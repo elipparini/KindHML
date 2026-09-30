@@ -7,6 +7,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -89,8 +90,26 @@ def _kill_group(proc: subprocess.Popen):
         pass
 
 
+SOLVERS = ("z3", "cvc5")
+
+
+def solver_args(solver: str) -> List[str]:
+    """Kind 2 options selecting the SMT solver. z3 is looked up as $Z3, then next to the
+    Python interpreter (pip package z3-solver), then on the PATH."""
+    if solver == "cvc5":
+        return ["--smt_solver", "cvc5"]
+    if solver == "z3":
+        bin_dir = os.path.dirname(os.path.abspath(sys.executable))
+        for c in (os.environ.get("Z3"), os.path.join(bin_dir, "z3"), shutil.which("z3")):
+            if c and os.path.isfile(c):
+                return ["--smt_solver", "z3", "--z3_bin", c]
+        raise FileNotFoundError("z3 not found: set $Z3 or pip install z3-solver")
+    raise ValueError(f"unknown solver {solver}")
+
+
 def run(lustre: str, timeout: float, extra_args: Optional[List[str]] = None,
-        kind2: Optional[str] = None, save_to: Optional[str] = None) -> Kind2Output:
+        kind2: Optional[str] = None, save_to: Optional[str] = None,
+        solver: str = "z3") -> Kind2Output:
     """Check all properties of a Lustre program. `timeout` is Kind 2's own timeout (s);
     Kind 2 is killed, with its solvers, if it has not stopped 10 s later."""
     kind2 = kind2 or find_kind2()
@@ -99,8 +118,8 @@ def run(lustre: str, timeout: float, extra_args: Optional[List[str]] = None,
         with open(path, "w") as f:
             f.write(lustre)
         scope = _memory_scope()
-        cmd = scope + [kind2, "-json", "--smt_solver", "cvc5", "--timeout", str(timeout),
-                       "--output_dir", tmp] + (extra_args or []) + [path]
+        cmd = scope + [kind2, "-json"] + solver_args(solver) + [
+            "--timeout", str(timeout), "--output_dir", tmp] + (extra_args or []) + [path]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                 start_new_session=True,
                                 preexec_fn=None if scope else _limit_memory)
@@ -165,6 +184,26 @@ def _property(o: dict) -> PropertyResult:
         k = _trace_length(o["counterExample"]) - 1
     return PropertyResult(o.get("name", "?"), status, k, answer.get("source"), time,
                           o.get("trueFor"), o.get("counterExample"))
+
+
+def format_counterexample(cex: list, main: str = "main") -> str:
+    """The streams of the main node, one column per step (inputs t, ib and the state s)."""
+    rows, steps = [], 0
+    for block in cex:
+        if block.get("name") != main:
+            continue
+        for stream in block.get("streams", []):
+            values = {int(k): v for k, v in stream.get("instantValues", [])}
+            steps = max(steps, len(values))
+            rows.append((stream["name"], values))
+    if not rows:
+        return ""
+    width = max(len(n) for n, _ in rows)
+    lines = [" " * width + "".join(f" | step {k:<6}" for k in range(steps))]
+    for name, values in sorted(rows, key=lambda r: (not r[0].startswith("t."), r[0])):
+        lines.append(name.ljust(width) + "".join(f" | {str(values.get(k, '')):<11}"
+                                                 for k in range(steps)))
+    return "\n".join(lines)
 
 
 def _trace_length(cex: list) -> int:

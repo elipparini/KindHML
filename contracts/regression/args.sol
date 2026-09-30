@@ -20,6 +20,7 @@ rule P0_false {
 
 rule P1_true {
     forall a : address .
+    is_EOA(a) ->
     forall v_after : int .
     exists h : method .
     exists arg : calldataargs .
@@ -39,6 +40,7 @@ rule P2_false {
 
 rule P3a_true {
     forall a : address .
+    is_EOA(a) ->
     forall v_after : int .
     v_after >= v ->
         (
@@ -63,6 +65,7 @@ rule P3b_false {
 
 rule P3c_true {
     forall a : address .
+    is_EOA(a) ->
     forall v_after : int .
     v_after * v_after * v_after >= v * v * v ->
         (

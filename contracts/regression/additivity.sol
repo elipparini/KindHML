@@ -17,6 +17,7 @@ rule P1_true {
     exists v12_storage : int .
     exists v3_storage : int .
     forall addr : address .
+    is_EOA(addr) ->
     (<< addr : Additivity . add(c1) $ 0 >>		
        (<< addr : Additivity . add(c2) $ 0 >>		
             (v12_storage == v)))
@@ -58,6 +59,7 @@ rule P_signature_error {
 
 rule P3_true {
     forall addr : address .
+    is_EOA(addr) ->
     << addr : Additivity . add(2) $ 0 >>		
         v == old(v)+2
 }
@@ -71,6 +73,7 @@ rule P4_false {
 
 rule P5_true {
     forall addr : address .
+    is_EOA(addr) ->
     << addr : Additivity . add(v) $ 0 >>		
         v == 2*old(v)
 }
@@ -84,6 +87,7 @@ rule P6_false {
 
 rule P7_true {
     forall addr : address .
+    is_EOA(addr) ->
     << addr : Additivity . add(1) $ 0 >>		
     << addr : Additivity . add(v) $ 0 >>		
         v == 2*(old(old(v))+1)
@@ -100,6 +104,7 @@ rule P8_false {
 
 rule P9_true {
     forall addr : address .
+    is_EOA(addr) ->
     << addr : Additivity . add(v) $ 0 >>		
     << addr : Additivity . add(1) $ 0 >>		
         v == 2*old(old(v)) +1

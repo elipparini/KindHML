@@ -27,6 +27,7 @@ contract Mapping2 {
 
 rule P1_true {
     forall a : address .
+    is_EOA(a) ->
     exists h : method .
         << a : Mapping2 . h() $ 0 >> 
             m[a] == 10

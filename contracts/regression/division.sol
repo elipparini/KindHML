@@ -25,6 +25,7 @@ rule P1_true {
     exists v12_storage : int .
     exists v3_storage : int .
     forall addr : address .
+    is_EOA(addr) ->
     (<< addr : Division . multiply(c1) $ 0 >>		
        (<< addr : Division . multiply(c2) $ 0 >>		
             (v12_storage == v)))

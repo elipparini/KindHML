@@ -135,6 +135,13 @@ def record(type_: str, fields: Sequence[Tuple[str, LExpr]]) -> LExpr:
     return Record(type_, tuple(fields))
 
 
+def proj(r: LExpr, f: str) -> LExpr:
+    """r.f, simplified when r is a record literal."""
+    if isinstance(r, Record):
+        return dict(r.fields)[f]
+    return Proj(r, f)
+
+
 def render(e: LExpr) -> str:
     if isinstance(e, Var):
         return e.name

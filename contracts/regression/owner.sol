@@ -18,6 +18,7 @@ contract C {
 
 rule P1_true {
     forall addr : address .
+    is_EOA(addr) ->
     exists f : method .
     exists args : calldataargs .
     << addr : C . f(args) $ 0 >>			

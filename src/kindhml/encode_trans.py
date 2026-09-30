@@ -149,16 +149,18 @@ class Encoder:
         if isinstance(e, S.ProcConst):
             return L.Var(proc_const(e.contract, e.proc))
         if isinstance(e, S.Field):
-            return L.Proj(s, field_var(e.contract, e.name))
+            return L.proj(s, field_var(e.contract, e.name))
         if isinstance(e, S.Index):
             if isinstance(e.map, S.Balance):
-                return self.get(S.INT, L.Proj(s, BALANCE), rec(e.key))
+                return self.get(S.INT, L.proj(s, BALANCE), rec(e.key))
             ft = self.system.field_type(e.map.contract, e.map.name)
-            return self.get(ft.value, L.Proj(s, field_var(e.map.contract, e.map.name)), rec(e.key))
+            return self.get(ft.value, L.proj(s, field_var(e.map.contract, e.map.name)), rec(e.key))
         if isinstance(e, S.Constructed):
-            return L.Proj(s, constructed_var(e.contract))
+            return L.proj(s, constructed_var(e.contract))
         if isinstance(e, S.BlockNum):
-            return L.Proj(s, BLOCK)
+            return L.proj(s, BLOCK)
+        if isinstance(e, S.Reverted):
+            return L.proj(s, REVERT)
         if isinstance(e, S.IsEOA):
             return L.call("is_eoa", rec(e.arg))
         if isinstance(e, S.UnOp):
@@ -181,7 +183,7 @@ class Encoder:
     def get(self, value_type: S.Type, m: L.LExpr, key: L.LExpr) -> L.LExpr:
         """m[key] for a map record m."""
         if isinstance(key, L.Var) and key.name.startswith("A_"):
-            return L.Proj(m, key_field(key.name[2:]))
+            return L.proj(m, key_field(key.name[2:]))
         return L.call(f"get_{base_type(value_type)}", m, key)
 
     def definedness(self, exprs: List[S.Expr], s: L.LExpr, t: L.LExpr) -> L.LExpr:
