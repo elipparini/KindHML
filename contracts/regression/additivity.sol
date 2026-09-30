@@ -17,11 +17,11 @@ rule P1_true {
     exists v12_storage : int .
     exists v3_storage : int .
     forall addr : address .
-    (<< addr : Addittivity . add(c1) $ 0 >>		
-       (<< addr : Addittivity . add(c2) $ 0 >>		
+    (<< addr : Additivity . add(c1) $ 0 >>		
+       (<< addr : Additivity . add(c2) $ 0 >>		
             (v12_storage == v)))
     &&
-    (<< addr : Addittivity . add(c3) $ 0 >>		
+    (<< addr : Additivity . add(c3) $ 0 >>		
             (v3_storage == v))
     &&
     (v12_storage == v3_storage)
@@ -35,11 +35,11 @@ rule P2_false {
     exists v12_storage : int .
     exists v3_storage : int .
     forall addr : address .
-    (<< addr : Addittivity . add(c1) $ 0 >>		
-       (<< addr : Addittivity . add(c2) $ 0 >>		
+    (<< addr : Additivity . add(c1) $ 0 >>		
+       (<< addr : Additivity . add(c2) $ 0 >>		
             (v12_storage == v)))
     &&
-    (<< addr : Addittivity . add(c3) $ 0 >>		
+    (<< addr : Additivity . add(c3) $ 0 >>		
             (v3_storage == v))
     &&
     (v12_storage == v3_storage)
@@ -49,7 +49,7 @@ rule P2_false {
 rule P_signature_error {
     forall v1 : int .
     forall addr : address .
-    (<< addr : Addittivity . add() $ 0 >>		
+    (<< addr : Additivity . add() $ 0 >>		
             true)
 }
 */
@@ -58,57 +58,57 @@ rule P_signature_error {
 
 rule P3_true {
     forall addr : address .
-    << addr : Addittivity . add(2) $ 0 >>		
+    << addr : Additivity . add(2) $ 0 >>		
         v == old(v)+2
 }
 
 
 rule P4_false {
     forall addr : address .
-    << addr : Addittivity . add(v) $ 0 >>		
+    << addr : Additivity . add(v) $ 0 >>		
         v == old(v)+3
 }
 
 rule P5_true {
     forall addr : address .
-    << addr : Addittivity . add(v) $ 0 >>		
+    << addr : Additivity . add(v) $ 0 >>		
         v == 2*old(v)
 }
 
 rule P6_false {
     forall addr : address .
-    << addr : Addittivity . add(v) $ 0 >>		
+    << addr : Additivity . add(v) $ 0 >>		
         v == 3*old(v)
 }
 
 
 rule P7_true {
     forall addr : address .
-    << addr : Addittivity . add(1) $ 0 >>		
-    << addr : Addittivity . add(v) $ 0 >>		
+    << addr : Additivity . add(1) $ 0 >>		
+    << addr : Additivity . add(v) $ 0 >>		
         v == 2*(old(old(v))+1)
 }
 
 
 rule P8_false {
     forall addr : address .
-    << addr : Addittivity . add(1) $ 0 >>		
-    << addr : Addittivity . add(v) $ 0 >>		
+    << addr : Additivity . add(1) $ 0 >>		
+    << addr : Additivity . add(v) $ 0 >>		
         v == 2*old(old(v)) +1
 }
 
 
 rule P9_true {
     forall addr : address .
-    << addr : Addittivity . add(v) $ 0 >>		
-    << addr : Addittivity . add(1) $ 0 >>		
+    << addr : Additivity . add(v) $ 0 >>		
+    << addr : Additivity . add(1) $ 0 >>		
         v == 2*old(old(v)) +1
 }
 
 
 rule P10_false {
     forall addr : address .
-    << addr : Addittivity . add(v) $ 0 >>		
-    << addr : Addittivity . add(1) $ 0 >>		
+    << addr : Additivity . add(v) $ 0 >>		
+    << addr : Additivity . add(1) $ 0 >>		
         v == 2*(old(old(v))+1)
 }

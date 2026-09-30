@@ -6,7 +6,7 @@ Branch `v1` (worktree `~/Desktop/gitlab/KindHML-v1`). The old tool stays on `mai
 ## Milestones
 
 - [x] **M1** Worktree, design note (`DESIGN.md`), Kind 2 experiments.
-- [ ] **M2** Grammar, AST, type checker; parse tests on all benchmarks and regressions.
+- [x] **M2** Grammar, AST, type checker; parse tests on all benchmarks and regressions.
 - [ ] **M3** Desugaring, `Trans` encoding, Lustre printer; unit tests; reference evaluator.
 - [ ] **M4** Formula encoding, full pipeline, regressions imported; all ground truths checked.
 - [ ] **M5** Contract-to-contract calls; README; `run_experiments.sh`; `\CL` notes in the paper.
@@ -26,6 +26,23 @@ The test files are in `experiments/kind2/`; the conclusions are:
 4. With scalar quantifiers only the invariant generator raises that exception; it is harmless.
 5. `-json` output gives, per property: `answer.value` (`valid`/`falsifiable`/...), `answer.source`
    (engine), `k`, `runtime`, and a counterexample.
+
+## M2 — Front end
+
+* `src/kindhml/grammar/KindHML.g4` (ANTLR 4.13.2; regenerate with `tools/gen_parser.sh`),
+  `builder.py` (parse tree → raw AST), `syntax.py` (AST), `typecheck.py` (resolution and
+  typing), `pretty.py`. Tests: `.venv/bin/pytest tests` (45 tests).
+* All 10 benchmark files and 11 regression files parse and type-check.
+* Regressions imported in `contracts/regression/` (raw import in commit `58df658`; later
+  changes are separate diffs). Ground truth of a rule: the `@groundtruth` comment if present,
+  otherwise the `_true`/`_false` suffix of its name.
+* Changes to input files: `Pricebet` → `Bet` (price-bet*), `Addittivity` → `Additivity`,
+  `st.balance` → `balance` (liquidity4, legacy Solvent syntax).
+* `signature_error.sol` tests a bug of the old tool (it checked `donate(1)` against the
+  signature of `dummy`); the new checker accepts it, as it should.
+* Language choices: a contract without constructor gets an empty one; quantified names must
+  be unique within a rule; `x += e` is sugar for `x = x + e`; `if` without `else` has an
+  empty `else`; `payable(e)` is `e`.
 
 ## Decisions taken after M1 (with the user)
 

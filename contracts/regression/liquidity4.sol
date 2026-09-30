@@ -21,7 +21,7 @@ rule P1_false {
 rule P2_true {
   forall addr : address .
   exists v : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
       balance[addr] == old(balance[addr]) + 1
 }
@@ -37,7 +37,7 @@ rule P3_false {
 rule P4_true {
   forall addr : address .
   exists v : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
       balance[addr] == old(balance[addr]) + (old(balance) - 1)
 }
@@ -55,7 +55,7 @@ rule P5_false {
 rule P6_true {
   forall addr : address .
   exists v : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
       balance[addr] == old(balance[addr]) + old(balance - 1)
 }
@@ -80,7 +80,7 @@ rule P8_true {
 rule P9_false {
   forall addr : address .
   exists v : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
       balance[addr] == old(balance[addr]) + (balance - 1) // note: we are using current balance 
 }
@@ -108,7 +108,7 @@ rule P11_false {
 rule P12_true {
   forall addr : address .
   exists v : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
@@ -116,7 +116,7 @@ rule P12_true {
 rule P13_false {
   forall addr : address .
   exists v : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ 2 >>
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
@@ -125,7 +125,7 @@ rule P14_true {
   forall addr : address .
   exists v : int .   
   exists xn : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ xn >>
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
@@ -133,7 +133,7 @@ rule P14_true {
 rule P15_false {
   forall addr : address .
   exists v : int .   
-  st.balance > 1 ->		
+  balance > 1 ->		
     << addr : C4 . pay(v) $ v >>
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }

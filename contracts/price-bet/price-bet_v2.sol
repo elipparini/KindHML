@@ -59,8 +59,8 @@ rule Liquidity {
     exists f2 : method .
     exists args1 : calldataargs .
     exists args2 : calldataargs .
-    << a1 : Pricebet . f1(args1) $ 0 >>		
-        << a2 : Pricebet . f2(args2) $ 0 >>		
+    << a1 : Bet . f1(args1) $ 0 >>		
+        << a2 : Bet . f2(args2) $ 0 >>		
             (balance == 0)
 }
 
@@ -74,8 +74,8 @@ rule Frontrunning {
     exists b : address .
     exists f : method .
     exists args : calldataargs .
-    << b : Pricebet . f(args) $ 0 >>		
-        << a : Pricebet . win() $ 0 >>
+    << b : Bet . f(args) $ 0 >>		
+        << a : Bet . win() $ 0 >>
             lastReverted
     )
 }
