@@ -84,7 +84,9 @@ Each item is also recorded as a `\CL{...}` note in the paper.
    to a `uint` field reverts; a negative actual value for a `uint` parameter reverts. Quantified
    `uint` variables, and the components of `args` variables for `uint` parameters, range over
    the naturals.
-2. **null sender.** Transactions whose sender is `null` revert (extra premise of A5).
+2. **null sender.** Transactions whose sender is `null` revert (extra premise of A5). Every
+   procedure starts with `require(sender != null && sender != C)`: the second conjunct is
+   A5(iv), which the paper's `initPay` enforces only for payable procedures.
 3. **block.number.** State variable `block_num` (initially 0) and transition variable
    `Tx.block_num`. A transaction sets `block_num = Tx.block_num` before `initPay`; as for any
    state variable, a revert restores the old value. The environment only produces
@@ -92,6 +94,9 @@ Each item is also recorded as a `\CL{...}` note in the paper.
    `≥ block_num`.
 4. **`h()` with a method variable.** Allowed; the parameters are existentially quantified
    (this is what the literal `∃TVars^E` of the paper gives when `EqParams` is empty).
+4b. **Division** is Euclidean (SMT-LIB `div`/`mod`); the paper does not fix the rounding.
+   In contracts, expressions are strict: a division by zero anywhere in a statement's direct
+   expressions reverts, also under `&&`/`||` (this is `def^i(s)`).
 5. **Address quantifiers** range over all addresses except `null`. The predicate `is_EOA(e)`
    (new) holds iff `e` is neither `null` nor a contract address.
 6. **Unconstructed states.** The checked property is `(∧_C constructed_C) → Φ(φ)`, i.e. `φ` is

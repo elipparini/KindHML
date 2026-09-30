@@ -295,6 +295,56 @@ class If(Stmt):
     pos: Pos = _pos()
 
 
+# Core statements, produced by the desugaring (`desugar.py`) --------------
+# Core statements carry the contract they act on explicitly, since after the
+# unfolding of contract calls a body mixes statements of several contracts.
+
+@dataclass(frozen=True)
+class Constructed(Expr):
+    """The state variable constructed_C."""
+    contract: str
+    pos: Pos = _pos()
+
+
+@dataclass(frozen=True)
+class TxBlockNum(Expr):
+    """The block number carried by the transaction (extension, see DESIGN.md)."""
+    pos: Pos = _pos()
+
+
+@dataclass(frozen=True)
+class SetField(Stmt):
+    """`C.x = value` (key is None) or `C.x[key] = value`."""
+    contract: str
+    name: str
+    key: Optional[Expr]
+    value: Expr
+    pos: Pos = _pos()
+
+
+@dataclass(frozen=True)
+class Send(Stmt):
+    """Transfer of `amount` tokens from `src` to `dst`: the statement `initPay` (src = sender)
+    and `dst.transfer(amount)` (src = this) of Table `tab:statement-to-fol`."""
+    src: Expr
+    dst: Expr
+    amount: Expr
+    pos: Pos = _pos()
+
+
+@dataclass(frozen=True)
+class SetConstructed(Stmt):
+    """constructed_C := true."""
+    contract: str
+    pos: Pos = _pos()
+
+
+@dataclass(frozen=True)
+class SetBlockNum(Stmt):
+    """block_num := Tx.block_num."""
+    pos: Pos = _pos()
+
+
 # ------------------------------------------------------------------ declarations
 
 CONSTRUCTOR = "constructor"
