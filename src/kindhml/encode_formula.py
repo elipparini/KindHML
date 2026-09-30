@@ -112,16 +112,22 @@ class FormulaEncoder:
         return self.quantify(e.kind, decls, guards, body)
 
     def finite_domain(self, t: S.Type) -> List[L.LExpr]:
+        """Addresses: all but null. Methods: all procedures but the constructors, which cannot
+        be called after deployment (DESIGN.md, Sect. 4)."""
         if t == S.ADDRESS:
             return [L.Var(addr_const(a)) for a in self.system.addresses if a != NULL]
         if t == S.METHOD:
-            return [L.Var(proc_const(c.name, p.name)) for c, p in self.system.methods]
+            return [L.Var(proc_const(c.name, p.name)) for c, p in self.system.methods
+                    if p.name != S.CONSTRUCTOR]
         raise ValueError(f"type {t} is not finite")
 
-    @staticmethod
-    def domain(v: L.LExpr, t: S.Type, address_quantifier: bool) -> List[L.LExpr]:
+    def domain(self, v: L.LExpr, t: S.Type, address_quantifier: bool) -> List[L.LExpr]:
+        """Guards restricting a (non-expanded) quantified variable to its domain."""
         if t == S.ADDRESS and address_quantifier:
             return [L.op("<>", v, L.Var(addr_const(NULL)))]
+        if t == S.METHOD:
+            return [L.op("<>", v, L.Var(proc_const(c.name, S.CONSTRUCTOR)))
+                    for c in self.system.contracts]
         if t == S.UINT:
             return [L.op(">=", v, L.Int(0))]
         return []

@@ -97,6 +97,9 @@ Each item is also recorded as a `\CL{...}` note in the paper.
 4b. **Division** is Euclidean (SMT-LIB `div`/`mod`); the paper does not fix the rounding.
    In contracts, expressions are strict: a division by zero anywhere in a statement's direct
    expressions reverts, also under `&&`/`||` (this is `def^i(s)`).
+4c. **Method quantifiers** range over the procedures other than the constructors (which, as
+   in Solidity, cannot be called after deployment). The paper's `Methods` includes them.
+   A constructor can still be named explicitly in a modality.
 5. **Address quantifiers** range over all addresses except `null`. The predicate `is_EOA(e)`
    (new) holds iff `e` is neither `null` nor a contract address.
 6. **Unconstructed states.** The checked property is `(∧_C constructed_C) → Φ(φ)`, i.e. `φ` is

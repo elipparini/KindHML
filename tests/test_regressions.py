@@ -15,11 +15,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TIMEOUT = 10
 
 OPEN = {
-    ("args", "P3a_true"): "the domain of `method` includes the constructor (to be decided)",
-    ("args", "P3c_true"): "the domain of `method` includes the constructor (to be decided)",
-    ("liquidity4", "P9_false"): "contract balances are 0 initially (paper); gt assumes any",
-    ("liquidity4", "P13_false"): "contract balances are 0 initially (paper); gt assumes any",
-    ("liquidity4", "P15_false"): "contract balances are 0 initially (paper); gt assumes any",
     ("division", "P1_true"): "nonlinear witness; unknown within the timeout",
     ("two-donatees", "P2_true"): "needs an auxiliary invariant; unknown within the timeout",
     ("two-donatees", "P4_true"): "needs an auxiliary invariant; unknown within the timeout",

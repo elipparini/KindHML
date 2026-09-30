@@ -77,6 +77,9 @@ rule P8_true {
 }
 
 
+// KindHML v1: contract balances are 0 in the initial state (paper, Init) and C4 has no
+// payable procedure, so `balance > 1` never holds and the rule is vacuously true.
+// @groundtruth: True
 rule P9_false {
   forall addr : address .
   exists v : int .   
@@ -113,6 +116,8 @@ rule P12_true {
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
 
+// KindHML v1: vacuously true, see P9_false.
+// @groundtruth: True
 rule P13_false {
   forall addr : address .
   exists v : int .   
@@ -130,9 +135,11 @@ rule P14_true {
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
 
+// KindHML v1: vacuously true, see P9_false.
+// @groundtruth: True
 rule P15_false {
   forall addr : address .
-  exists v : int .   
+  exists v : int .
   balance > 1 ->		
     << addr : C4 . pay(v) $ v >>
       balance[addr] == old(balance[addr]) + old(balance) - 1
