@@ -92,5 +92,7 @@ Each item is also recorded as a `\CL{...}` note in the paper.
    `≥ block_num`.
 4. **`h()` with a method variable.** Allowed; the parameters are existentially quantified
    (this is what the literal `∃TVars^E` of the paper gives when `EqParams` is empty).
-5. Open questions (to be decided): domain of `address` quantifiers; guard on unconstructed
-   states. See `PROGRESS.md`.
+5. **Address quantifiers** range over all addresses except `null`. The predicate `is_EOA(e)`
+   (new) holds iff `e` is neither `null` nor a contract address.
+6. **Unconstructed states.** The checked property is `(∧_C constructed_C) → Φ(φ)`, i.e. `φ` is
+   required only in reachable states where all contracts are constructed.

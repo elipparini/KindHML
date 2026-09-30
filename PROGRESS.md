@@ -27,19 +27,13 @@ The test files are in `experiments/kind2/`; the conclusions are:
 5. `-json` output gives, per property: `answer.value` (`valid`/`falsifiable`/...), `answer.source`
    (engine), `k`, `runtime`, and a counterexample.
 
-## Open questions for the user
+## Decisions taken after M1 (with the user)
 
-1. **Domain of `address` quantifiers.** In the paper `∀x:address` ranges over all addresses,
-   including contracts (and `null`). Many ground truths (e.g. `mapping1` `P1_true`:
-   `∀a. ∃h. ⟨a : Mapping1.h()⟩ m[a] = old(m[a]) + 1`) are true only if `a` ranges over user
-   addresses, because transactions from a contract (A5) or from `null` revert. The old tool
-   excludes the contract and `a0` for `forall`, but not for `exists`.
-   Proposal: quantifiers over `address` range over user addresses; `null` and contract
-   addresses are available only as constants (`null`, `this`, contract names).
-2. **Unconstructed states.** The paper checks `φ` in all reachable states, including the initial
-   one where no contract is constructed. The ground truths assume the old tool's guard
-   `not constructed ∨ φ` (e.g. `mapping1` `P1_true` is false in the initial state).
-   Proposal: check `φ` in the reachable states where all contracts are constructed.
-3. `price-bet*.sol` rules refer to `Pricebet` while the contract is `Bet`;
-   `regression_new/additivity.sol` refers to `Addittivity`. The old tool ignores the name.
-   Proposal: fix the benchmarks and make the name mismatch an error.
+1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
+   A new predicate `is_EOA(e)` holds iff `e` is a user address (not `null`, not a contract).
+   Rules whose ground truth assumes users only (e.g. `mapping1` `P1_true`) get an explicit
+   `is_EOA(a) ->` guard; every such change of a benchmark is listed in M4.
+2. **Unconstructed states:** `φ` is checked in the reachable states where every contract is
+   constructed (the property is `(∧_C constructed_C) → Φ(φ)`).
+3. **Contract names in modalities:** an unknown name is a type error; `Pricebet` (price-bet)
+   and `Addittivity` (regression additivity) are corrected in the files.
