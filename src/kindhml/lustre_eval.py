@@ -22,9 +22,17 @@ _OPS = {
 
 
 class Evaluator:
-    def __init__(self, program: L.Program):
+    def __init__(self, program: L.Program, int_domain=None):
+        """`int_domain`: if given, quantifiers over int range over it (bounded evaluation, for
+        tests); quantifiers over enums and bool range over all their values."""
         self.functions: Dict[str, L.Function] = {
             d.name: d for d in program.decls if isinstance(d, L.Function) and not d.node}
+        self.domains = {"bool": [False, True]}
+        for d in program.decls:
+            if isinstance(d, L.EnumType):
+                self.domains[d.name] = list(d.constants)
+        if int_domain is not None:
+            self.domains["int"] = list(int_domain)
 
     def call(self, name: str, args: list):
         f = self.functions[name]
@@ -53,4 +61,13 @@ class Evaluator:
             return self.eval(e.record, env)[e.field]
         if isinstance(e, L.Record):
             return {n: self.eval(v, env) for n, v in e.fields}
+        if isinstance(e, L.Quant):
+            return self._quant(e, list(e.vars), env)
         raise NotImplementedError(f"cannot evaluate {e!r}")
+
+    def _quant(self, e: L.Quant, vars_, env) -> bool:
+        if not vars_:
+            return self.eval(e.body, env)
+        (name, typ), rest = vars_[0], vars_[1:]
+        results = (self._quant(e, rest, {**env, name: v}) for v in self.domains[typ])
+        return all(results) if e.kind == "forall" else any(results)

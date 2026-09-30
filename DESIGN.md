@@ -44,27 +44,46 @@ Experiments with Kind 2 v2.3.0 (see `PROGRESS.md`, Milestone 1) fix the followin
 * `function trans(s: St; t: Tx) returns (r: St)` is the switch of `Trans` / `Trans_C`.
 * The main node has inputs `t: Tx` and the initial user balances, and a state stream
   `s = init -> pre trans(s, t)`; `Init` constrains the initial balances by an `assert`.
-* The property is `--%PROPERTY "<Rule>" Φ(φ)`, where `Φ(φ)` is an expression over `s`.
+* The property is `--%PROPERTY "<Rule>" (∧_C s.constructed_C) => Φ(φ)`.
 
-### Encoding of formulas
+### Encoding of formulas (`encode_formula.py`)
 
-The modal tree of the paper is built explicitly. A node `V` is represented by a Lustre term of
-type `St`: the root is `s`, and the child reached through the edge `E` labelled
-`⟨e_s : C.e_f(ē) $ e_v⟩` is `trans(term(V), tx(E))`, where `tx(E)` is the record literal
-`Tx { sender = Φ(e_s); cx = C; fx = Φ(e_f); value = Φ(e_v); <EqParams>; others = 0 }`.
+The modal tree of the paper is built during the recursion: a node `V` is a state term (the
+copy `SVars^V`) with a pointer to its parent, and `old(e)` at `V` is encoded at the parent.
+For the edge `E` labelled `⟨e_s : C.e_f(ē) $ e_v⟩`, the transition variables are the record
+literal `Tx { sender = Φ(e_s); cx = C; fx = Φ(e_f); value = Φ(e_v); <EqParams>; ... }`; the
+parameters of other procedures get an arbitrary value (Trans does not depend on them).
+The transition variables that are not fixed by the modality remain existentially quantified:
+the parameters of `h()` (a `method` variable without argument, extension) and the block number.
 
-This replaces the literal `∃SVars^{V'} ∃TVars^E` of the paper by substitution. It is equivalent:
-`Trans` is a function of `(SVars, TVars)` (Lemma `lem:transition`), and all transition variables
-that affect `Trans` are fixed by the equalities of the modality, except those listed below, which
-remain existentially quantified (as scalar variables):
+The child state `SVars^{V'}` is obtained in one of four ways (`--mode`):
 
-* the parameters of a procedure called through a `method` variable without an `args` argument,
-  written `h()` (extension, see §4);
-* the block number of the transaction, if the contract uses `block.number` (extension, see §4).
+* `inline` (default): the term χ(SVars^V, TVars^E), computed by substituting the levels
+  (`S^i`) in Python (`lustre_subst.py`), with constant folding. This is the substitution of
+  χ_v described at the end of Sect. `sec:encoding:contract`; it is equivalent to the paper's
+  ∃SVars^{V'} since Trans is a function (Lemma `lem:transition`).
+* `levels`: the paper's literal form: ∃ over fresh scalar copies of the levels SVars^1..m and
+  of SVars^{V'}, constrained by the equations of Trans written on these scalars. This is also
+  what the old tool did. Performance is similar to `inline`.
+* `exists`: ∃SVars^{V'}. SVars^{V'} = trans(SVars^V, TVars^E), calling the Lustre function.
+* `subst`: SVars^{V'} := trans(SVars^V, TVars^E). Kind 2 hits an internal assertion
+  (`lustreAstNormalizer.ml`) on nested calls inside quantifiers.
 
-Quantification over records breaks the BMC and k-induction engines of Kind 2, so an `args`
-variable is expanded into one scalar variable per element of `ParamVars` (as in the paper).
-`old(e)` at node `V` is encoded at the parent of `V`.
+Quantifiers over the finite types `address` and `method` are expanded into finite
+conjunctions/disjunctions (A1; `--expand`). This matters: with symbolic senders, the revert
+conditions of the transaction guards (`sender != null && sender != C`) occur under the inner
+quantifiers, and the solvers fail to find witnesses of outer existentials (e.g. regression
+`additivity` P1: unknown after 30 s without expansion, valid in 0.2 s with it).
+Quantifiers over records break Kind 2's BMC and k-induction, so an `args` variable is expanded
+into one scalar per element of `ParamVars`, as in the paper; unused scalars are dropped.
+
+### Solvers
+
+With cvc5, Kind 2's BMC crashes (`Ltree.fold : quantified term`) when a counterexample
+exists, and Kind 2 then stops k-induction too (the old tool filtered this error out). With z3,
+counterexamples are found; on many valid rules cvc5 is faster. `--solver auto` (default) runs
+cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the rest
+(benchmarks with a budget of 120 s: 3 min 51 s in total, against about 16 min for z3 first).
 
 ## 3. Assumptions of the paper (A1–A7) and how they are enforced
 

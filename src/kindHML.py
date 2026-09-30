@@ -28,8 +28,8 @@ def main() -> int:
     ap.add_argument("--only_lus", action="store_true", help="only generate the Lustre files")
     ap.add_argument("--cex", action="store_true", help="print counterexamples")
     ap.add_argument("--solver", choices=("auto",) + SOLVERS, default="auto",
-                    help="SMT solver used by Kind 2; auto: z3, then cvc5 if z3 gives no "
-                         "verdict, each with half of the timeout (default: auto)")
+                    help="SMT solver used by Kind 2; auto: cvc5 for at most half of the "
+                         "timeout, then z3 if there is no verdict (default: auto)")
     ap.add_argument("--mode", choices=MODES, default=V.DEFAULT_MODE,
                     help=f"encoding of modalities (default: {V.DEFAULT_MODE})")
     ap.add_argument("--expand", default=",".join(V.DEFAULT_EXPAND),

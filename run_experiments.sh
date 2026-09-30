@@ -1,31 +1,8 @@
- python src/kindHML.py contracts/bank/bank.sol Additivity 2 1000
- python src/kindHML.py contracts/bank/bank.sol Reversibility_deposit 2 1000
- python src/kindHML.py contracts/bank/bank.sol Liquidity 2 1000
- python src/kindHML.py contracts/bank/bank.sol No_frontrun_deposit 2 1000
- python src/kindHML.py contracts/bank/bank_v2.sol Additivity 2 1000
- python src/kindHML.py contracts/bank/bank_v2.sol Reversibility_deposit 2 1000
- python src/kindHML.py contracts/bank/bank_v2.sol Liquidity 2 1000
- python src/kindHML.py contracts/bank/bank_v2.sol No_frontrun_deposit 2 1000
- python src/kindHML.py contracts/bank/bank_v3.sol Additivity 2 1000
- python src/kindHML.py contracts/bank/bank_v3.sol Reversibility_deposit 2 1000
- python src/kindHML.py contracts/bank/bank_v3.sol Liquidity 2 1000
- python src/kindHML.py contracts/bank/bank_v3.sol No_frontrun_deposit 2 1000
- python src/kindHML.py contracts/bank/bank_v4.sol Additivity 2 1000
- python src/kindHML.py contracts/bank/bank_v4.sol Reversibility_deposit 2 1000
- python src/kindHML.py contracts/bank/bank_v4.sol Liquidity 2 1000
- python src/kindHML.py contracts/bank/bank_v4.sol No_frontrun_deposit 2 1000
- python src/kindHML.py contracts/vault/vault.sol Two_steps_drainability 2 1000
- python src/kindHML.py contracts/vault/vault.sol Two_steps_drainability_non_inflation 2 1000
- python src/kindHML.py contracts/vault/vault_v2.sol Two_steps_drainability 2 1000
- python src/kindHML.py contracts/vault/vault_v2.sol Two_steps_drainability_non_inflation 2 1000
- python src/kindHML.py contracts/vault/vault_v3.sol Two_steps_drainability 2 1000
- python src/kindHML.py contracts/vault/vault_v3.sol Two_steps_drainability_non_inflation 2 1000
- python src/kindHML.py contracts/price-bet/price-bet.sol Winnability 2 1000
- python src/kindHML.py contracts/price-bet/price-bet.sol Liquidity 2 1000
- python src/kindHML.py contracts/price-bet/price-bet.sol Frontrunning 2 1000
- python src/kindHML.py contracts/price-bet/price-bet_v2.sol Winnability 2 1000
- python src/kindHML.py contracts/price-bet/price-bet_v2.sol Liquidity 2 1000
- python src/kindHML.py contracts/price-bet/price-bet_v2.sol Frontrunning 2 1000    
- python src/kindHML.py contracts/price-bet/price-bet_v3.sol Winnability 2 1000
- python src/kindHML.py contracts/price-bet/price-bet_v3.sol Liquidity 2 1000
- python src/kindHML.py contracts/price-bet/price-bet_v3.sol Frontrunning 2 1000
+#!/bin/sh
+# The benchmarks of the paper: every rule of every benchmark contract, 2 participants,
+# a budget of 1000 s per rule. Rules are checked one at a time.
+# The table of verdicts is written to results/benchmarks.csv.
+cd "$(dirname "$0")"
+PY=${PYTHON:-.venv/bin/python}
+exec "$PY" tests/run_all.py contracts/bank contracts/vault contracts/price-bet \
+    --participants 2 --timeout 1000 --csv results/benchmarks.csv

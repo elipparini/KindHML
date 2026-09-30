@@ -216,3 +216,116 @@ class Interpreter:
                     "<": lambda: a < b, "<=": lambda: a <= b, ">": lambda: a > b,
                     ">=": lambda: a >= b, "==": lambda: a == b, "!=": lambda: a != b}[op]()
         raise NotImplementedError(f"expression {e!r}")
+
+
+# ---------------------------------------------------------------- formulae
+
+class FormulaEvaluator:
+    """Bounded evaluation of formulae (Fig. `fig:logSem`) over a sequence of flagged states,
+    head first. Quantified integers range over `int_domain`; the other domains are those of
+    DESIGN.md: addresses but null, methods but constructors, args as records over ParamVars.
+    For tests only: with an unbounded domain the result may differ."""
+
+    def __init__(self, system: System, int_domain):
+        self.system = system
+        self.interp = Interpreter(system)
+        self.ints = list(int_domain)
+
+    def values(self, t: S.Type, quantifier: bool = True):
+        if t == S.INT:
+            return self.ints
+        if t == S.UINT:
+            return [v for v in self.ints if v >= 0]
+        if t == S.BOOL:
+            return [False, True]
+        if t == S.ADDRESS:
+            return [a for a in self.system.addresses if a != NULL or not quantifier]
+        if t == S.METHOD:
+            return [(c.name, p.name) for c, p in self.system.methods if p.name != S.CONSTRUCTOR]
+        raise ValueError(t)
+
+    def records(self, params):
+        """All assignments of the given parameters (ParamVar list)."""
+        out = [{}]
+        for v in params:
+            out = [{**r, (v.contract, v.proc, v.name): x} for r in out
+                   for x in self.values(v.type, quantifier=False)]
+        return out
+
+    def holds(self, e: S.Expr, seq, env=None) -> bool:
+        return bool(self.eval(e, seq, env or {}))
+
+    def eval(self, e: S.Expr, seq, env):
+        st = seq[0]
+        ev = lambda x: self.eval(x, seq, env)
+        if isinstance(e, (S.IntLit, S.BoolLit)):
+            return e.value
+        if isinstance(e, S.NullLit):
+            return NULL
+        if isinstance(e, S.ContractAddr):
+            return e.contract
+        if isinstance(e, S.ProcConst):
+            return (e.contract, e.proc)
+        if isinstance(e, S.QVar):
+            return env[e.name]
+        if isinstance(e, S.Field):
+            return st.fields[(e.contract, e.name)]
+        if isinstance(e, S.Index):
+            key = ev(e.key)
+            if isinstance(e.map, S.Balance):
+                return st.balance[key]
+            return st.fields[(e.map.contract, e.map.name)][key]
+        if isinstance(e, S.BlockNum):
+            return st.block_num
+        if isinstance(e, S.Reverted):
+            return st.revert
+        if isinstance(e, S.Old):
+            return self.eval(e.arg, seq[1:], env)
+        if isinstance(e, S.IsEOA):
+            return ev(e.arg) in self.system.users
+        if isinstance(e, S.UnOp):
+            v = ev(e.arg)
+            return (not v) if e.op == "!" else -v
+        if isinstance(e, S.BinOp):
+            a, b = ev(e.left), ev(e.right)
+            op = e.op
+            if op in ("/", "%"):
+                if b == 0:
+                    return 0                   # unspecified, as in lustre_eval
+                return smt_div(a, b) if op == "/" else smt_mod(a, b)
+            return {"&&": lambda: a and b, "||": lambda: a or b, "->": lambda: (not a) or b,
+                    "+": lambda: a + b, "-": lambda: a - b, "*": lambda: a * b,
+                    "<": lambda: a < b, "<=": lambda: a <= b, ">": lambda: a > b,
+                    ">=": lambda: a >= b, "==": lambda: a == b, "!=": lambda: a != b}[op]()
+        if isinstance(e, S.Quant):
+            if e.type == S.ARGS:
+                domain = self.records(self.system.param_vars)
+            else:
+                domain = self.values(e.type)
+            results = (self.eval(e.body, seq, {**env, e.var: v}) for v in domain)
+            return all(results) if e.kind == "forall" else any(results)
+        if isinstance(e, S.Modal):
+            return self.modal(e, seq, env)
+        raise NotImplementedError(f"formula {e!r}")
+
+    def modal(self, e: S.Modal, seq, env) -> bool:
+        st = seq[0]
+        ev = lambda x: self.eval(x, seq, env)
+        sender, value = ev(e.sender), ev(e.value)
+        method = ev(e.proc)
+        params = self.system.params_of(*method)
+        if isinstance(e.proc, S.ProcConst):
+            arg_choices = [{v.name: ev(a) for v, a in zip(params, e.args)}]
+        elif e.args:
+            record = env[e.args[0].name]
+            arg_choices = [{v.name: record[(v.contract, v.proc, v.name)] for v in params}]
+        else:                                    # h(): parameters existentially quantified
+            arg_choices = [{k[2]: x for k, x in r.items()} for r in self.records(params)]
+        blocks = ([b for b in self.ints if b >= st.block_num] if self.system.uses_block_num
+                  else [0])
+        for args in arg_choices:
+            for blk in blocks:
+                nxt = self.interp.step(st, Tx(sender, e.contract, method, args, value, blk))
+                if self.eval(e.body, [nxt] + list(seq), env):
+                    return True
+        return False

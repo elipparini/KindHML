@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -24,6 +25,7 @@ def load(path: str):
 
 
 DEFAULT_MODE = "inline"
+AUTO_ORDER = tuple(os.environ.get("KINDHML_AUTO_ORDER", "cvc5,z3").split(","))
 DEFAULT_EXPAND = ("address", "method")
 
 
@@ -69,16 +71,19 @@ class Outcome:
 def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: float,
            mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND, lus_path: Optional[str] = None,
            extra_args: Optional[List[str]] = None, solver: str = "auto") -> Outcome:
-    """Check one rule. Solver "auto" runs Kind 2 with z3 and, if that gives no verdict,
-    with cvc5, each with half of the time (one after the other)."""
+    """Check one rule. Solver "auto" runs Kind 2 with AUTO_ORDER[0] for at most half of the
+    time and, if that gives no verdict, with AUTO_ORDER[1] for the remaining time."""
     lustre = lustre_for(program, rule, n_users, mode, expand)
     if lus_path:
         with open(lus_path, "w") as f:
             f.write(lustre)
-    solvers = ["z3", "cvc5"] if solver == "auto" else [solver]
+    solvers = list(AUTO_ORDER) if solver == "auto" else [solver]
     outcome = None
-    for s in solvers:
-        out = kind2.run(lustre, timeout / len(solvers), extra_args=extra_args, solver=s)
+    deadline = time.time() + timeout
+    for i, s in enumerate(solvers):
+        left = deadline - time.time()
+        budget = left / 2 if i < len(solvers) - 1 else left
+        out = kind2.run(lustre, max(budget, 1), extra_args=extra_args, solver=s)
         result = next((p for p in out.properties if p.name == rule.name), None)
         outcome = Outcome(rule, result, out.errors, s)
         if outcome.status in ("valid", "invalid"):

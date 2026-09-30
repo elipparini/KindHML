@@ -8,7 +8,7 @@ Branch `v1` (worktree `~/Desktop/gitlab/KindHML-v1`). The old tool stays on `mai
 - [x] **M1** Worktree, design note (`DESIGN.md`), Kind 2 experiments.
 - [x] **M2** Grammar, AST, type checker; parse tests on all benchmarks and regressions.
 - [x] **M3** Desugaring, `Trans` encoding, Lustre printer; unit tests; reference evaluator.
-- [ ] **M4** Formula encoding, full pipeline, regressions imported; all ground truths checked.
+- [x] **M4** Formula encoding, full pipeline, regressions imported; all ground truths checked.
 - [ ] **M5** Contract-to-contract calls; README; `run_experiments.sh`; `\CL` notes in the paper.
 
 ## M1 — Kind 2 experiments (Kind 2 v2.3.0-467, cvc5 1.1.1)
@@ -70,6 +70,32 @@ procedures; for a non-payable procedure `initPay` is `require(value == 0)`, whic
 exclude `sender = C`. The tool adds an explicit first statement
 `require(sender != null && sender != C)` to every procedure (see `desugar.py`).
 
+## M4 — Formula encoding and pipeline
+
+* `encode_formula.py` (Φ, modes `inline` [default], `levels`, `exists`, `subst`; expansion of
+  address/method quantifiers), `lustre_subst.py` (substitution, simplification),
+  `verify.py` (pipeline), `src/kindHML.py` (CLI, as before plus `--cex --solver --mode
+  --expand`), `tests/run_all.py` (batch runner, CSV), `tests/test_formula.py` (differential
+  test of Φ against a bounded reference evaluator of the logic, no Kind 2),
+  `tests/test_regressions.py` (end-to-end, `-m kind2`).
+* Findings (details in DESIGN.md §2): expansion of finite quantifiers is essential; cvc5 makes
+  Kind 2's BMC crash on quantified properties with counterexamples (z3 does not), so the
+  default solver strategy is z3 then cvc5; nested `trans` calls crash Kind 2's normaliser.
+* Regressions (64 rules, budget 20 s): 59 match; open: `division` P1 (nonlinear witness),
+  `two-donatees` P2, P4, P2b, P3c (true, need an auxiliary invariant; upstream notes say
+  Kind 2 returns unknown).
+* Changes to regression files: `is_EOA(a) ->` guards in 14 `_true` rules (address domain);
+  `liquidity4` P9, P13, P15 relabelled True (vacuous: contract balance is 0 initially and C4
+  has no payable procedure; the same holds for all its rules guarded by `balance > 1`).
+* Benchmarks (31 rules): all decided with a budget of 120 s; see `results/v1_benchmarks.csv`.
+  Disagreements with the ground truth, all explained:
+  - `price-bet` Liquidity, Frontrunning, `price-bet_v3` Liquidity: the constructor may set
+    `oracle = null`; then nobody can call `set`. Genuine under the paper's semantics, also
+    for the paper's listing (note in examples.tex). To decide.
+  - `vault_v3` non-inflation: the file's formula (∃ first tx, ∀ second tx) is true (witness:
+    `withdraw(r, 0)`); the paper's formula (`chmlVaultB`, universal) is the intended one.
+    The old tool's counterexample (step 0) is spurious. Proposal: use the paper's formula.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
@@ -80,3 +106,7 @@ exclude `sender = C`. The tool adds an explicit first statement
    constructed (the property is `(∧_C constructed_C) → Φ(φ)`).
 3. **Contract names in modalities:** an unknown name is a type error; `Pricebet` (price-bet)
    and `Addittivity` (regression additivity) are corrected in the files.
+4. (after M4 part 1) **Method quantifiers** exclude constructors. **Init**: contract balances
+   are 0 (paper); a `\CL` note asks whether to allow any nonnegative initial balance.
+   **Bet with oracle = null**: the benchmark is discussed in the paper, so it is not changed;
+   a `\CL` note in examples.tex records the issue.
