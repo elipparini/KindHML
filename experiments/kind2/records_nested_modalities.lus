@@ -1,0 +1,32 @@
+type address = enum { anull, aC, u1, u2 };
+type proc = enum { p_constructor, p_inc };
+type Map = struct { anull: int; aC: int; u1: int; u2: int };
+type St = struct { v: int; rev: bool; bal: Map; built: bool };
+type Tx = struct { sender: address; f: proc; value: int; inc_x: int };
+
+function get(m: Map; a: address) returns (r: int);
+let r = if a = anull then m.anull else if a = aC then m.aC else if a = u1 then m.u1 else m.u2; tel
+
+function trans(s: St; t: Tx) returns (r: St);
+let
+  r = if not (t.sender <> anull and t.sender <> aC and t.value = 0 and
+       ((t.f = p_constructor and not s.built) or (t.f = p_inc and s.built and t.inc_x > 0)))
+      then St { v = s.v; rev = true; bal = s.bal; built = s.built }
+      else if t.f = p_inc then St { v = s.v + t.inc_x; rev = false; bal = s.bal; built = s.built }
+      else St { v = s.v; rev = false; bal = s.bal; built = true };
+tel
+
+node main(t: Tx; ib: Map) returns ();
+var s: St;
+let
+  assert ib.anull >= 0 and ib.u1 >= 0 and ib.u2 >= 0;
+  s = St { v = 0; rev = false; bal = Map { anull = ib.anull; aC = 0; u1 = ib.u1; u2 = ib.u2 }; built = false } -> pre trans(s, t);
+  --%PROPERTY "P_true" not s.built or (forall (a: address) (a = anull or a = aC) or
+       (exists (x: int) trans(s, Tx { sender = a; f = p_inc; value = 0; inc_x = x }).v > s.v));
+  --%PROPERTY "P_false" forall (a: address) (exists (x: int)
+       trans(s, Tx { sender = a; f = p_inc; value = 0; inc_x = x }).v > s.v);
+  --%PROPERTY "Bal_true" forall (a: address) (a <> aC => get(s.bal, a) >= 0);
+  --%PROPERTY "Nested_true" not s.built or (forall (a: address) (a = anull or a = aC) or
+       (exists (x: int; y: int) trans(trans(s, Tx { sender = a; f = p_inc; value = 0; inc_x = x }),
+                                       Tx { sender = a; f = p_inc; value = 0; inc_x = y }).v = s.v + 5));
+tel

@@ -1,0 +1,6 @@
+type S = struct { v: int; w: int };
+function tr(s: S; x: int) returns (r: S);
+var l1: S; l2: S;
+let l1 = S { v = s.v + x; w = s.w }; l2 = S { v = l1.v; w = l1.w + x }; r = if x > 0 then l2 else s; tel
+node main(i: int) returns ();
+let --%PROPERTY "A" forall (a: int) a > 0 => tr(S {v = i; w = 0}, a).w > 0; tel

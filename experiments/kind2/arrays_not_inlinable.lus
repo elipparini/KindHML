@@ -1,0 +1,3 @@
+function add(s: int^2; x: int) returns (r: int^2); let r = [s[0] + x, s[1]]; tel
+node main(i: int) returns ();
+let --%PROPERTY forall (a: int) a > 0 => add([i,i], a)[0] > i; tel

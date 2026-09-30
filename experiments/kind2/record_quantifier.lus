@@ -1,0 +1,8 @@
+type address = enum { anull, u1 };
+type S = struct { v: int; w: int };
+type T = struct { snd: address; x: int };
+function tr(s: S; t: T) returns (r: S);
+let r = if t.snd <> anull and t.x > 0 then S { v = s.v + t.x; w = s.w } else s; tel
+node main(i: int) returns ();
+let --%PROPERTY "A" forall (a: address) a <> anull => exists (t: T) (t.snd = a and tr(S {v = i; w = 0}, t).v > i);
+    --%PROPERTY "B" exists (t: T) (t.snd = anull and tr(S {v = i; w = 0}, t).v > i); tel
