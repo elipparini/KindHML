@@ -1,0 +1,111 @@
+"""Reading Kind 2's JSON and plain-text outputs (no Kind 2 needed)."""
+
+from kindhml.kind2 import parse_output, parse_text
+
+RAW = """[
+{
+  "objectType" : "log",
+  "level" : "info",
+  "value" : "kind2 v2.3.0"
+}
+,
+{
+  "objectType" : "property",
+  "name" : "init.(0 <= r.x and
+ r.x <= 0)",
+  "isCandidate" : "true",
+  "answer" : {"source" : "ind2", "value" : "valid"}
+}
+,
+{
+  "objectType" : "property",
+  "name" : "P",
+  "isCandidate" : "false",
+  "runtime" : {"unit" : "sec", "timeout" : false, "value" : 1.5},
+  "answer" : {"source" : "ind", "value" : "valid"}
+}
+,
+{
+  "objectType" : "property",
+  "name" : "Q",
+  "isCandidate" : "false",
+  "runtime" : {"unit" : "sec", "timeout" : false, "value" : 2.0},
+  "answer" : {"source" : "bmc", "value" : "falsifiable"}
+}
+]
+"""
+
+
+def test_complete_output():
+    out = parse_output(RAW)
+    assert [(p.name, p.status) for p in out.properties] == [("P", "valid"), ("Q", "invalid")]
+    assert out.errors == []
+
+
+def test_truncated_output_keeps_complete_objects():
+    for cut in range(len(RAW)):
+        names = [p.name for p in parse_output(RAW[:cut]).properties]
+        assert names in ([], ["P"], ["P", "Q"])
+    assert [p.name for p in parse_output(RAW[:RAW.index('"Q"')]).properties] == ["P"]
+
+
+def test_stray_text_between_objects():
+    raw = RAW.replace("\n,\n{\n  \"objectType\" : \"property\",\n  \"name\" : \"Q\"",
+                      "\nFatal error: exception\n,\n{\n  \"objectType\" : \"property\",\n"
+                      "  \"name\" : \"Q\"", 1)
+    assert "Fatal error" in raw
+    assert [p.name for p in parse_output(raw).properties] == ["P", "Q"]
+
+
+def test_empty_output_reports_stderr():
+    assert parse_output("", "Segmentation fault\n").errors == [
+        "no output from Kind 2: Segmentation fault"]
+    assert parse_text("", "Segmentation fault\n").errors == [
+        "no output from Kind 2: Segmentation fault"]
+
+
+TEXT = """ kind2 v2.3.0-467-gc2817d4
+================================================================================
+Analyzing main
+<Warning> Cannot mine invariants in quantified terms
+
+<Success> Generated candidate property init[l101c8].((0 <= r.x) and (r.x <= 0)) is valid by 2-induction after 0.159s.
+
+<Success> Property L is valid by 2-induction after 0.159s.
+
+<Error> Runtime error in inductive step: Invalid_argument("Ltree.fold : quantified term")
+
+<Success> Property P is valid by property directed reachability (IA) after 0.829s.
+
+<Failure> Property Q is invalid by bounded model checking for k=3 after 2.842s.
+
+--------------------------------------------------------------------------------
+Summary of properties:
+--------------------------------------------------------------------------------
+P: valid (k=1)
+Q: invalid after 3 steps
+R: true up to 2 steps
+S: unknown
+L: valid (k=2)
+================================================================================
+<Timeout> Wallclock timeout.
+"""
+
+
+def test_text_output():
+    out = parse_text(TEXT)
+    got = {p.name: (p.status, p.k, p.engine, p.time, p.true_up_to) for p in out.properties}
+    assert got == {"L": ("valid", 2, "ind2", 0.159, None),
+                   "P": ("valid", 1, "ic3ia", 0.829, None),
+                   "Q": ("invalid", 3, "bmc", 2.842, None),
+                   "R": ("unknown", None, None, None, 2),
+                   "S": ("unknown", None, None, None, None)}
+    assert out.errors == ['Runtime error in inductive step: '
+                          'Invalid_argument("Ltree.fold : quantified term")', "Wallclock timeout."]
+
+
+def test_text_output_of_a_killed_run():
+    """Answers are printed when found, before the summary."""
+    out = parse_text(TEXT[:TEXT.index("----")])
+    assert {p.name: p.status for p in out.properties} == {"L": "valid", "P": "valid",
+                                                          "Q": "invalid"}

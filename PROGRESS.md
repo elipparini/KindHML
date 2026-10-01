@@ -9,7 +9,7 @@ Branch `v1` (worktree `~/Desktop/gitlab/KindHML-v1`). The old tool stays on `mai
 - [x] **M2** Grammar, AST, type checker; parse tests on all benchmarks and regressions.
 - [x] **M3** Desugaring, `Trans` encoding, Lustre printer; unit tests; reference evaluator.
 - [x] **M4** Formula encoding, full pipeline, regressions imported; all ground truths checked.
-- [ ] **M5** Contract-to-contract calls; README; `run_experiments.sh`; `\CL` notes in the paper.
+- [x] **M5** Contract-to-contract calls; README; `run_experiments.sh`; `\CL` notes in the paper.
 
 ## M1 — Kind 2 experiments (Kind 2 v2.3.0-467, cvc5 1.1.1)
 
@@ -78,9 +78,10 @@ exclude `sender = C`. The tool adds an explicit first statement
   --expand`), `tests/run_all.py` (batch runner, CSV), `tests/test_formula.py` (differential
   test of Φ against a bounded reference evaluator of the logic, no Kind 2),
   `tests/test_regressions.py` (end-to-end, `-m kind2`).
-* Findings (details in DESIGN.md §2): expansion of finite quantifiers is essential; cvc5 makes
-  Kind 2's BMC crash on quantified properties with counterexamples (z3 does not), so the
-  default solver strategy is z3 then cvc5; nested `trans` calls crash Kind 2's normaliser.
+* Findings (details in DESIGN.md §2): expansion of finite quantifiers is essential; with cvc5,
+  Kind 2 crashes on many quantified properties that have a counterexample (z3 does not),
+  while cvc5 is faster on many valid rules, so the default strategy `auto` runs cvc5 for half
+  of the budget and then z3; nested `trans` calls crash Kind 2's normaliser.
 * Regressions (64 rules, budget 20 s): 59 match; open: `division` P1 (nonlinear witness),
   `two-donatees` P2, P4, P2b, P3c (true, need an auxiliary invariant; upstream notes say
   Kind 2 returns unknown).
@@ -95,6 +96,27 @@ exclude `sender = C`. The tool adds an explicit first statement
   - `vault_v3` non-inflation: the file's formula (∃ first tx, ∀ second tx) is true (witness:
     `withdraw(r, 0)`); the paper's formula (`chmlVaultB`, universal) is the intended one.
     The old tool's counterexample (step 0) is spurious. Proposal: use the paper's formula.
+
+## M5 — Contract calls, robustness, documentation
+
+* Contract-to-contract calls by unfolding (`syntax.Unfold`, `desugar.callee`, frames in
+  `encode_trans.py`); arguments and value evaluated at the call point; cyclic calls rejected
+  (A4). Reference interpreter executes calls natively. Tests: `tests/contracts/calls.sol`
+  (differential test of Trans; mutations "callee sees the original sender" and "arguments
+  evaluated after the transfer" are detected; unit tests; end-to-end rules).
+* Lemma `_lemma_balances_nonnegative` added to every Lustre program (DESIGN.md §2).
+* Kind 2 runner: each run in a named systemd scope, stopped at the end (a z3 process had
+  survived a run, because Kind 2 runs in its own process group). Plain-text output without
+  counterexamples by default (JSON only with `--cex`): building a counterexample can take
+  longer than finding it (DESIGN.md §2). The JSON reader tolerates truncated output.
+* `\CL` notes in the paper: contract calls (encoding-fol.tex), uint (contracts.tex).
+* Results (`results/v1_benchmarks.csv`, budget 120 s; `results/v1_regressions.csv`, budget
+  20 s, also `tests/contracts`): the benchmarks give the same verdicts as in M4. The
+  regressions also do, except `signature_error` P5_true: it is valid, but z3 (IC3) needs about
+  11 s and gets only the second half of the 20 s budget (valid with 60 s, faster with the
+  lemma than without). In `calls.sol`, Relay_never_reverts needs a budget of about 30 s for
+  the same reason. `pytest -m kind2 tests/test_regressions.py` (budget 30 s, regressions
+  and `tests/contracts`): 65 passed, 5 expected failures (the open rules of M4), 7 min 40 s.
 
 ## Decisions taken after M1 (with the user)
 

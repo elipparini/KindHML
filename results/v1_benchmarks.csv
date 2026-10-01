@@ -1,32 +1,32 @@
 file,rule,status,groundtruth,check,wall
-contracts/bank/bank.sol,Reversibility_deposit,valid,True,OK,4.42
-contracts/bank/bank.sol,Liquidity,valid,True,OK,13.23
-contracts/bank/bank.sol,No_frontrun_deposit,valid,True,OK,1.2
-contracts/bank/bank.sol,Additivity,valid,True,OK,1.13
-contracts/bank/bank_v2.sol,Reversibility_deposit,valid,True,OK,9.91
-contracts/bank/bank_v2.sol,Liquidity,valid,True,OK,20.59
-contracts/bank/bank_v2.sol,No_frontrun_deposit,valid,True,OK,1.19
-contracts/bank/bank_v2.sol,Additivity,invalid,False,OK,1.33
-contracts/bank/bank_v3.sol,Reversibility_deposit,invalid,False,OK,1.61
-contracts/bank/bank_v3.sol,Liquidity,invalid,False,OK,13.27
-contracts/bank/bank_v3.sol,No_frontrun_deposit,valid,True,OK,1.45
-contracts/bank/bank_v3.sol,Additivity,valid,True,OK,1.44
-contracts/bank/bank_v4.sol,Liquidity,valid,True,OK,18.08
-contracts/bank/bank_v4.sol,No_frontrun_deposit,invalid,False,OK,1.62
-contracts/bank/bank_v4.sol,Additivity,valid,True,OK,1.37
-contracts/bank/bank_v4.sol,Reversibility_deposit,valid,True,OK,9.37
-contracts/vault/vault.sol,Two_steps_drainability,valid,True,OK,27.72
-contracts/vault/vault.sol,Two_steps_drainability_non_inflation,valid,True,OK,2.7
-contracts/vault/vault_v2.sol,Two_steps_drainability,invalid,False,OK,3.99
-contracts/vault/vault_v2.sol,Two_steps_drainability_non_inflation,valid,True,OK,2.66
-contracts/vault/vault_v3.sol,Two_steps_drainability,valid,True,OK,19.16
-contracts/vault/vault_v3.sol,Two_steps_drainability_non_inflation,valid,False,NOT OK,16.22
-contracts/price-bet/price-bet.sol,Winnability,valid,True,OK,17.09
-contracts/price-bet/price-bet.sol,Liquidity,invalid,True,NOT OK,2.48
-contracts/price-bet/price-bet.sol,Frontrunning,invalid,True,NOT OK,1.91
-contracts/price-bet/price-bet_v2.sol,Winnability,invalid,False,OK,2.44
-contracts/price-bet/price-bet_v2.sol,Liquidity,invalid,False,OK,24.85
-contracts/price-bet/price-bet_v2.sol,Frontrunning,valid,True,OK,2.05
-contracts/price-bet/price-bet_v3.sol,Winnability,invalid,False,OK,1.89
-contracts/price-bet/price-bet_v3.sol,Liquidity,invalid,True,NOT OK,2.6
-contracts/price-bet/price-bet_v3.sol,Frontrunning,invalid,False,OK,2.16
+contracts/bank/bank.sol,Reversibility_deposit,valid,True,OK,10.0
+contracts/bank/bank.sol,Liquidity,valid,True,OK,44.91
+contracts/bank/bank.sol,No_frontrun_deposit,valid,True,OK,1.5
+contracts/bank/bank.sol,Additivity,valid,True,OK,1.66
+contracts/bank/bank_v2.sol,Reversibility_deposit,valid,True,OK,6.26
+contracts/bank/bank_v2.sol,Liquidity,valid,True,OK,58.62
+contracts/bank/bank_v2.sol,No_frontrun_deposit,valid,True,OK,1.52
+contracts/bank/bank_v2.sol,Additivity,invalid,False,OK,1.46
+contracts/bank/bank_v3.sol,Reversibility_deposit,invalid,False,OK,11.8
+contracts/bank/bank_v3.sol,Liquidity,invalid,False,OK,19.62
+contracts/bank/bank_v3.sol,No_frontrun_deposit,valid,True,OK,1.85
+contracts/bank/bank_v3.sol,Additivity,valid,True,OK,2.0
+contracts/bank/bank_v4.sol,Liquidity,valid,True,OK,46.82
+contracts/bank/bank_v4.sol,No_frontrun_deposit,invalid,False,OK,2.21
+contracts/bank/bank_v4.sol,Additivity,valid,True,OK,1.79
+contracts/bank/bank_v4.sol,Reversibility_deposit,valid,True,OK,10.19
+contracts/vault/vault.sol,Two_steps_drainability,valid,True,OK,46.89
+contracts/vault/vault.sol,Two_steps_drainability_non_inflation,valid,True,OK,3.61
+contracts/vault/vault_v2.sol,Two_steps_drainability,invalid,False,OK,14.38
+contracts/vault/vault_v2.sol,Two_steps_drainability_non_inflation,valid,True,OK,3.71
+contracts/vault/vault_v3.sol,Two_steps_drainability,valid,True,OK,35.5
+contracts/vault/vault_v3.sol,Two_steps_drainability_non_inflation,valid,False,NOT OK,31.77
+contracts/price-bet/price-bet.sol,Winnability,valid,True,OK,36.85
+contracts/price-bet/price-bet.sol,Liquidity,invalid,True,NOT OK,3.25
+contracts/price-bet/price-bet.sol,Frontrunning,invalid,True,NOT OK,2.2
+contracts/price-bet/price-bet_v2.sol,Winnability,invalid,False,OK,2.94
+contracts/price-bet/price-bet_v2.sol,Liquidity,invalid,False,OK,34.41
+contracts/price-bet/price-bet_v2.sol,Frontrunning,valid,True,OK,3.17
+contracts/price-bet/price-bet_v3.sol,Winnability,invalid,False,OK,2.34
+contracts/price-bet/price-bet_v3.sol,Liquidity,invalid,True,NOT OK,3.63
+contracts/price-bet/price-bet_v3.sol,Frontrunning,invalid,False,OK,3.08

@@ -32,7 +32,8 @@ python3 src/kindHML.py contracts/vault/vault_v2.sol ALL 2 30 --cex
 Options:
 
 - `--only_lus`: only write the Lustre encoding.
-- `--cex`: print counterexamples.
+- `--cex`: print counterexamples. Kind 2 may need much longer to build a counterexample than
+  to find it, so a rule can then need a larger budget.
 - `--solver auto|z3|cvc5`: SMT solver used by Kind 2. `auto` (default) runs cvc5 for at most
   half of the budget and, if it gives no verdict, z3 for the rest.
 - `--mode inline|levels|exists|subst`: encoding of modalities (default `inline`, see
@@ -44,8 +45,9 @@ verdict in `out_results/<contract>_<Rule>_<n>_<timeout>.out`. The verdict is com
 ground truth of the rule: a comment `// @groundtruth: True|False` right before it, or else the
 suffix `_true`/`_false` of its name.
 
-Kind 2 runs in its own process group, which is killed at the end of each run, and its memory
-(with its solvers) is limited to 3 GB when `systemd-run --user` is available.
+Each Kind 2 run, with its solvers, is placed in a `systemd-run --user` scope, which limits
+their memory to 3 GB and is stopped at the end of the run. Without systemd, the processes are
+killed at the end of the run and the memory limit is per process.
 
 ## Input language
 
@@ -72,6 +74,11 @@ rule Liquidity {
 Formulas: `forall`/`exists x : T .` with `T` in `int, uint, bool, address, method,
 calldataargs`; modalities `<< sender : Contract . f(args) $ value >> φ`; `old(e)`;
 `lastReverted`; `is_EOA(e)`; `balance`, `balance[a]`, contract fields.
+
+A file may contain several contracts, which can call each other (no cycles):
+`Token.mint(msg.sender, n) $ msg.value` calls `mint` of contract `Token`, transferring
+`msg.value` tokens with the call. With several contracts, rules write `C.x` for a field `x` of
+`C` and `C.balance` (or `balance[C]`) for its balance; see `tests/contracts/calls.sol`.
 
 ## Tests and experiments
 

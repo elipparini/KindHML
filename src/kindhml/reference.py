@@ -166,6 +166,25 @@ class Interpreter:
             amount = self.eval(s.amount, st, env)
             self.send(st, env["this"], to, amount)
             return
+        if isinstance(s, S.Call):
+            # Contract call: the actual parameters and the value are evaluated first; the
+            # call is valid under the premises of a transaction except those on the sender.
+            c = self.system.program.contract(s.callee.contract)
+            p = c.proc(s.proc)
+            args = {x.name: self.eval(a, st, env) for x, a in zip(p.params, s.args)}
+            value = self.eval(s.value, st, env)
+            caller = env["this"]
+            if p.payable:
+                self.send(st, caller, c.name, value)
+            elif value != 0:
+                raise Revert
+            if not st.constructed[c.name]:
+                raise Revert
+            if any(x.type == S.UINT and args[x.name] < 0 for x in p.params):
+                raise Revert
+            self.exec(p.body, st, {"sender": caller, "value": value, "this": c.name,
+                                   "args": args})
+            return
         raise NotImplementedError(f"statement {s!r}")
 
     # ------------------------------------------------------------ expressions

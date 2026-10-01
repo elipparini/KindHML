@@ -95,6 +95,28 @@ def divisors(e: S.Expr) -> List[S.Expr]:
     return out
 
 
+class Frame:
+    """The meaning of `msg.sender`, `msg.value`, and the parameters in a procedure body:
+    the transition variables for a transaction, or, in a contract call unfolded at level i,
+    the caller and the terms of the actual parameters and value at level i."""
+
+    def __init__(self, sender: L.LExpr, value: L.LExpr,
+                 params: Optional[Dict[Tuple[str, str, str], L.LExpr]], tx: L.LExpr):
+        self.sender, self.value, self.params, self.tx = sender, value, params, tx
+
+    @staticmethod
+    def of(t) -> "Frame":
+        """`t` itself if it is a frame; the frame of a transaction if it is a Tx term."""
+        if isinstance(t, Frame):
+            return t
+        return Frame(L.Proj(t, "sender"), L.Proj(t, "value"), None, t)
+
+    def param(self, contract: str, proc: str, name: str) -> L.LExpr:
+        if self.params is None:
+            return L.Proj(self.tx, param_var(contract, proc, name))
+        return self.params[(contract, proc, name)]
+
+
 class Encoder:
     def __init__(self, system: System):
         self.system = system
@@ -168,14 +190,15 @@ class Encoder:
         if isinstance(e, S.BinOp):
             return L.op(BINOPS[e.op], rec(e.left), rec(e.right))
         if t is not None:
+            frame = Frame.of(t)
             if isinstance(e, S.Param):
-                return L.Proj(t, param_var(e.contract, e.proc, e.name))
+                return frame.param(e.contract, e.proc, e.name)
             if isinstance(e, S.Sender):
-                return L.Proj(t, "sender")
+                return frame.sender
             if isinstance(e, S.Value):
-                return L.Proj(t, "value")
+                return frame.value
             if isinstance(e, S.TxBlockNum):
-                return L.Proj(t, BLOCK)
+                return L.Proj(frame.tx, BLOCK)
         if other is not None:
             return other(e)
         raise KindHMLError(f"cannot encode expression {e!r}", getattr(e, "pos", None))
@@ -200,6 +223,8 @@ class Encoder:
             return sum(Encoder.length(x) for x in stmt.stmts)
         if isinstance(stmt, S.If):
             return max(Encoder.length(stmt.then), Encoder.length(stmt.orelse))
+        if isinstance(stmt, S.Unfold):
+            return Encoder.length(stmt.body)
         return 1
 
     def update(self, level: L.LExpr, changes: Dict[str, L.LExpr]) -> L.LExpr:
@@ -272,6 +297,16 @@ class Encoder:
             orelse = self.levels(self.pad(stmt.orelse, n), i, t)
             body = {k: L.ite(cond, then[k], orelse[k]) for k in then}
             direct = [stmt.cond]
+        elif isinstance(stmt, S.Unfold):
+            # The actual parameters and the value are evaluated at the call point (level i);
+            # in the callee, sender is the caller (Sect. `sec:encoding:contract`).
+            params = self.system.params_of(stmt.callee, stmt.proc)
+            frame = Frame(L.Var(addr_const(stmt.caller)), self.expr(stmt.value, s, t),
+                          {(v.contract, v.proc, v.name): self.expr(a, s, t)
+                           for v, a in zip(params, stmt.args)},
+                          Frame.of(t).tx)
+            body = self.levels(stmt.body, i, frame)
+            direct = list(stmt.args) + [stmt.value]
         else:
             body = {i + 1: self.step(stmt, s, t)}
             direct = self.direct_exprs(stmt)
@@ -399,6 +434,14 @@ class Encoder:
             asserts=asserts,
             equations=[("s", L.Arrow(L.call("init", ib), L.Pre(L.call("trans", s, t))))],
             node=True, comment="The transition system (Init, Trans)")
+
+    def lemmas(self) -> List[Tuple[str, L.LExpr]]:
+        """Invariants of every system, as auxiliary properties: all balances are nonnegative
+        (Init makes them so, and a transfer requires 0 <= amount <= balance of the source)."""
+        bal = L.Proj(L.Var("s"), BALANCE)
+        return [("_lemma_balances_nonnegative",
+                 L.conj([L.op(">=", L.Proj(bal, key_field(a)), L.Int(0))
+                         for a in self.system.addresses]))]
 
     def program(self) -> Tuple[L.Program, L.Function]:
         """The Lustre program without properties, and its main node (to add properties to)."""

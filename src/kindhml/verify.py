@@ -29,12 +29,20 @@ AUTO_ORDER = tuple(os.environ.get("KINDHML_AUTO_ORDER", "cvc5,z3").split(","))
 DEFAULT_EXPAND = ("address", "method")
 
 
+LEMMAS = os.environ.get("KINDHML_LEMMAS", "1") != "0"
+
+
 def lustre_for(program: S.Program, rule: S.Rule, n_users: int, mode: str = DEFAULT_MODE,
-               expand=DEFAULT_EXPAND) -> str:
+               expand=DEFAULT_EXPAND, lemmas: bool = LEMMAS) -> str:
     """The Lustre program checking `rule`: the transition system (Init, Trans) and the
-    property (∧_C constructed_C) → Φ(φ)."""
+    property (∧_C constructed_C) → Φ(φ). With `lemmas`, also quantifier-free invariants of
+    every system (balances are nonnegative), which Kind 2 proves first and then uses to
+    strengthen the induction for the rule (its invariant generator does not work on
+    quantified properties)."""
     enc = Encoder(System.make(program, n_users))
     prog, main = enc.program()
+    if lemmas:
+        main.properties += enc.lemmas()
     main.properties.append((rule.name, FormulaEncoder(enc, mode, tuple(expand)).rule(rule)))
     return prog.render()
 
@@ -70,9 +78,11 @@ class Outcome:
 
 def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: float,
            mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND, lus_path: Optional[str] = None,
-           extra_args: Optional[List[str]] = None, solver: str = "auto") -> Outcome:
+           extra_args: Optional[List[str]] = None, solver: str = "auto",
+           cex: bool = False) -> Outcome:
     """Check one rule. Solver "auto" runs Kind 2 with AUTO_ORDER[0] for at most half of the
-    time and, if that gives no verdict, with AUTO_ORDER[1] for the remaining time."""
+    time and, if that gives no verdict, with AUTO_ORDER[1] for the remaining time.
+    With `cex`, the result of an invalid rule contains its counterexample (slower)."""
     lustre = lustre_for(program, rule, n_users, mode, expand)
     if lus_path:
         with open(lus_path, "w") as f:
@@ -83,7 +93,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: float,
     for i, s in enumerate(solvers):
         left = deadline - time.time()
         budget = left / 2 if i < len(solvers) - 1 else left
-        out = kind2.run(lustre, max(budget, 1), extra_args=extra_args, solver=s)
+        out = kind2.run(lustre, max(budget, 1), extra_args=extra_args, solver=s, cex=cex)
         result = next((p for p in out.properties if p.name == rule.name), None)
         outcome = Outcome(rule, result, out.errors, s)
         if outcome.status in ("valid", "invalid"):

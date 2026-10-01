@@ -46,6 +46,30 @@ Experiments with Kind 2 v2.3.0 (see `PROGRESS.md`, Milestone 1) fix the followin
   `s = init -> pre trans(s, t)`; `Init` constrains the initial balances by an `assert`.
 * The property is `--%PROPERTY "<Rule>" (∧_C s.constructed_C) => Φ(φ)`.
 
+### Contract calls
+
+A call `D.g(e1, ..., ek) $ e` in a procedure of C is unfolded (Sect. `sec:encoding:contract`):
+the desugaring replaces it by `Unfold(C, D, g, ē, e, body)`, where `body` is initPay (a
+transfer of `e` tokens from C to D if `g` is payable, `require(e == 0)` otherwise), the
+guard `require(constructed_D)`, the uint guards, and the body of `g`, itself desugared
+(nested calls are unfolded recursively; a cyclic call graph is rejected, A4).
+"Evaluated at the call point" is implemented without extra variables: at level i, the
+encoder computes the terms of ē and e at level i, and encodes `body` from level i in a
+*frame* where `msg.sender` is D's caller C, `msg.value` is the term of e, and each parameter
+of g is the term of its actual parameter. So an argument such as `balance` denotes the
+balance before the transfer of `e`. The division guard of a call covers ē and e
+(Appendix `app:correctness:transition`). Internal calls have no transaction guard
+(`sender != null && sender != C`): their sender is a contract.
+
+### Lemmas
+
+Kind 2's invariant generator does not work on quantified properties, so rules whose proof
+needs an auxiliary invariant fail. The tool adds to every Lustre program the
+quantifier-free property `_lemma_balances_nonnegative` (true in every system: Init makes
+balances nonnegative and transfers require 0 <= amount <= balance); Kind 2 proves it and uses
+it in the induction for the rule (e.g. `tests/contracts/calls.sol` Buy_mints: unknown after
+60 s without it, valid in 6 s with it). `KINDHML_LEMMAS=0` disables it.
+
 ### Encoding of formulas (`encode_formula.py`)
 
 The modal tree of the paper is built during the recursion: a node `V` is a state term (the
@@ -77,11 +101,26 @@ quantifiers, and the solvers fail to find witnesses of outer existentials (e.g. 
 Quantifiers over records break Kind 2's BMC and k-induction, so an `args` variable is expanded
 into one scalar per element of `ParamVars`, as in the paper; unused scalars are dropped.
 
+### Running Kind 2
+
+One Kind 2 job at a time. Kind 2 starts its solvers in other process groups, and solvers it
+leaves behind are reparented when it exits; so each run is a named `systemd-run --user`
+scope (a cgroup, which also caps memory at 3 GB), stopped at the end of the run. Without
+systemd, the runner records the descendants of Kind 2 while it runs and kills them.
+
+The runner reads Kind 2's plain-text output, with `--print_cex false`. In JSON mode Kind 2
+always builds the counterexample (the values of every stream of every function instance),
+and it cannot be interrupted while doing so. On `tests/contracts/calls.sol`
+Relay_never_reverts (three contracts), BMC finds the counterexample 7 s after the start,
+but the JSON answer is printed at 25 s; with a budget of 20 s the verdict was lost. JSON
+output is used only with `--cex`.
+
 ### Solvers
 
-With cvc5, Kind 2's BMC crashes (`Ltree.fold : quantified term`) when a counterexample
-exists, and Kind 2 then stops k-induction too (the old tool filtered this error out). With z3,
-counterexamples are found; on many valid rules cvc5 is faster. `--solver auto` (default) runs
+With cvc5, on many rules that have a counterexample, Kind 2's inductive step crashes
+(`Ltree.fold : quantified term`) and Kind 2 then stops BMC as well, so that only IC3 may
+still find the counterexample (the old tool filtered this error out). With z3, BMC finds
+counterexamples; on many valid rules cvc5 is faster. `--solver auto` (default) runs
 cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the rest
 (benchmarks with a budget of 120 s: 3 min 51 s in total, against about 16 min for z3 first).
 

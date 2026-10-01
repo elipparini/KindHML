@@ -345,6 +345,21 @@ class SetBlockNum(Stmt):
     pos: Pos = _pos()
 
 
+@dataclass(frozen=True)
+class Unfold(Stmt):
+    """The contract call `callee.proc(args) $ value` made by `caller`, with the core body of
+    the callee (initPay, constructed guard, uint guards, body). In `body`, `Sender`, `Value`
+    and `Param(callee, proc, x)` denote the caller, the value, and the actual parameters,
+    evaluated at the call point (Sect. `sec:encoding:contract`)."""
+    caller: str
+    callee: str
+    proc: str
+    args: Tuple[Expr, ...]
+    value: Expr
+    body: Stmt
+    pos: Pos = _pos()
+
+
 # ------------------------------------------------------------------ declarations
 
 CONSTRUCTOR = "constructor"

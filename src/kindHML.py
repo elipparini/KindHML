@@ -64,7 +64,7 @@ def main() -> int:
             continue
         outcome = V.verify(program, rule, args.n_of_participants, args.timeout,
                            mode=args.mode, expand=expand, lus_path=lus_path,
-                           solver=args.solver)
+                           solver=args.solver, cex=args.cex)
         line = f"{name} - {outcome.describe()}"
         print(line, flush=True)
         if args.cex and outcome.status == "invalid" and outcome.result.counterexample:

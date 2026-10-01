@@ -1,5 +1,6 @@
-"""End-to-end regression tests: each rule of contracts/regression must match its ground
-truth within a small timeout. Runs Kind 2 (one job at a time); select with -m kind2.
+"""End-to-end regression tests: each rule of contracts/regression and tests/contracts must
+match its ground truth within a small timeout. Runs Kind 2 (one job at a time); select with
+-m kind2.
 
 Rules listed in OPEN are known not to match yet; each entry says why.
 """
@@ -12,7 +13,10 @@ import pytest
 from kindhml import verify as V
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TIMEOUT = 10
+# With the default solver strategy, z3 gets the second half of it; some rules need z3 for
+# about 10 s (signature_error P5_true; calls Relay_never_reverts, with three contracts).
+TIMEOUT = 30
+DIRS = [os.path.join(ROOT, "contracts", "regression"), os.path.join(ROOT, "tests", "contracts")]
 
 OPEN = {
     ("division", "P1_true"): "nonlinear witness; unknown within the timeout",
@@ -24,7 +28,7 @@ OPEN = {
 
 
 def cases():
-    for path in sorted(glob.glob(os.path.join(ROOT, "contracts", "regression", "*.sol"))):
+    for path in [p for d in DIRS for p in sorted(glob.glob(os.path.join(d, "*.sol")))]:
         program, _ = V.load(path)
         for rule in program.rules:
             key = (V.stem(path), rule.name)

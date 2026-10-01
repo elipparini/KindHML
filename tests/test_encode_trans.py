@@ -1,6 +1,9 @@
 """Structural tests of the statement encoding S^i(s)."""
 
+import pytest
+
 from kindhml import desugar
+from kindhml.errors import KindHMLError
 from kindhml import lustre as L
 from kindhml import syntax as S
 from kindhml.builder import parse
@@ -52,6 +55,28 @@ def test_division_is_guarded():
     assert isinstance(level, L.Ite)
     assert level.cond == L.op("<>", L.Proj(L.Var("t"), "C_g_d"), L.Int(0))
     assert dict(level.orelse.fields)["revert"] == L.TRUE
+
+
+def test_cyclic_calls_rejected_A4():
+    program, _ = check(parse("""
+        contract A { function f() { B.g() } }
+        contract B { function g() { A.f() } }"""))
+    with pytest.raises(KindHMLError, match="cyclic contract calls"):
+        Encoder(System.make(program, 1)).program()
+
+
+def test_call_arguments_evaluated_at_call_point():
+    """In the unfolded body, parameters denote terms over the level of the call."""
+    program, _ = check(parse("""
+        contract A { function f() { B.g(balance) $ 1 } }
+        contract B { int x; function g(int b) payable { x = b } }"""))
+    enc = Encoder(System.make(program, 1))
+    a = program.contract("A")
+    body = desugar.body(enc.system, a, a.proc("f").body)
+    assert isinstance(body, S.Unfold) and body.caller == "A" and body.callee == "B"
+    levels = enc.levels(body, 0, L.Var("t"))
+    # initPay (level 1), constructed guard (2), x = b (3): b is balance[A] at level 0
+    assert dict(levels[3].fields)["B_x"] == L.Proj(L.Proj(L.Var("s"), "balance"), "k_A")
 
 
 def test_procedure_length_includes_guards():

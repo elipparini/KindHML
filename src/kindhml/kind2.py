@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import threading
+import uuid
 import tempfile
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -82,12 +85,60 @@ def _limit_memory():
     resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
 
 
-def _kill_group(proc: subprocess.Popen):
-    """Kill Kind 2 and every solver process it started (they share its process group)."""
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+def _children() -> dict:
+    """ppid -> list of pids, from /proc."""
+    out: dict = {}
+    for name in os.listdir("/proc"):
+        if name.isdigit():
+            try:
+                with open(f"/proc/{name}/stat") as f:
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+                out.setdefault(ppid, []).append(int(name))
+            except (OSError, IndexError, ValueError):
+                pass
+    return out
+
+
+def _descendants(pid: int) -> List[int]:
+    children, todo, seen = _children(), [pid], []
+    while todo:
+        p = todo.pop()
+        for c in children.get(p, []):
+            seen.append(c)
+            todo.append(c)
+    return seen
+
+
+class _Watcher(threading.Thread):
+    """Records the descendants of a process while it runs: Kind 2 starts its solvers in
+    other process groups, and solvers it leaves behind are reparented when it exits."""
+
+    def __init__(self, pid: int):
+        super().__init__(daemon=True)
+        self.pid, self.seen, self.done = pid, set(), threading.Event()
+
+    def run(self):
+        while not self.done.wait(0.2):
+            self.seen.update(_descendants(self.pid))
+
+
+def _cleanup(proc: subprocess.Popen, unit: Optional[str], watcher: "_Watcher"):
+    """Kill Kind 2 and every process it started: the whole systemd scope if there is one,
+    and in any case the process groups and the recorded descendants."""
+    watcher.done.set()
+    if unit:
+        subprocess.run(["systemctl", "--user", "kill", "--signal=SIGKILL", unit + ".scope"],
+                       capture_output=True, timeout=10)
+        subprocess.run(["systemctl", "--user", "stop", unit + ".scope"],
+                       capture_output=True, timeout=10)
+    for pid in [proc.pid] + _descendants(proc.pid) + sorted(watcher.seen):
+        for kill in (lambda p: os.killpg(os.getpgid(p), signal.SIGKILL),
+                     lambda p: os.kill(p, signal.SIGKILL)):
+            try:
+                if pid != os.getpid() and os.getpgid(pid) != os.getpgid(0):
+                    kill(pid)
+            except (ProcessLookupError, PermissionError):
+                pass
 
 
 SOLVERS = ("z3", "cvc5")
@@ -109,64 +160,127 @@ def solver_args(solver: str) -> List[str]:
 
 def run(lustre: str, timeout: float, extra_args: Optional[List[str]] = None,
         kind2: Optional[str] = None, save_to: Optional[str] = None,
-        solver: str = "z3") -> Kind2Output:
+        solver: str = "z3", cex: bool = False) -> Kind2Output:
     """Check all properties of a Lustre program. `timeout` is Kind 2's own timeout (s);
-    Kind 2 is killed, with its solvers, if it has not stopped 10 s later."""
+    Kind 2 is killed, with its solvers, if it has not stopped 10 s later.
+    With `cex`, Kind 2's JSON output is read, which contains the counterexamples. Without,
+    the plain-text output is read, with counterexamples disabled: Kind 2 always builds them
+    in JSON mode, which can take longer than finding them (and cannot be interrupted)."""
     kind2 = kind2 or find_kind2()
     with tempfile.TemporaryDirectory(prefix="kindhml_") as tmp:
         path = os.path.join(tmp, "task.lus")
         with open(path, "w") as f:
             f.write(lustre)
         scope = _memory_scope()
-        cmd = scope + [kind2, "-json"] + solver_args(solver) + [
+        unit = f"kindhml-{os.getpid()}-{uuid.uuid4().hex[:8]}" if scope else None
+        prefix = scope + [f"--unit={unit}"] if scope else []
+        output = ["-json"] if cex else ["--color", "false", "--print_cex", "false"]
+        cmd = prefix + [kind2] + output + solver_args(solver) + [
             "--timeout", str(timeout), "--output_dir", tmp] + (extra_args or []) + [path]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                 start_new_session=True,
                                 preexec_fn=None if scope else _limit_memory)
+        watcher = _Watcher(proc.pid)
+        watcher.start()
         try:
-            raw, _ = proc.communicate(timeout=timeout + 10)
+            raw, err = proc.communicate(timeout=timeout + 10)
             killed = False
         except subprocess.TimeoutExpired:
-            _kill_group(proc)
-            raw, _ = proc.communicate()
+            _cleanup(proc, unit, watcher)
+            raw, err = proc.communicate()
             killed = True
         finally:
-            _kill_group(proc)
+            _cleanup(proc, unit, watcher)
     if save_to:
         with open(save_to, "w") as f:
             f.write(raw)
-    out = parse_output(raw)
+    out = parse_output(raw, err) if cex else parse_text(raw, err)
     if killed:
         out.errors.append("Kind 2 did not stop in time and was killed")
     return out
 
 
-def parse_output(raw: str) -> Kind2Output:
-    try:
-        objects = json.loads(raw)
-    except json.JSONDecodeError:
-        # Output of a killed run: keep the complete objects printed so far.
-        cut = raw.rfind("\n}")
+def _json_objects(raw: str) -> List[dict]:
+    """The top-level objects of Kind 2's JSON array, decoded one at a time, so that the
+    output of a killed run (truncated) and stray text between objects are tolerated.
+    Control characters are allowed in strings (property names may contain newlines)."""
+    decoder = json.JSONDecoder(strict=False)
+    objects: List[dict] = []
+    i = raw.find("{")
+    while i >= 0:
         try:
-            objects = json.loads(raw[:cut + 2].rstrip().rstrip(",") + "\n]") if cut >= 0 else []
+            o, end = decoder.raw_decode(raw, i)
         except json.JSONDecodeError:
-            return Kind2Output([], ["cannot parse the output of Kind 2"], raw)
+            nxt = raw.find("\n{", i + 1)      # top-level objects start a line
+            i = nxt + 1 if nxt >= 0 else -1
+            continue
+        if isinstance(o, dict):
+            objects.append(o)
+        i = raw.find("{", end)
+    return objects
+
+
+def _no_output(raw: str, stderr: str) -> Kind2Output:
+    msg = "no output from Kind 2"
+    if stderr.strip():
+        msg += ": " + stderr.strip().splitlines()[-1]
+    return Kind2Output([], [msg], raw)
+
+
+def parse_output(raw: str, stderr: str = "") -> Kind2Output:
+    """Kind 2's JSON output (option -json)."""
+    objects = _json_objects(raw)
+    if not objects:
+        return _no_output(raw, stderr)
     props: dict = {}
     errors: List[str] = []
-    true_up_to: dict = {}
     for o in objects:
         kind = o.get("objectType")
         if kind == "log" and o.get("level") in ("error", "fatal"):
             errors.append(str(o.get("value")))
-        elif kind == "kind2Output":
-            continue
         elif kind == "property" and o.get("isCandidate") != "true":
             props[o["name"]] = _property(o)
-        elif kind == "progress" and "k" in o:
-            pass
-    for name, p in props.items():
-        if name in true_up_to and p.status != "valid":
-            p.true_up_to = true_up_to[name]
+    return Kind2Output(list(props.values()), errors, raw)
+
+
+# Engine names of the plain-text output, abbreviated as in the JSON output.
+_ENGINES = {"bounded model checking": "bmc", "inductive step": "ind", "2-induction": "ind2",
+            "property directed reachability (IA)": "ic3ia",
+            "property directed reachability (QE)": "ic3qe"}
+_ANSWER = re.compile(r"<(?:Success|Failure)> Property (\S+) is (valid|invalid) by (.+?)"
+                     r"(?: for k=(\d+))? after ([0-9.]+)s\.$")
+_SUMMARY = re.compile(r"(\S+): (valid|invalid|true up to|unknown)"
+                      r"(?: \(k=(\d+)\)| after (\d+) steps| (\d+) steps)?$")
+
+
+def parse_text(raw: str, stderr: str = "") -> Kind2Output:
+    """Kind 2's plain-text output (options --color false --print_cex false). The answer
+    for a property is printed as soon as it is found, and the final summary gives the
+    depth up to which an undecided property holds."""
+    if not raw.strip():
+        return _no_output(raw, stderr)
+    props: dict = {}
+    errors: List[str] = []
+    summary = False
+    for line in raw.splitlines():
+        answer = _ANSWER.match(line)
+        final = summary and _SUMMARY.match(line)
+        if answer:
+            name, value, engine, k, t = answer.groups()
+            props[name] = PropertyResult(name, value, int(k) if k else None,
+                                         _ENGINES.get(engine, engine), float(t))
+        elif final:
+            name, word, k_valid, k_invalid, up_to = final.groups()
+            status = word if word in ("valid", "invalid") else "unknown"
+            p = props.setdefault(name, PropertyResult(name, status))
+            if p.k is None and (k_valid or k_invalid):
+                p.k = int(k_valid or k_invalid)
+            if up_to:
+                p.true_up_to = int(up_to)
+        elif line.startswith(("<Error>", "<Timeout>")):
+            errors.append(line.split("> ", 1)[1])
+        elif line.startswith("Summary of properties:"):
+            summary = True
     return Kind2Output(list(props.values()), errors, raw)
 
 
