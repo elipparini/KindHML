@@ -20,6 +20,7 @@ rule P1_false {
 
 rule P2_true {
   forall addr : address .
+  is_EOA(addr) ->
   exists v : int .   
   balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
@@ -36,6 +37,7 @@ rule P3_false {
 
 rule P4_true {
   forall addr : address .
+  is_EOA(addr) ->
   exists v : int .   
   balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
@@ -54,6 +56,7 @@ rule P5_false {
 // properties P6 and P7 are the same as P4 and P5 except for the "-1" inside/outside the scope of old()  
 rule P6_true {
   forall addr : address .
+  is_EOA(addr) ->
   exists v : int .   
   balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
@@ -77,9 +80,6 @@ rule P8_true {
 }
 
 
-// KindHML v1: contract balances are 0 in the initial state (paper, Init) and C4 has no
-// payable procedure, so `balance > 1` never holds and the rule is vacuously true.
-// @groundtruth: True
 rule P9_false {
   forall addr : address .
   exists v : int .   
@@ -110,14 +110,13 @@ rule P11_false {
 
 rule P12_true {
   forall addr : address .
+  is_EOA(addr) ->
   exists v : int .   
   balance > 1 ->		
     << addr : C4 . pay(v) $ 0 >>
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
 
-// KindHML v1: vacuously true, see P9_false.
-// @groundtruth: True
 rule P13_false {
   forall addr : address .
   exists v : int .   
@@ -128,6 +127,7 @@ rule P13_false {
 
 rule P14_true {
   forall addr : address .
+  is_EOA(addr) ->
   exists v : int .   
   exists xn : int .   
   balance > 1 ->		
@@ -135,8 +135,6 @@ rule P14_true {
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
 
-// KindHML v1: vacuously true, see P9_false.
-// @groundtruth: True
 rule P15_false {
   forall addr : address .
   exists v : int .

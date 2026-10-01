@@ -19,7 +19,7 @@ from kindhml.builder import parse
 from kindhml.encode_trans import (BALANCE, BLOCK, REVERT, Encoder, addr_const, constructed_var,
                                   field_var, key_field, map_type, param_var, proc_const)
 from kindhml.lustre_eval import Evaluator
-from kindhml.model import System
+from kindhml.model import NULL, System
 from kindhml.reference import Interpreter, State, Tx, initial_state
 from kindhml.typecheck import check
 
@@ -81,10 +81,9 @@ def random_value(t: S.AnyType, system: System, rnd: random.Random):
 
 
 def random_state(system: System, rnd: random.Random) -> State:
-    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.users})
+    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.addresses})
     for c in system.contracts:
         st.constructed[c.name] = rnd.random() < 0.9
-        st.balance[c.name] = rnd.randint(0, 5)
         for f in c.fields:
             st.fields[(c.name, f.name)] = random_value(f.type, system, rnd)
     st.block_num = rnd.randint(0, 3)
@@ -104,7 +103,7 @@ def random_tx(system: System, rnd: random.Random) -> Tx:
 
 def random_reachable_state(system: System, rnd: random.Random, interp: Interpreter) -> State:
     """The state reached by a random sequence of transactions from an initial state."""
-    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.users})
+    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.addresses})
     for c in system.contracts:
         ctor = c.procs[0]
         st = interp.step(st, Tx(rnd.choice(system.users), c.name, (c.name, ctor.name),
@@ -135,6 +134,25 @@ def setup(path):
     system = System.make(program, 2)
     enc = Encoder(system)
     return system, enc, Interpreter(system), random.Random(path)
+
+
+def test_senders_of_transactions_and_of_calls():
+    """A transaction is sent by a user; in a contract call, the sender is the calling contract
+    (Shop.relay calls Router.forward, which calls Token.give, which reads bal[msg.sender])."""
+    system, enc, interp, _ = setup(os.path.join(ROOT, "tests", "contracts", "calls.sol"))
+    ev = Evaluator(enc.program()[0])
+    st = initial_state(system, {a: 1 for a in system.addresses})
+    st.constructed = {c: True for c in st.constructed}
+    for router_tokens, sender, reverts in [(1, "u1", False), (0, "u1", True),
+                                           (1, "Router", True), (1, NULL, True)]:
+        s = st.copy()
+        s.fields[("Token", "bal")]["Router"] = router_tokens
+        tx = Tx(sender, "Shop", ("Shop", "relay"), {"n": 1})
+        expected = interp.step(s, tx)
+        assert expected.revert == reverts, (router_tokens, sender)
+        actual = ev.eval(L.call("trans", state_literal(s, system, enc),
+                                tx_literal(tx, system, enc)), {})
+        assert actual == ev.eval(state_literal(expected, system, enc), {}), (router_tokens, sender)
 
 
 @pytest.mark.parametrize("path", FILES, ids=os.path.basename)

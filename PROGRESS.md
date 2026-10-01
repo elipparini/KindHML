@@ -118,6 +118,31 @@ exclude `sender = C`. The tool adds an explicit first statement
   the same reason. `pytest -m kind2 tests/test_regressions.py` (budget 30 s, regressions
   and `tests/contracts`): 65 passed, 5 expected failures (the open rules of M4), 7 min 40 s.
 
+## After M5 — consistency of tool and paper (decisions 5–7 below)
+
+* Senders: a transaction starts with `require(is_EOA(sender))` (was: `sender != null &&
+  sender != C`); unfolded calls have no such guard, their sender is the calling contract.
+  Same verdicts on all single-contract files; test `test_senders_of_transactions_and_of_calls`.
+* Init: every balance is nonnegative (contracts included); was: contract balances 0.
+* Benchmark files:
+  - `liquidity4`: the relabelling of P9, P13, P15 (M4) is undone (now falsified, also for
+    users); `is_EOA(addr) ->` guards in P2, P4, P6, P12, P14 (with `addr = C4` the
+    transaction reverts, now that `balance > 1` is reachable).
+  - `price-bet`, `_v2`, `_v3`: `require(oracle_addr != null)` in the constructor; new mutant
+    `price-bet_v4` = the previous `price-bet`.
+* Results (`results/v1_benchmarks.csv`, 120 s; `results/v1_regressions.csv`, 30 s, with
+  `liquidity4` rerun after the guards):
+  - benchmarks: 34 rules; all match except `vault_v3` non-inflation (formula, pending).
+    `bank` and `bank_v2` Liquidity were unknown in the batch: alone, `bank` is valid in 37 s,
+    and `bank_v2` needs 54 s of cvc5, at the edge of cvc5's half of 120 s (it was 58 s in M5).
+  - regressions and `tests/contracts`: 65 of 70 match; `two-donatees` P2b_true now matches
+    (IC3, 30 s). Open: `division` P1, `two-donatees` P2, P4, P3c, and `signature_error`
+    P5_true. The last one is valid, but at the edge: with 60 s, the current encoding was once
+    unknown and once valid (48 s, z3 16 s); with the old guard or the old Init, valid in 52 s
+    and 47 s (one run each). So the time varies between runs.
+  - `pytest -m kind2 tests/test_regressions.py` (30 s): 64 passed, 5 expected failures,
+    1 unexpected pass (`two-donatees` P2b_true), 7 min 39 s.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
@@ -132,3 +157,12 @@ exclude `sender = C`. The tool adds an explicit first statement
    are 0 (paper); a `\CL` note asks whether to allow any nonnegative initial balance.
    **Bet with oracle = null**: the benchmark is discussed in the paper, so it is not changed;
    a `\CL` note in examples.tex records the issue.
+5. (after M5) **Senders:** only users send transactions (paper and tool); in unfolded
+   contract calls the sender is the calling contract. **Init:** all balances nonnegative
+   (paper and tool). **Domains** of `address` and `method` as in decisions 1 and 4, now
+   stated in the paper; uint presented in the paper as sugar for `require` statements.
+6. (after M5) **Bet:** `require(o != null)` in the main version and in v2, v3 (paper
+   listing and files); the previous main version is the new mutant v4; its rows in the
+   paper's results table are placeholders until the table is regenerated.
+7. (after M5) **block.number:** stays outside the formal model for now; the proposal (block
+   number as a component of the transaction) is a `\CL` note in examples.tex.

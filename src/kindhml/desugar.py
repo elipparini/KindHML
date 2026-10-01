@@ -3,7 +3,7 @@
 A procedure f of contract C with body s becomes, for a transaction,
 
     [block_num := Tx.block_num;]            -- only if block.number is used (extension)
-    require(sender != null && sender != C);  -- A5(iv) and the null-sender extension
+    require(is_EOA(sender));                 -- transactions are sent by users
     callee(C, f)
 
 where callee(C, f), also used for the contract calls of C.f, is
@@ -18,6 +18,8 @@ where callee(C, f), also used for the contract calls of C.f, is
 otherwise; s' is s with `x = e` on a uint field preceded by `require(e >= 0)`,
 `to.transfer(n)` replaced by `Send(C, to, n)`, and each contract call `D.g(ē) $ e` replaced by
 `Unfold(C, D, g, ē, e, callee(D, g))` (unfolding, A4: the call graph must be acyclic).
+The guard on the sender belongs to the transaction: in callee(D, g) unfolded in a procedure
+of C, the sender is the contract C.
 
 The division guards def^i(s) are not added here: they are part of the encoding of each
 statement (`encode_trans.py`), as in Appendix `app:correctness:transition`.
@@ -45,12 +47,10 @@ def _seq(stmts: List[S.Stmt]) -> S.Stmt:
 
 def procedure(system: System, c: S.Contract, p: S.Procedure) -> S.Stmt:
     """The core statement for a transaction calling procedure `p` of contract `c`."""
-    this = S.ContractAddr(c.name)
     stmts: List[S.Stmt] = []
     if system.uses_block_num:
         stmts.append(S.SetBlockNum())
-    stmts.append(S.Require(_and(S.BinOp("!=", S.Sender(), S.NullLit()),
-                                S.BinOp("!=", S.Sender(), this))))
+    stmts.append(S.Require(S.IsEOA(S.Sender())))
     stmts.append(callee(system, c, p, ()))
     return _seq(stmts)
 

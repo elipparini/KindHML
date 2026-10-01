@@ -8,6 +8,7 @@ contract Bet {
 
     constructor(address oracle_addr, int initial_rate) payable {
         require(oracle_addr != this);
+        require(oracle_addr != null);
         owner = msg.sender;
         oracle = oracle_addr; 
         rate = initial_rate;

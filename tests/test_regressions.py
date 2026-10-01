@@ -14,7 +14,7 @@ from kindhml import verify as V
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # With the default solver strategy, z3 gets the second half of it; some rules need z3 for
-# about 10 s (signature_error P5_true; calls Relay_never_reverts, with three contracts).
+# about 10 s (calls Relay_never_reverts, with three contracts).
 TIMEOUT = 30
 DIRS = [os.path.join(ROOT, "contracts", "regression"), os.path.join(ROOT, "tests", "contracts")]
 
@@ -22,8 +22,10 @@ OPEN = {
     ("division", "P1_true"): "nonlinear witness; unknown within the timeout",
     ("two-donatees", "P2_true"): "needs an auxiliary invariant; unknown within the timeout",
     ("two-donatees", "P4_true"): "needs an auxiliary invariant; unknown within the timeout",
-    ("two-donatees", "P2b_true"): "needs an auxiliary invariant; unknown within the timeout",
+    ("two-donatees", "P2b_true"): "valid by IC3 with z3 in about 30 s: at the edge of the timeout",
     ("two-donatees", "P3c_true"): "needs an auxiliary invariant; unknown within the timeout",
+    ("signature_error", "P5_true"): "valid by IC3 with z3, in 16 s to more than 30 s depending "
+                                    "on the run: at the edge of the timeout",
 }
 
 

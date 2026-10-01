@@ -5,7 +5,8 @@ This module implements the semantics of Sect. `sec:contracts` (Figs. `fig:semant
 `desugar.py` and of the encoding. The premises of the transaction rule are those of the paper
 plus assumption A5 and the extensions of DESIGN.md, Sect. 4:
 
-* the sender is neither `null` nor the called contract;
+* the sender of a transaction is a user (neither `null` nor a contract); in a contract call,
+  the sender is the calling contract;
 * the constructor is called exactly once, before any other procedure;
 * a non-payable procedure requires value 0; a payable one transfers the value, which must
   be nonnegative and covered by the sender's balance;
@@ -73,10 +74,10 @@ def default(t: S.AnyType, system: System):
     return {S.INT: 0, S.UINT: 0, S.BOOL: False, S.ADDRESS: NULL}[t]
 
 
-def initial_state(system: System, user_balances: Dict[str, int]) -> State:
-    contracts = {c.name for c in system.contracts}
+def initial_state(system: System, balances: Dict[str, int]) -> State:
+    """An initial state: the given (nonnegative) balances, 0 for the other addresses."""
     return State(
-        balance={a: (0 if a in contracts else user_balances.get(a, 0)) for a in system.addresses},
+        balance={a: balances.get(a, 0) for a in system.addresses},
         constructed={c.name: False for c in system.contracts},
         fields={(c.name, f.name): default(f.type, system)
                 for c in system.contracts for f in c.fields})
@@ -104,7 +105,7 @@ class Interpreter:
         if c is None or tx.method[0] != c.name:
             raise Revert
         p = c.proc(tx.method[1])
-        if tx.sender in (NULL, c.name):
+        if tx.sender not in self.system.users:
             raise Revert
         if self.system.uses_block_num:
             st.block_num = tx.block_num

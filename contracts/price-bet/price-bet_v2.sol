@@ -11,6 +11,7 @@ contract Bet {
 
     constructor(address oracle_addr, int initial_rate, int _timeout) payable {
         require(oracle_addr != this);
+        require(oracle_addr != null);
         require(_timeout > 0);
         owner = msg.sender;
         oracle = oracle_addr; 

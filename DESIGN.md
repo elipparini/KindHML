@@ -58,8 +58,9 @@ encoder computes the terms of ē and e at level i, and encodes `body` from level
 *frame* where `msg.sender` is D's caller C, `msg.value` is the term of e, and each parameter
 of g is the term of its actual parameter. So an argument such as `balance` denotes the
 balance before the transfer of `e`. The division guard of a call covers ē and e
-(Appendix `app:correctness:transition`). Internal calls have no transaction guard
-(`sender != null && sender != C`): their sender is a contract.
+(Appendix `app:correctness:transition`). The guard on the sender, `require(is_EOA(sender))`,
+belongs to the transaction (`desugar.procedure`), not to the body (`desugar.callee`): in
+an unfolded call, the sender is the calling contract.
 
 ### Lemmas
 
@@ -95,7 +96,7 @@ The child state `SVars^{V'}` is obtained in one of four ways (`--mode`):
 
 Quantifiers over the finite types `address` and `method` are expanded into finite
 conjunctions/disjunctions (A1; `--expand`). This matters: with symbolic senders, the revert
-conditions of the transaction guards (`sender != null && sender != C`) occur under the inner
+conditions of the transaction guard on the sender (`is_EOA(sender)`) occur under the inner
 quantifiers, and the solvers fail to find witnesses of outer existentials (e.g. regression
 `additivity` P1: unknown after 30 s without expansion, valid in 0.2 s with it).
 Quantifiers over records break Kind 2's BMC and k-induction, so an `args` variable is expanded
@@ -134,17 +135,25 @@ cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the
 * A6 (no `sender`/`value` in formulas): type checker.
 * A7 (each `args` variable in exactly one modality): type checker.
 
-## 4. Deviations from the paper
+## 4. Choices of the tool and deviations from the paper
 
-Each item is also recorded as a `\CL{...}` note in the paper.
+Choices first recorded as `\CL` notes and now stated in the paper (after M5, with the user):
 
-1. **uint.** A field or parameter of type `uint` is an integer. An assignment of a negative value
-   to a `uint` field reverts; a negative actual value for a `uint` parameter reverts. Quantified
-   `uint` variables, and the components of `args` variables for `uint` parameters, range over
-   the naturals.
-2. **null sender.** Transactions whose sender is `null` revert (extra premise of A5). Every
-   procedure starts with `require(sender != null && sender != C)`: the second conjunct is
-   A5(iv), which the paper's `initPay` enforces only for payable procedures.
+1. **uint** (Sect. `sec:contracts`). A field or parameter of type `uint` is an integer. An
+   assignment of a negative value to a `uint` field reverts; a negative actual value for a
+   `uint` parameter reverts. Quantified `uint` variables, and the components of `args`
+   variables for `uint` parameters, range over the naturals.
+2. **Senders** (Sect. `sec:encoding:contract`, A5(iv)). A transaction is sent by a user:
+   it starts with `require(is_EOA(sender))`, i.e. the sender is neither `null` nor a
+   contract. Unfolded contract calls have no such guard (see Contract calls).
+2b. **Init.** Every address, contracts included, has a nonnegative initial balance.
+2c. **Domains** (Sect. `sec:logic:syntax`). Address quantifiers range over all addresses
+   except `null`; method quantifiers over the procedures other than the constructors (a
+   constructor can still be named explicitly in a modality). The predicate `is_EOA(e)`
+   (tool only, not in the paper) holds iff `e` is neither `null` nor a contract address.
+
+Deviations, still recorded as `\CL` notes in the paper where relevant:
+
 3. **block.number.** State variable `block_num` (initially 0) and transition variable
    `Tx.block_num`. A transaction sets `block_num = Tx.block_num` before `initPay`; as for any
    state variable, a revert restores the old value. The environment only produces
@@ -155,10 +164,5 @@ Each item is also recorded as a `\CL{...}` note in the paper.
 4b. **Division** is Euclidean (SMT-LIB `div`/`mod`); the paper does not fix the rounding.
    In contracts, expressions are strict: a division by zero anywhere in a statement's direct
    expressions reverts, also under `&&`/`||` (this is `def^i(s)`).
-4c. **Method quantifiers** range over the procedures other than the constructors (which, as
-   in Solidity, cannot be called after deployment). The paper's `Methods` includes them.
-   A constructor can still be named explicitly in a modality.
-5. **Address quantifiers** range over all addresses except `null`. The predicate `is_EOA(e)`
-   (new) holds iff `e` is neither `null` nor a contract address.
 6. **Unconstructed states.** The checked property is `(∧_C constructed_C) → Φ(φ)`, i.e. `φ` is
    required only in reachable states where all contracts are constructed.

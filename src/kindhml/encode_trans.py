@@ -367,16 +367,9 @@ class Encoder:
                           equations=[("r", result)], comment="Trans")
 
     def init(self) -> L.Function:
-        """Init: EOA balances are given (and nonnegative, see the main node), contract
-        balances are 0, contracts are not constructed, all other variables have default values."""
-        contracts = {c.name for c in self.system.contracts}
-        ib = L.Var("ib")
-        values = {
-            BALANCE: L.record(map_type(S.INT), [
-                (key_field(a), L.Int(0) if a in contracts else L.Proj(ib, key_field(a)))
-                for a in self.system.addresses]),
-            REVERT: L.FALSE,
-        }
+        """Init: the balances are given (and nonnegative, see the main node), contracts are
+        not constructed, all other variables have default values."""
+        values = {BALANCE: L.Var("ib"), REVERT: L.FALSE}
         for c in self.system.contracts:
             values[constructed_var(c.name)] = L.FALSE
             for f in c.fields:
@@ -424,9 +417,8 @@ class Encoder:
     def main_node(self) -> L.Function:
         """The transition system: s = Init -> pre Trans(s, t)."""
         s, t, ib = L.Var("s"), L.Var("t"), L.Var("ib")
-        contracts = {c.name for c in self.system.contracts}
         asserts = [L.conj([L.op(">=", L.Proj(ib, key_field(a)), L.Int(0))
-                           for a in self.system.addresses if a not in contracts])]
+                           for a in self.system.addresses])]
         if self.system.uses_block_num:
             asserts.append(L.op(">=", L.Proj(t, BLOCK), L.Proj(s, BLOCK)))
         return L.Function(
