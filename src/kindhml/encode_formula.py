@@ -12,10 +12,10 @@ The modality  Φ^{V,E}(⟨e_s : C.e_f(ē) $ e_v⟩ψ)  is encoded in one of two 
   since Trans is a function (Lemma `lem:transition`).
 
 In both modes the transition variables are those fixed by the modality (sender, cx, fx, value,
-EqParams); the ones that are not fixed (parameters of other procedures) take an arbitrary
-value, since Trans does not depend on them. The parameters of `h()` with h a method
-variable, and the block number (if used), are existentially quantified (extensions, see
-DESIGN.md).
+EqParams, and the increase `blocks` of the block number, 0 when omitted); the ones that are
+not fixed (parameters of other procedures) take an arbitrary value, since Trans does not
+depend on them. The parameters of `h()` with h a method variable are existentially
+quantified (extension, see DESIGN.md).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 from . import desugar
 from . import lustre as L
 from . import syntax as S
-from .encode_trans import (BLOCK, REVERT, TX, Encoder, addr_const, base_type, constructed_var,
+from .encode_trans import (BLOCKS, REVERT, TX, Encoder, addr_const, base_type, constructed_var,
                            default_value, key_field, param_var, proc_const)
 from .errors import KindHMLError
 from .lustre_subst import Inliner, eq, free_vars, ite
@@ -175,10 +175,7 @@ class FormulaEncoder:
             pv = param_var(v.contract, v.proc, v.name)
             fields[pv] = params.get(pv, default_value(v.type, self.system))
         if self.system.uses_block_num:
-            name = self.fresh("blk")
-            decls.append((name, "int"))
-            guards.append(L.op(">=", L.Var(name), L.proj(node.state, BLOCK)))
-            fields[BLOCK] = L.Var(name)
+            fields[BLOCKS] = here(e.blocks)
         tx = L.record(TX, [(n, fields[n]) for n, _ in self.enc.tx_fields()])
         if self.mode == "subst":
             child = Node(L.call("trans", node.state, tx), node)

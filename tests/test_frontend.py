@@ -75,6 +75,12 @@ def test_quantifier_and_modality_bodies_extend_right():
         "((funds[a] > 0) && !lastReverted))))")
 
 
+def test_block_increase_in_modality():
+    assert formula("forall a : address . forall n : uint . "
+                   "<< a : Bank . deposit() $ 1 @ n + 1 >> true") == (
+        "(forall a:address. (forall n:uint. (<< a : Bank.deposit() $ 1 @ (n + 1) >> true)))")
+
+
 def test_implication_is_right_associative():
     assert formula("true -> false -> true") == "(true -> (false -> true))"
 

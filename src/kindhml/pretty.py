@@ -26,8 +26,10 @@ def expr(e: S.Expr) -> str:
         return f"({e.kind} {e.var}:{e.type}. {expr(e.body)})"
     if isinstance(e, S.Modal):
         args = ", ".join(map(expr, e.args))
-        return (f"(<< {expr(e.sender)} : {e.contract}.{expr(e.proc)}({args}) $ {expr(e.value)} >> "
-                f"{expr(e.body)})")
+        blocks = ("" if isinstance(e.blocks, S.IntLit) and e.blocks.value == 0
+                  else f" @ {expr(e.blocks)}")
+        return (f"(<< {expr(e.sender)} : {e.contract}.{expr(e.proc)}({args}) $ {expr(e.value)}"
+                f"{blocks} >> {expr(e.body)})")
     if isinstance(e, S.Field):
         return e.name
     if isinstance(e, S.Param):

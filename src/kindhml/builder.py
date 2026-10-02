@@ -252,12 +252,14 @@ class _Builder(KindHMLVisitor):
         pos = _pos(ctx)
         exprs = ctx.expr()
         sender = self.visit(ctx.sender)
-        # expr() lists sender, the actual parameters, the value (if any), the body.
+        # expr() lists sender, the actual parameters, the value and the block increase (if
+        # any), the body.
         args = self._exprs(ctx.exprs())
         value = self.visit(ctx.value) if ctx.value else S.IntLit(0, pos)
+        blocks = self.visit(ctx.blocks) if ctx.blocks else S.IntLit(0, pos)
         body = self.visit(exprs[-1])
         return S.Modal(sender, ctx.contractName.text, S.Name(ctx.proc.text, _pos(ctx.proc)),
-                       args, value, body, pos)
+                       args, value, blocks, body, pos)
 
 
 def parse(text: str) -> S.Program:

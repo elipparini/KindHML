@@ -63,8 +63,6 @@ def test_formula_matches_reference(path, rule_name, mode, expand):
             if left <= 0:
                 break
             st = T.random_reachable_state(system, rnd, interp)
-            if st.block_num not in INTS:
-                continue
             signal.setitimer(signal.ITIMER_REAL, left)
             try:
                 state = lev.eval(T.state_literal(st, system, enc), {})

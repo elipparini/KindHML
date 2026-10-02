@@ -143,16 +143,18 @@ class Quant(Expr):
 
 @dataclass(frozen=True)
 class Modal(Expr):
-    """`<< sender : contract . proc(args) $ value >> body`.
+    """`<< sender : contract . proc(args) $ value @ blocks >> body`.
 
     `proc` is a `Name` in the raw AST, and a `ProcConst` or `QVar` of type
-    method in the resolved AST.
+    method in the resolved AST. `blocks` is the increase of the block number made by the
+    transaction (0 when omitted).
     """
     sender: Expr
     contract: str
     proc: Expr
     args: Tuple[Expr, ...]
     value: Expr
+    blocks: Expr
     body: Expr
     pos: Pos = _pos()
 
@@ -307,8 +309,8 @@ class Constructed(Expr):
 
 
 @dataclass(frozen=True)
-class TxBlockNum(Expr):
-    """The block number carried by the transaction (extension, see DESIGN.md)."""
+class TxBlocks(Expr):
+    """The increase of the block number carried by the transaction (see DESIGN.md)."""
     pos: Pos = _pos()
 
 
@@ -341,7 +343,7 @@ class SetConstructed(Stmt):
 
 @dataclass(frozen=True)
 class SetBlockNum(Stmt):
-    """block_num := Tx.block_num."""
+    """block_num := block_num + Tx.blocks."""
     pos: Pos = _pos()
 
 

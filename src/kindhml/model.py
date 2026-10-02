@@ -16,12 +16,18 @@ NULL = "null"
 
 
 def _uses_block_num(program: S.Program) -> bool:
+    """Whether `block.number` occurs, or a modality increases the block number (`@ e` with
+    `e` not the literal 0: a negative increase reverts, so it matters also then)."""
     found = False
 
     def visit(x):
         nonlocal found
         if isinstance(x, S.BlockNum):
             found = True
+        elif isinstance(x, S.Modal) and not (isinstance(x.blocks, S.IntLit)
+                                             and x.blocks.value == 0):
+            found = True
+            visit(x.body)
         elif isinstance(x, tuple):
             for y in x:
                 visit(y)

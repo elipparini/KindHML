@@ -305,6 +305,8 @@ class Checker:
             raise _err(f"unknown contract '{e.contract}'", e)
         sender = self._expect(e.sender, S.ADDRESS, ctx)
         value = self._expect(e.value, S.INT, ctx)
+        # a uint: a negative increase makes the transaction revert, like a negative value
+        blocks = self._expect(e.blocks, S.INT, ctx)
         name = e.proc.name
         if ctx.env.get(name) == S.METHOD:
             proc: S.Expr = S.QVar(name, S.METHOD, e.proc.pos)
@@ -316,7 +318,8 @@ class Checker:
             raise _err(f"'{name}' is neither a procedure of {c.name} nor a variable of type"
                        " method", e.proc)
         body = self._expect(e.body, S.BOOL, ctx.at(ctx.depth + 1))
-        return replace(e, sender=sender, proc=proc, args=args, value=value, body=body), S.BOOL
+        return replace(e, sender=sender, proc=proc, args=args, value=value, blocks=blocks,
+                       body=body), S.BOOL
 
     def _method_var_args(self, e: S.Modal, ctx: _Ctx) -> Tuple[S.Expr, ...]:
         """`h(a)` with `a : calldataargs`, or `h()` (parameters existentially quantified)."""

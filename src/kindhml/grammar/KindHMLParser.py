@@ -10,7 +10,7 @@ else:
 
 def serializedATN():
     return [
-        4,1,61,289,2,0,7,0,2,1,7,1,2,2,7,2,2,3,7,3,2,4,7,4,2,5,7,5,2,6,7,
+        4,1,62,293,2,0,7,0,2,1,7,1,2,2,7,2,2,3,7,3,2,4,7,4,2,5,7,5,2,6,7,
         6,2,7,7,7,2,8,7,8,2,9,7,9,2,10,7,10,2,11,7,11,2,12,7,12,2,13,7,13,
         2,14,7,14,2,15,7,15,1,0,4,0,34,8,0,11,0,12,0,35,1,0,5,0,39,8,0,10,
         0,12,0,42,9,0,1,0,1,0,1,1,1,1,1,1,1,1,5,1,50,8,1,10,1,12,1,53,9,
@@ -28,95 +28,96 @@ def serializedATN():
         1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,
         1,14,3,14,216,8,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,
         1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,3,14,235,8,14,1,14,1,14,
-        1,14,3,14,240,8,14,1,14,1,14,1,14,3,14,245,8,14,1,14,1,14,1,14,1,
-        14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,
-        14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,5,
-        14,276,8,14,10,14,12,14,279,9,14,1,15,1,15,1,15,5,15,284,8,15,10,
-        15,12,15,287,9,15,1,15,0,1,28,16,0,2,4,6,8,10,12,14,16,18,20,22,
-        24,26,28,30,0,13,1,0,9,11,1,0,25,27,2,0,13,16,58,58,1,0,32,33,1,
-        0,35,36,1,0,53,54,1,0,37,39,2,0,36,36,40,40,1,0,41,44,1,0,45,46,
-        1,0,47,48,1,0,49,50,1,0,51,52,324,0,33,1,0,0,0,2,45,1,0,0,0,4,88,
-        1,0,0,0,6,90,1,0,0,0,8,92,1,0,0,0,10,100,1,0,0,0,12,114,1,0,0,0,
-        14,116,1,0,0,0,16,122,1,0,0,0,18,174,1,0,0,0,20,178,1,0,0,0,22,180,
-        1,0,0,0,24,186,1,0,0,0,26,188,1,0,0,0,28,244,1,0,0,0,30,280,1,0,
-        0,0,32,34,3,2,1,0,33,32,1,0,0,0,34,35,1,0,0,0,35,33,1,0,0,0,35,36,
-        1,0,0,0,36,40,1,0,0,0,37,39,3,22,11,0,38,37,1,0,0,0,39,42,1,0,0,
-        0,40,38,1,0,0,0,40,41,1,0,0,0,41,43,1,0,0,0,42,40,1,0,0,0,43,44,
-        5,0,0,1,44,1,1,0,0,0,45,46,5,1,0,0,46,47,5,58,0,0,47,51,5,2,0,0,
-        48,50,3,4,2,0,49,48,1,0,0,0,50,53,1,0,0,0,51,49,1,0,0,0,51,52,1,
-        0,0,0,52,54,1,0,0,0,53,51,1,0,0,0,54,55,5,3,0,0,55,3,1,0,0,0,56,
-        57,3,12,6,0,57,59,5,58,0,0,58,60,5,4,0,0,59,58,1,0,0,0,59,60,1,0,
-        0,0,60,89,1,0,0,0,61,62,5,5,0,0,62,64,5,6,0,0,63,65,3,8,4,0,64,63,
-        1,0,0,0,64,65,1,0,0,0,65,66,1,0,0,0,66,70,5,7,0,0,67,69,3,6,3,0,
-        68,67,1,0,0,0,69,72,1,0,0,0,70,68,1,0,0,0,70,71,1,0,0,0,71,73,1,
-        0,0,0,72,70,1,0,0,0,73,89,3,14,7,0,74,75,5,8,0,0,75,76,5,58,0,0,
-        76,78,5,6,0,0,77,79,3,8,4,0,78,77,1,0,0,0,78,79,1,0,0,0,79,80,1,
-        0,0,0,80,84,5,7,0,0,81,83,3,6,3,0,82,81,1,0,0,0,83,86,1,0,0,0,84,
-        82,1,0,0,0,84,85,1,0,0,0,85,87,1,0,0,0,86,84,1,0,0,0,87,89,3,14,
-        7,0,88,56,1,0,0,0,88,61,1,0,0,0,88,74,1,0,0,0,89,5,1,0,0,0,90,91,
-        7,0,0,0,91,7,1,0,0,0,92,97,3,10,5,0,93,94,5,12,0,0,94,96,3,10,5,
-        0,95,93,1,0,0,0,96,99,1,0,0,0,97,95,1,0,0,0,97,98,1,0,0,0,98,9,1,
-        0,0,0,99,97,1,0,0,0,100,101,3,12,6,0,101,102,5,58,0,0,102,11,1,0,
-        0,0,103,115,5,13,0,0,104,115,5,14,0,0,105,115,5,15,0,0,106,115,5,
-        16,0,0,107,108,5,17,0,0,108,109,5,6,0,0,109,110,5,16,0,0,110,111,
-        5,18,0,0,111,112,3,12,6,0,112,113,5,7,0,0,113,115,1,0,0,0,114,103,
-        1,0,0,0,114,104,1,0,0,0,114,105,1,0,0,0,114,106,1,0,0,0,114,107,
-        1,0,0,0,115,13,1,0,0,0,116,118,5,2,0,0,117,119,3,16,8,0,118,117,
-        1,0,0,0,118,119,1,0,0,0,119,120,1,0,0,0,120,121,5,3,0,0,121,15,1,
-        0,0,0,122,127,3,18,9,0,123,124,5,4,0,0,124,126,3,18,9,0,125,123,
-        1,0,0,0,126,129,1,0,0,0,127,125,1,0,0,0,127,128,1,0,0,0,128,131,
-        1,0,0,0,129,127,1,0,0,0,130,132,5,4,0,0,131,130,1,0,0,0,131,132,
-        1,0,0,0,132,17,1,0,0,0,133,175,5,19,0,0,134,135,5,20,0,0,135,136,
-        5,6,0,0,136,137,3,28,14,0,137,138,5,7,0,0,138,175,1,0,0,0,139,140,
-        5,21,0,0,140,141,5,6,0,0,141,142,3,28,14,0,142,143,5,7,0,0,143,146,
-        3,20,10,0,144,145,5,22,0,0,145,147,3,20,10,0,146,144,1,0,0,0,146,
-        147,1,0,0,0,147,175,1,0,0,0,148,153,5,58,0,0,149,150,5,23,0,0,150,
-        151,3,28,14,0,151,152,5,24,0,0,152,154,1,0,0,0,153,149,1,0,0,0,153,
-        154,1,0,0,0,154,155,1,0,0,0,155,156,7,1,0,0,156,175,3,28,14,0,157,
-        158,3,28,14,0,158,159,5,28,0,0,159,160,5,58,0,0,160,162,5,6,0,0,
-        161,163,3,30,15,0,162,161,1,0,0,0,162,163,1,0,0,0,163,164,1,0,0,
-        0,164,167,5,7,0,0,165,166,5,29,0,0,166,168,3,28,14,0,167,165,1,0,
-        0,0,167,168,1,0,0,0,168,175,1,0,0,0,169,175,3,14,7,0,170,171,5,6,
-        0,0,171,172,3,16,8,0,172,173,5,7,0,0,173,175,1,0,0,0,174,133,1,0,
-        0,0,174,134,1,0,0,0,174,139,1,0,0,0,174,148,1,0,0,0,174,157,1,0,
-        0,0,174,169,1,0,0,0,174,170,1,0,0,0,175,19,1,0,0,0,176,179,3,14,
-        7,0,177,179,3,18,9,0,178,176,1,0,0,0,178,177,1,0,0,0,179,21,1,0,
-        0,0,180,181,5,30,0,0,181,182,5,58,0,0,182,183,5,2,0,0,183,184,3,
-        28,14,0,184,185,5,3,0,0,185,23,1,0,0,0,186,187,7,2,0,0,187,25,1,
-        0,0,0,188,193,5,58,0,0,189,190,5,12,0,0,190,192,5,58,0,0,191,189,
-        1,0,0,0,192,195,1,0,0,0,193,191,1,0,0,0,193,194,1,0,0,0,194,196,
-        1,0,0,0,195,193,1,0,0,0,196,197,5,31,0,0,197,198,3,24,12,0,198,27,
-        1,0,0,0,199,200,6,14,-1,0,200,201,5,6,0,0,201,202,3,28,14,0,202,
-        203,5,7,0,0,203,245,1,0,0,0,204,245,5,57,0,0,205,245,7,3,0,0,206,
-        245,5,34,0,0,207,208,5,9,0,0,208,209,5,6,0,0,209,210,3,28,14,0,210,
-        211,5,7,0,0,211,245,1,0,0,0,212,213,5,58,0,0,213,215,5,6,0,0,214,
-        216,3,30,15,0,215,214,1,0,0,0,215,216,1,0,0,0,216,217,1,0,0,0,217,
-        245,5,7,0,0,218,245,5,58,0,0,219,220,7,4,0,0,220,245,3,28,14,10,
-        221,222,7,5,0,0,222,223,3,26,13,0,223,224,5,28,0,0,224,225,3,28,
-        14,2,225,245,1,0,0,0,226,227,5,55,0,0,227,228,3,28,14,0,228,229,
-        5,31,0,0,229,230,5,58,0,0,230,231,5,28,0,0,231,232,5,58,0,0,232,
-        234,5,6,0,0,233,235,3,30,15,0,234,233,1,0,0,0,234,235,1,0,0,0,235,
-        236,1,0,0,0,236,239,5,7,0,0,237,238,5,29,0,0,238,240,3,28,14,0,239,
-        237,1,0,0,0,239,240,1,0,0,0,240,241,1,0,0,0,241,242,5,56,0,0,242,
-        243,3,28,14,1,243,245,1,0,0,0,244,199,1,0,0,0,244,204,1,0,0,0,244,
-        205,1,0,0,0,244,206,1,0,0,0,244,207,1,0,0,0,244,212,1,0,0,0,244,
-        218,1,0,0,0,244,219,1,0,0,0,244,221,1,0,0,0,244,226,1,0,0,0,245,
-        277,1,0,0,0,246,247,10,9,0,0,247,248,7,6,0,0,248,276,3,28,14,10,
-        249,250,10,8,0,0,250,251,7,7,0,0,251,276,3,28,14,9,252,253,10,7,
-        0,0,253,254,7,8,0,0,254,276,3,28,14,8,255,256,10,6,0,0,256,257,7,
-        9,0,0,257,276,3,28,14,7,258,259,10,5,0,0,259,260,7,10,0,0,260,276,
-        3,28,14,6,261,262,10,4,0,0,262,263,7,11,0,0,263,276,3,28,14,5,264,
-        265,10,3,0,0,265,266,7,12,0,0,266,276,3,28,14,3,267,268,10,12,0,
-        0,268,269,5,28,0,0,269,276,5,58,0,0,270,271,10,11,0,0,271,272,5,
-        23,0,0,272,273,3,28,14,0,273,274,5,24,0,0,274,276,1,0,0,0,275,246,
-        1,0,0,0,275,249,1,0,0,0,275,252,1,0,0,0,275,255,1,0,0,0,275,258,
-        1,0,0,0,275,261,1,0,0,0,275,264,1,0,0,0,275,267,1,0,0,0,275,270,
-        1,0,0,0,276,279,1,0,0,0,277,275,1,0,0,0,277,278,1,0,0,0,278,29,1,
-        0,0,0,279,277,1,0,0,0,280,285,3,28,14,0,281,282,5,12,0,0,282,284,
-        3,28,14,0,283,281,1,0,0,0,284,287,1,0,0,0,285,283,1,0,0,0,285,286,
-        1,0,0,0,286,31,1,0,0,0,287,285,1,0,0,0,28,35,40,51,59,64,70,78,84,
-        88,97,114,118,127,131,146,153,162,167,174,178,193,215,234,239,244,
-        275,277,285
+        1,14,3,14,240,8,14,1,14,1,14,3,14,244,8,14,1,14,1,14,1,14,3,14,249,
+        8,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,
+        1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,1,14,
+        1,14,1,14,1,14,1,14,5,14,280,8,14,10,14,12,14,283,9,14,1,15,1,15,
+        1,15,5,15,288,8,15,10,15,12,15,291,9,15,1,15,0,1,28,16,0,2,4,6,8,
+        10,12,14,16,18,20,22,24,26,28,30,0,13,1,0,9,11,1,0,25,27,2,0,13,
+        16,59,59,1,0,32,33,1,0,35,36,1,0,53,54,1,0,37,39,2,0,36,36,40,40,
+        1,0,41,44,1,0,45,46,1,0,47,48,1,0,49,50,1,0,51,52,329,0,33,1,0,0,
+        0,2,45,1,0,0,0,4,88,1,0,0,0,6,90,1,0,0,0,8,92,1,0,0,0,10,100,1,0,
+        0,0,12,114,1,0,0,0,14,116,1,0,0,0,16,122,1,0,0,0,18,174,1,0,0,0,
+        20,178,1,0,0,0,22,180,1,0,0,0,24,186,1,0,0,0,26,188,1,0,0,0,28,248,
+        1,0,0,0,30,284,1,0,0,0,32,34,3,2,1,0,33,32,1,0,0,0,34,35,1,0,0,0,
+        35,33,1,0,0,0,35,36,1,0,0,0,36,40,1,0,0,0,37,39,3,22,11,0,38,37,
+        1,0,0,0,39,42,1,0,0,0,40,38,1,0,0,0,40,41,1,0,0,0,41,43,1,0,0,0,
+        42,40,1,0,0,0,43,44,5,0,0,1,44,1,1,0,0,0,45,46,5,1,0,0,46,47,5,59,
+        0,0,47,51,5,2,0,0,48,50,3,4,2,0,49,48,1,0,0,0,50,53,1,0,0,0,51,49,
+        1,0,0,0,51,52,1,0,0,0,52,54,1,0,0,0,53,51,1,0,0,0,54,55,5,3,0,0,
+        55,3,1,0,0,0,56,57,3,12,6,0,57,59,5,59,0,0,58,60,5,4,0,0,59,58,1,
+        0,0,0,59,60,1,0,0,0,60,89,1,0,0,0,61,62,5,5,0,0,62,64,5,6,0,0,63,
+        65,3,8,4,0,64,63,1,0,0,0,64,65,1,0,0,0,65,66,1,0,0,0,66,70,5,7,0,
+        0,67,69,3,6,3,0,68,67,1,0,0,0,69,72,1,0,0,0,70,68,1,0,0,0,70,71,
+        1,0,0,0,71,73,1,0,0,0,72,70,1,0,0,0,73,89,3,14,7,0,74,75,5,8,0,0,
+        75,76,5,59,0,0,76,78,5,6,0,0,77,79,3,8,4,0,78,77,1,0,0,0,78,79,1,
+        0,0,0,79,80,1,0,0,0,80,84,5,7,0,0,81,83,3,6,3,0,82,81,1,0,0,0,83,
+        86,1,0,0,0,84,82,1,0,0,0,84,85,1,0,0,0,85,87,1,0,0,0,86,84,1,0,0,
+        0,87,89,3,14,7,0,88,56,1,0,0,0,88,61,1,0,0,0,88,74,1,0,0,0,89,5,
+        1,0,0,0,90,91,7,0,0,0,91,7,1,0,0,0,92,97,3,10,5,0,93,94,5,12,0,0,
+        94,96,3,10,5,0,95,93,1,0,0,0,96,99,1,0,0,0,97,95,1,0,0,0,97,98,1,
+        0,0,0,98,9,1,0,0,0,99,97,1,0,0,0,100,101,3,12,6,0,101,102,5,59,0,
+        0,102,11,1,0,0,0,103,115,5,13,0,0,104,115,5,14,0,0,105,115,5,15,
+        0,0,106,115,5,16,0,0,107,108,5,17,0,0,108,109,5,6,0,0,109,110,5,
+        16,0,0,110,111,5,18,0,0,111,112,3,12,6,0,112,113,5,7,0,0,113,115,
+        1,0,0,0,114,103,1,0,0,0,114,104,1,0,0,0,114,105,1,0,0,0,114,106,
+        1,0,0,0,114,107,1,0,0,0,115,13,1,0,0,0,116,118,5,2,0,0,117,119,3,
+        16,8,0,118,117,1,0,0,0,118,119,1,0,0,0,119,120,1,0,0,0,120,121,5,
+        3,0,0,121,15,1,0,0,0,122,127,3,18,9,0,123,124,5,4,0,0,124,126,3,
+        18,9,0,125,123,1,0,0,0,126,129,1,0,0,0,127,125,1,0,0,0,127,128,1,
+        0,0,0,128,131,1,0,0,0,129,127,1,0,0,0,130,132,5,4,0,0,131,130,1,
+        0,0,0,131,132,1,0,0,0,132,17,1,0,0,0,133,175,5,19,0,0,134,135,5,
+        20,0,0,135,136,5,6,0,0,136,137,3,28,14,0,137,138,5,7,0,0,138,175,
+        1,0,0,0,139,140,5,21,0,0,140,141,5,6,0,0,141,142,3,28,14,0,142,143,
+        5,7,0,0,143,146,3,20,10,0,144,145,5,22,0,0,145,147,3,20,10,0,146,
+        144,1,0,0,0,146,147,1,0,0,0,147,175,1,0,0,0,148,153,5,59,0,0,149,
+        150,5,23,0,0,150,151,3,28,14,0,151,152,5,24,0,0,152,154,1,0,0,0,
+        153,149,1,0,0,0,153,154,1,0,0,0,154,155,1,0,0,0,155,156,7,1,0,0,
+        156,175,3,28,14,0,157,158,3,28,14,0,158,159,5,28,0,0,159,160,5,59,
+        0,0,160,162,5,6,0,0,161,163,3,30,15,0,162,161,1,0,0,0,162,163,1,
+        0,0,0,163,164,1,0,0,0,164,167,5,7,0,0,165,166,5,29,0,0,166,168,3,
+        28,14,0,167,165,1,0,0,0,167,168,1,0,0,0,168,175,1,0,0,0,169,175,
+        3,14,7,0,170,171,5,6,0,0,171,172,3,16,8,0,172,173,5,7,0,0,173,175,
+        1,0,0,0,174,133,1,0,0,0,174,134,1,0,0,0,174,139,1,0,0,0,174,148,
+        1,0,0,0,174,157,1,0,0,0,174,169,1,0,0,0,174,170,1,0,0,0,175,19,1,
+        0,0,0,176,179,3,14,7,0,177,179,3,18,9,0,178,176,1,0,0,0,178,177,
+        1,0,0,0,179,21,1,0,0,0,180,181,5,30,0,0,181,182,5,59,0,0,182,183,
+        5,2,0,0,183,184,3,28,14,0,184,185,5,3,0,0,185,23,1,0,0,0,186,187,
+        7,2,0,0,187,25,1,0,0,0,188,193,5,59,0,0,189,190,5,12,0,0,190,192,
+        5,59,0,0,191,189,1,0,0,0,192,195,1,0,0,0,193,191,1,0,0,0,193,194,
+        1,0,0,0,194,196,1,0,0,0,195,193,1,0,0,0,196,197,5,31,0,0,197,198,
+        3,24,12,0,198,27,1,0,0,0,199,200,6,14,-1,0,200,201,5,6,0,0,201,202,
+        3,28,14,0,202,203,5,7,0,0,203,249,1,0,0,0,204,249,5,58,0,0,205,249,
+        7,3,0,0,206,249,5,34,0,0,207,208,5,9,0,0,208,209,5,6,0,0,209,210,
+        3,28,14,0,210,211,5,7,0,0,211,249,1,0,0,0,212,213,5,59,0,0,213,215,
+        5,6,0,0,214,216,3,30,15,0,215,214,1,0,0,0,215,216,1,0,0,0,216,217,
+        1,0,0,0,217,249,5,7,0,0,218,249,5,59,0,0,219,220,7,4,0,0,220,249,
+        3,28,14,10,221,222,7,5,0,0,222,223,3,26,13,0,223,224,5,28,0,0,224,
+        225,3,28,14,2,225,249,1,0,0,0,226,227,5,55,0,0,227,228,3,28,14,0,
+        228,229,5,31,0,0,229,230,5,59,0,0,230,231,5,28,0,0,231,232,5,59,
+        0,0,232,234,5,6,0,0,233,235,3,30,15,0,234,233,1,0,0,0,234,235,1,
+        0,0,0,235,236,1,0,0,0,236,239,5,7,0,0,237,238,5,29,0,0,238,240,3,
+        28,14,0,239,237,1,0,0,0,239,240,1,0,0,0,240,243,1,0,0,0,241,242,
+        5,56,0,0,242,244,3,28,14,0,243,241,1,0,0,0,243,244,1,0,0,0,244,245,
+        1,0,0,0,245,246,5,57,0,0,246,247,3,28,14,1,247,249,1,0,0,0,248,199,
+        1,0,0,0,248,204,1,0,0,0,248,205,1,0,0,0,248,206,1,0,0,0,248,207,
+        1,0,0,0,248,212,1,0,0,0,248,218,1,0,0,0,248,219,1,0,0,0,248,221,
+        1,0,0,0,248,226,1,0,0,0,249,281,1,0,0,0,250,251,10,9,0,0,251,252,
+        7,6,0,0,252,280,3,28,14,10,253,254,10,8,0,0,254,255,7,7,0,0,255,
+        280,3,28,14,9,256,257,10,7,0,0,257,258,7,8,0,0,258,280,3,28,14,8,
+        259,260,10,6,0,0,260,261,7,9,0,0,261,280,3,28,14,7,262,263,10,5,
+        0,0,263,264,7,10,0,0,264,280,3,28,14,6,265,266,10,4,0,0,266,267,
+        7,11,0,0,267,280,3,28,14,5,268,269,10,3,0,0,269,270,7,12,0,0,270,
+        280,3,28,14,3,271,272,10,12,0,0,272,273,5,28,0,0,273,280,5,59,0,
+        0,274,275,10,11,0,0,275,276,5,23,0,0,276,277,3,28,14,0,277,278,5,
+        24,0,0,278,280,1,0,0,0,279,250,1,0,0,0,279,253,1,0,0,0,279,256,1,
+        0,0,0,279,259,1,0,0,0,279,262,1,0,0,0,279,265,1,0,0,0,279,268,1,
+        0,0,0,279,271,1,0,0,0,279,274,1,0,0,0,280,283,1,0,0,0,281,279,1,
+        0,0,0,281,282,1,0,0,0,282,29,1,0,0,0,283,281,1,0,0,0,284,289,3,28,
+        14,0,285,286,5,12,0,0,286,288,3,28,14,0,287,285,1,0,0,0,288,291,
+        1,0,0,0,289,287,1,0,0,0,289,290,1,0,0,0,290,31,1,0,0,0,291,289,1,
+        0,0,0,29,35,40,51,59,64,70,78,84,88,97,114,118,127,131,146,153,162,
+        167,174,178,193,215,234,239,243,248,279,281,289
     ]
 
 class KindHMLParser ( Parser ):
@@ -138,7 +139,7 @@ class KindHMLParser ( Parser ):
                      "'!'", "'-'", "'*'", "'/'", "'%'", "'+'", "'<'", "'<='", 
                      "'>'", "'>='", "'=='", "'!='", "'&&'", "'and'", "'||'", 
                      "'or'", "'->'", "'implies'", "'forall'", "'exists'", 
-                     "'<<'", "'>>'" ]
+                     "'<<'", "'@'", "'>>'" ]
 
     symbolicNames = [ "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
@@ -154,8 +155,8 @@ class KindHMLParser ( Parser ):
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
                       "<INVALID>", "<INVALID>", "<INVALID>", "<INVALID>", 
-                      "<INVALID>", "INT", "ID", "LINE_COMMENT", "BLOCK_COMMENT", 
-                      "WS" ]
+                      "<INVALID>", "<INVALID>", "INT", "ID", "LINE_COMMENT", 
+                      "BLOCK_COMMENT", "WS" ]
 
     RULE_program = 0
     RULE_contract = 1
@@ -235,11 +236,12 @@ class KindHMLParser ( Parser ):
     T__53=54
     T__54=55
     T__55=56
-    INT=57
-    ID=58
-    LINE_COMMENT=59
-    BLOCK_COMMENT=60
-    WS=61
+    T__56=57
+    INT=58
+    ID=59
+    LINE_COMMENT=60
+    BLOCK_COMMENT=61
+    WS=62
 
     def __init__(self, input:TokenStream, output:TextIO = sys.stdout):
         super().__init__(input, output)
@@ -913,7 +915,7 @@ class KindHMLParser ( Parser ):
             self.state = 118
             self._errHandler.sync(self)
             _la = self._input.LA(1)
-            if (((_la) & ~0x3f) == 0 and ((1 << _la) & 495396092158411332) != 0):
+            if (((_la) & ~0x3f) == 0 and ((1 << _la) & 927741656385978948) != 0):
                 self.state = 117
                 self.stmts()
 
@@ -1253,7 +1255,7 @@ class KindHMLParser ( Parser ):
                 self.state = 162
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
-                if (((_la) & ~0x3f) == 0 and ((1 << _la) & 495396092154741312) != 0):
+                if (((_la) & ~0x3f) == 0 and ((1 << _la) & 927741656382308928) != 0):
                     self.state = 161
                     self.exprs()
 
@@ -1440,7 +1442,7 @@ class KindHMLParser ( Parser ):
             self.enterOuterAlt(localctx, 1)
             self.state = 186
             _la = self._input.LA(1)
-            if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 288230376151834624) != 0)):
+            if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 576460752303546368) != 0)):
                 self._errHandler.recoverInline(self)
             else:
                 self._errHandler.reportMatch(self)
@@ -1597,6 +1599,7 @@ class KindHMLParser ( Parser ):
             self.contractName = None # Token
             self.proc = None # Token
             self.value = None # ExprContext
+            self.blocks = None # ExprContext
             self.copyFrom(ctx)
 
         def expr(self, i:int=None):
@@ -1915,9 +1918,9 @@ class KindHMLParser ( Parser ):
         self._la = 0 # Token type
         try:
             self.enterOuterAlt(localctx, 1)
-            self.state = 244
+            self.state = 248
             self._errHandler.sync(self)
-            la_ = self._interp.adaptivePredict(self._input,24,self._ctx)
+            la_ = self._interp.adaptivePredict(self._input,25,self._ctx)
             if la_ == 1:
                 localctx = KindHMLParser.ParenExprContext(self, localctx)
                 self._ctx = localctx
@@ -1985,7 +1988,7 @@ class KindHMLParser ( Parser ):
                 self.state = 215
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
-                if (((_la) & ~0x3f) == 0 and ((1 << _la) & 495396092154741312) != 0):
+                if (((_la) & ~0x3f) == 0 and ((1 << _la) & 927741656382308928) != 0):
                     self.state = 214
                     self.exprs()
 
@@ -2059,7 +2062,7 @@ class KindHMLParser ( Parser ):
                 self.state = 234
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
-                if (((_la) & ~0x3f) == 0 and ((1 << _la) & 495396092154741312) != 0):
+                if (((_la) & ~0x3f) == 0 and ((1 << _la) & 927741656382308928) != 0):
                     self.state = 233
                     self.exprs()
 
@@ -2076,33 +2079,43 @@ class KindHMLParser ( Parser ):
                     localctx.value = self.expr(0)
 
 
-                self.state = 241
-                self.match(KindHMLParser.T__55)
-                self.state = 242
+                self.state = 243
+                self._errHandler.sync(self)
+                _la = self._input.LA(1)
+                if _la==56:
+                    self.state = 241
+                    self.match(KindHMLParser.T__55)
+                    self.state = 242
+                    localctx.blocks = self.expr(0)
+
+
+                self.state = 245
+                self.match(KindHMLParser.T__56)
+                self.state = 246
                 self.expr(1)
                 pass
 
 
             self._ctx.stop = self._input.LT(-1)
-            self.state = 277
+            self.state = 281
             self._errHandler.sync(self)
-            _alt = self._interp.adaptivePredict(self._input,26,self._ctx)
+            _alt = self._interp.adaptivePredict(self._input,27,self._ctx)
             while _alt!=2 and _alt!=ATN.INVALID_ALT_NUMBER:
                 if _alt==1:
                     if self._parseListeners is not None:
                         self.triggerExitRuleEvent()
                     _prevctx = localctx
-                    self.state = 275
+                    self.state = 279
                     self._errHandler.sync(self)
-                    la_ = self._interp.adaptivePredict(self._input,25,self._ctx)
+                    la_ = self._interp.adaptivePredict(self._input,26,self._ctx)
                     if la_ == 1:
                         localctx = KindHMLParser.MulExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 246
+                        self.state = 250
                         if not self.precpred(self._ctx, 9):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 9)")
-                        self.state = 247
+                        self.state = 251
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
                         if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 962072674304) != 0)):
@@ -2110,18 +2123,18 @@ class KindHMLParser ( Parser ):
                         else:
                             self._errHandler.reportMatch(self)
                             self.consume()
-                        self.state = 248
+                        self.state = 252
                         self.expr(10)
                         pass
 
                     elif la_ == 2:
                         localctx = KindHMLParser.AddExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 249
+                        self.state = 253
                         if not self.precpred(self._ctx, 8):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 8)")
-                        self.state = 250
+                        self.state = 254
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
                         if not(_la==36 or _la==40):
@@ -2129,18 +2142,18 @@ class KindHMLParser ( Parser ):
                         else:
                             self._errHandler.reportMatch(self)
                             self.consume()
-                        self.state = 251
+                        self.state = 255
                         self.expr(9)
                         pass
 
                     elif la_ == 3:
                         localctx = KindHMLParser.CmpExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 252
+                        self.state = 256
                         if not self.precpred(self._ctx, 7):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 7)")
-                        self.state = 253
+                        self.state = 257
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
                         if not((((_la) & ~0x3f) == 0 and ((1 << _la) & 32985348833280) != 0)):
@@ -2148,18 +2161,18 @@ class KindHMLParser ( Parser ):
                         else:
                             self._errHandler.reportMatch(self)
                             self.consume()
-                        self.state = 254
+                        self.state = 258
                         self.expr(8)
                         pass
 
                     elif la_ == 4:
                         localctx = KindHMLParser.EqExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 255
+                        self.state = 259
                         if not self.precpred(self._ctx, 6):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 6)")
-                        self.state = 256
+                        self.state = 260
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
                         if not(_la==45 or _la==46):
@@ -2167,18 +2180,18 @@ class KindHMLParser ( Parser ):
                         else:
                             self._errHandler.reportMatch(self)
                             self.consume()
-                        self.state = 257
+                        self.state = 261
                         self.expr(7)
                         pass
 
                     elif la_ == 5:
                         localctx = KindHMLParser.AndExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 258
+                        self.state = 262
                         if not self.precpred(self._ctx, 5):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 5)")
-                        self.state = 259
+                        self.state = 263
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
                         if not(_la==47 or _la==48):
@@ -2186,18 +2199,18 @@ class KindHMLParser ( Parser ):
                         else:
                             self._errHandler.reportMatch(self)
                             self.consume()
-                        self.state = 260
+                        self.state = 264
                         self.expr(6)
                         pass
 
                     elif la_ == 6:
                         localctx = KindHMLParser.OrExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 261
+                        self.state = 265
                         if not self.precpred(self._ctx, 4):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 4)")
-                        self.state = 262
+                        self.state = 266
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
                         if not(_la==49 or _la==50):
@@ -2205,18 +2218,18 @@ class KindHMLParser ( Parser ):
                         else:
                             self._errHandler.reportMatch(self)
                             self.consume()
-                        self.state = 263
+                        self.state = 267
                         self.expr(5)
                         pass
 
                     elif la_ == 7:
                         localctx = KindHMLParser.ImpliesExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 264
+                        self.state = 268
                         if not self.precpred(self._ctx, 3):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 3)")
-                        self.state = 265
+                        self.state = 269
                         localctx.op = self._input.LT(1)
                         _la = self._input.LA(1)
                         if not(_la==51 or _la==52):
@@ -2224,42 +2237,42 @@ class KindHMLParser ( Parser ):
                         else:
                             self._errHandler.reportMatch(self)
                             self.consume()
-                        self.state = 266
+                        self.state = 270
                         self.expr(3)
                         pass
 
                     elif la_ == 8:
                         localctx = KindHMLParser.MemberExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 267
+                        self.state = 271
                         if not self.precpred(self._ctx, 12):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 12)")
-                        self.state = 268
+                        self.state = 272
                         self.match(KindHMLParser.T__27)
-                        self.state = 269
+                        self.state = 273
                         self.match(KindHMLParser.ID)
                         pass
 
                     elif la_ == 9:
                         localctx = KindHMLParser.IndexExprContext(self, KindHMLParser.ExprContext(self, _parentctx, _parentState))
                         self.pushNewRecursionContext(localctx, _startState, self.RULE_expr)
-                        self.state = 270
+                        self.state = 274
                         if not self.precpred(self._ctx, 11):
                             from antlr4.error.Errors import FailedPredicateException
                             raise FailedPredicateException(self, "self.precpred(self._ctx, 11)")
-                        self.state = 271
+                        self.state = 275
                         self.match(KindHMLParser.T__22)
-                        self.state = 272
+                        self.state = 276
                         self.expr(0)
-                        self.state = 273
+                        self.state = 277
                         self.match(KindHMLParser.T__23)
                         pass
 
              
-                self.state = 279
+                self.state = 283
                 self._errHandler.sync(self)
-                _alt = self._interp.adaptivePredict(self._input,26,self._ctx)
+                _alt = self._interp.adaptivePredict(self._input,27,self._ctx)
 
         except RecognitionException as re:
             localctx.exception = re
@@ -2303,17 +2316,17 @@ class KindHMLParser ( Parser ):
         self._la = 0 # Token type
         try:
             self.enterOuterAlt(localctx, 1)
-            self.state = 280
+            self.state = 284
             self.expr(0)
-            self.state = 285
+            self.state = 289
             self._errHandler.sync(self)
             _la = self._input.LA(1)
             while _la==12:
-                self.state = 281
+                self.state = 285
                 self.match(KindHMLParser.T__11)
-                self.state = 282
+                self.state = 286
                 self.expr(0)
-                self.state = 287
+                self.state = 291
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
 

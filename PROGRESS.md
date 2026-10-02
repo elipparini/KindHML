@@ -143,6 +143,22 @@ exclude `sender = C`. The tool adds an explicit first statement
   - `pytest -m kind2 tests/test_regressions.py` (30 s): 64 passed, 5 expected failures,
     1 unexpected pass (`two-donatees` P2b_true), 7 min 39 s.
 
+## After M5 — block number as an increase (decision 8 below)
+
+* Modalities `<< s : C . f(args) $ v @ d >>`: `d` (uint, 0 when omitted) is the increase of
+  the block number made by the transaction. A transaction starts with `require(d >= 0);
+  block_num := block_num + d`; Init: `block_num` any value >= 0; the environment assumption
+  `Tx.block_num >= block_num` and the existential block of every modality are gone.
+* Vault files: the same two rules for all mutants, with explicit increases (drainability:
+  `∃d1, d2`; non-inflation: `∀d1, d2. d1 + d2 < wait_time -> ...`, any senders).
+  price-bet_v2 rules unchanged (all steps in one block).
+* Tests: `test_transactions_increase_the_block_number`, `test_block_increase_in_modality`;
+  Trans differential test with negative increases; Kind 2 Trans test: 24 passed.
+* Benchmarks (`results/v1_benchmarks.csv`, 120 s): 33 of 34 match, including all six Vault
+  tasks (vault_v3 non-inflation now false, as in the paper's table); bank_v2 Liquidity
+  unknown at the edge of cvc5's half of the budget (see above). Regression files do not use
+  the block number, so their encoding is unchanged.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
@@ -166,3 +182,7 @@ exclude `sender = C`. The tool adds an explicit first statement
    paper's results table are placeholders until the table is regenerated.
 7. (after M5) **block.number:** stays outside the formal model for now; the proposal (block
    number as a component of the transaction) is a `\CL` note in examples.tex.
+8. (after M5) **block.number, decided:** the transaction carries the increase of the block
+   number (`@ d`, uint, 0 when omitted); applied at the start of the transaction, before
+   `initPay`; a revert leaves the state, block number included, unchanged (`\CL` note on
+   this); initial block number any value >= 0. Plan for the paper in a `\CL` note.

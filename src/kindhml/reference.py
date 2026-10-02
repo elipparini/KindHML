@@ -14,7 +14,8 @@ plus assumption A5 and the extensions of DESIGN.md, Sect. 4:
 * a transfer requires 0 <= amount <= balance of the contract and a recipient different
   from the contract;
 * division by zero reverts; division is Euclidean, as in SMT-LIB (`div`, `mod`);
-* the transaction sets `block_num` to its block number.
+* the transaction increases `block_num` by its `blocks` (>= 0, else it reverts), before
+  `initPay`; a reverted transaction leaves the state, hence the block number, unchanged.
 
 A flagged state is represented by a `State` (with `revert` as the flag b).
 """
@@ -65,7 +66,7 @@ class Tx:
     method: Tuple[str, str]                      # (contract, procedure) (fx)
     args: Dict[str, object] = field(default_factory=dict)   # parameter name -> value
     value: int = 0
-    block_num: int = 0
+    blocks: int = 0                              # increase of the block number
 
 
 def default(t: S.AnyType, system: System):
@@ -74,13 +75,15 @@ def default(t: S.AnyType, system: System):
     return {S.INT: 0, S.UINT: 0, S.BOOL: False, S.ADDRESS: NULL}[t]
 
 
-def initial_state(system: System, balances: Dict[str, int]) -> State:
-    """An initial state: the given (nonnegative) balances, 0 for the other addresses."""
+def initial_state(system: System, balances: Dict[str, int], block_num: int = 0) -> State:
+    """An initial state: the given (nonnegative) balances, 0 for the other addresses, and the
+    given (nonnegative) block number."""
     return State(
         balance={a: balances.get(a, 0) for a in system.addresses},
         constructed={c.name: False for c in system.contracts},
         fields={(c.name, f.name): default(f.type, system)
-                for c in system.contracts for f in c.fields})
+                for c in system.contracts for f in c.fields},
+        block_num=block_num)
 
 
 class Interpreter:
@@ -108,7 +111,9 @@ class Interpreter:
         if tx.sender not in self.system.users:
             raise Revert
         if self.system.uses_block_num:
-            st.block_num = tx.block_num
+            if tx.blocks < 0:
+                raise Revert
+            st.block_num += tx.blocks
         if p.payable:
             self.send(st, tx.sender, c.name, tx.value)
         elif tx.value != 0:
@@ -341,11 +346,9 @@ class FormulaEvaluator:
             arg_choices = [{v.name: record[(v.contract, v.proc, v.name)] for v in params}]
         else:                                    # h(): parameters existentially quantified
             arg_choices = [{k[2]: x for k, x in r.items()} for r in self.records(params)]
-        blocks = ([b for b in self.ints if b >= st.block_num] if self.system.uses_block_num
-                  else [0])
+        blocks = ev(e.blocks)
         for args in arg_choices:
-            for blk in blocks:
-                nxt = self.interp.step(st, Tx(sender, e.contract, method, args, value, blk))
-                if self.eval(e.body, [nxt] + list(seq), env):
-                    return True
+            nxt = self.interp.step(st, Tx(sender, e.contract, method, args, value, blocks))
+            if self.eval(e.body, [nxt] + list(seq), env):
+                return True
         return False

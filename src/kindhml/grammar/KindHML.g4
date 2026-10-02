@@ -82,7 +82,7 @@ expr
     | <assoc=right> expr op=('->' | 'implies') expr               # ImpliesExpr
     | q=('forall' | 'exists') qvars '.' expr                      # QuantExpr
     | '<<' sender=expr ':' contractName=ID '.' proc=ID
-          '(' exprs? ')' ('$' value=expr)? '>>' expr              # ModalExpr
+          '(' exprs? ')' ('$' value=expr)? ('@' blocks=expr)? '>>' expr   # ModalExpr
     ;
 
 exprs : expr (',' expr)* ;

@@ -72,8 +72,10 @@ rule Liquidity {
 ```
 
 Formulas: `forall`/`exists x : T .` with `T` in `int, uint, bool, address, method,
-calldataargs`; modalities `<< sender : Contract . f(args) $ value >> φ`; `old(e)`;
-`lastReverted`; `is_EOA(e)`; `balance`, `balance[a]`, contract fields.
+calldataargs`; modalities `<< sender : Contract . f(args) $ value @ blocks >> φ`, where
+`blocks` (a uint, 0 when omitted) is the increase of the block number made by the
+transaction; `old(e)`; `lastReverted`; `is_EOA(e)`; `balance`, `balance[a]`,
+`block.number`, contract fields.
 
 A file may contain several contracts, which can call each other (no cycles):
 `Token.mint(msg.sender, n) $ msg.value` calls `mint` of contract `Token`, transferring

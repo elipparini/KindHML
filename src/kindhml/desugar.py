@@ -2,7 +2,8 @@
 
 A procedure f of contract C with body s becomes, for a transaction,
 
-    [block_num := Tx.block_num;]            -- only if block.number is used (extension)
+    [require(Tx.blocks >= 0);                -- only if the block number is used:
+     block_num := block_num + Tx.blocks;]    -- the transaction increases it (extension)
     require(is_EOA(sender));                 -- transactions are sent by users
     callee(C, f)
 
@@ -49,7 +50,7 @@ def procedure(system: System, c: S.Contract, p: S.Procedure) -> S.Stmt:
     """The core statement for a transaction calling procedure `p` of contract `c`."""
     stmts: List[S.Stmt] = []
     if system.uses_block_num:
-        stmts.append(S.SetBlockNum())
+        stmts += [S.Require(S.BinOp(">=", S.TxBlocks(), S.IntLit(0))), S.SetBlockNum()]
     stmts.append(S.Require(S.IsEOA(S.Sender())))
     stmts.append(callee(system, c, p, ()))
     return _seq(stmts)

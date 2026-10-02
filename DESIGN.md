@@ -36,7 +36,8 @@ Experiments with Kind 2 v2.3.0 (see `PROGRESS.md`, Milestone 1) fix the followin
 * `St` is a record with one field per state variable of `StateVars` (`balance`, `constructed_C`,
   the contract fields, `revert`, optionally `block_num`).
 * `Tx` is a record with one field per transition variable of `TransVars` (`sender`, `cx`, `fx`,
-  `value`, one field `f_x` per parameter of each procedure, optionally `block_num`).
+  `value`, one field `f_x` per parameter of each procedure, optionally `blocks`, the
+  increase of the block number).
 * For each procedure `f`, a Lustre `function trans_<C>_<f>(s: St; t: Tx) returns (r: St)`
   whose local variables `l1, ..., lm` are the levels `StateVars^1..StateVars^m`; its equations are
   exactly `S^0(s0; s)`, and `r` is the ITE of `Trans_f`.
@@ -75,11 +76,12 @@ it in the induction for the rule (e.g. `tests/contracts/calls.sol` Buy_mints: un
 
 The modal tree of the paper is built during the recursion: a node `V` is a state term (the
 copy `SVars^V`) with a pointer to its parent, and `old(e)` at `V` is encoded at the parent.
-For the edge `E` labelled `⟨e_s : C.e_f(ē) $ e_v⟩`, the transition variables are the record
-literal `Tx { sender = Φ(e_s); cx = C; fx = Φ(e_f); value = Φ(e_v); <EqParams>; ... }`; the
-parameters of other procedures get an arbitrary value (Trans does not depend on them).
-The transition variables that are not fixed by the modality remain existentially quantified:
-the parameters of `h()` (a `method` variable without argument, extension) and the block number.
+For the edge `E` labelled `⟨e_s : C.e_f(ē) $ e_v @ e_Δ⟩`, the transition variables are the
+record literal `Tx { sender = Φ(e_s); cx = C; fx = Φ(e_f); value = Φ(e_v); <EqParams>;
+blocks = Φ(e_Δ) }` (`e_Δ` is 0 when omitted); the parameters of other procedures get an
+arbitrary value (Trans does not depend on them). The only transition variables that remain
+existentially quantified are the parameters of `h()` (a `method` variable without argument,
+extension).
 
 The child state `SVars^{V'}` is obtained in one of four ways (`--mode`):
 
@@ -154,11 +156,15 @@ Choices first recorded as `\CL` notes and now stated in the paper (after M5, wit
 
 Deviations, still recorded as `\CL` notes in the paper where relevant:
 
-3. **block.number.** State variable `block_num` (initially 0) and transition variable
-   `Tx.block_num`. A transaction sets `block_num = Tx.block_num` before `initPay`; as for any
-   state variable, a revert restores the old value. The environment only produces
-   `Tx.block_num ≥ block_num`, and in a modality the value is existentially quantified over
-   `≥ block_num`.
+3. **block.number** (decided with the user; a `\CL` note gives the plan for the paper).
+   State variable `block_num` (initially any value ≥ 0) and transition variable
+   `Tx.blocks`, the *increase* of the block number. A transaction starts with
+   `require(Tx.blocks >= 0); block_num := block_num + Tx.blocks`, before `initPay`; as for
+   any state variable, a revert restores the old value (also of `block_num`). In a modality
+   the increase is `@ e` (a uint; 0 when omitted), so formulae quantify it explicitly,
+   e.g. `∃d : uint` for drainability and `∀d : uint` for non-inflation. Earlier versions
+   quantified the block existentially in every modality, which makes universal properties
+   vacuous (examples.tex, `\CL` analysis note).
 4. **`h()` with a method variable.** Allowed; the parameters are existentially quantified
    (this is what the literal `∃TVars^E` of the paper gives when `EqParams` is empty).
 4b. **Division** is Euclidean (SMT-LIB `div`/`mod`); the paper does not fix the rounding.

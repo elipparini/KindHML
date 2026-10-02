@@ -16,7 +16,7 @@ from kindhml import kind2
 from kindhml import lustre as L
 from kindhml import syntax as S
 from kindhml.builder import parse
-from kindhml.encode_trans import (BALANCE, BLOCK, REVERT, Encoder, addr_const, constructed_var,
+from kindhml.encode_trans import (BALANCE, BLOCK, BLOCKS, REVERT, Encoder, addr_const, constructed_var,
                                   field_var, key_field, map_type, param_var, proc_const)
 from kindhml.lustre_eval import Evaluator
 from kindhml.model import NULL, System
@@ -61,7 +61,7 @@ def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
 def tx_literal(tx: Tx, system: System, enc: Encoder) -> L.LExpr:
     values = {"sender": L.Var(addr_const(tx.sender)), "cx": L.Var(addr_const(tx.contract)),
               "fx": L.Var(proc_const(*tx.method)), "value": L.Int(tx.value),
-              BLOCK: L.Int(tx.block_num)}
+              BLOCKS: L.Int(tx.blocks)}
     for v in system.param_vars:
         arg = tx.args.get(v.name) if (v.contract, v.proc) == tx.method else None
         values[param_var(v.contract, v.proc, v.name)] = value_literal(
@@ -98,21 +98,20 @@ def random_tx(system: System, rnd: random.Random) -> Tx:
     args = {x.name: random_value(x.type, system, rnd) for x in p.params}
     sender = rnd.choice(system.users) if rnd.random() < 0.85 else rnd.choice(system.addresses)
     value = rnd.randint(-1, 3) if p.payable or rnd.random() < 0.1 else 0
-    return Tx(sender, contract, (c.name, p.name), args, value, rnd.randint(0, 5))
+    return Tx(sender, contract, (c.name, p.name), args, value, rnd.randint(-1, 3))
 
 
 def random_reachable_state(system: System, rnd: random.Random, interp: Interpreter) -> State:
     """The state reached by a random sequence of transactions from an initial state."""
-    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.addresses})
+    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.addresses},
+                       rnd.randint(0, 3))
     for c in system.contracts:
         ctor = c.procs[0]
         st = interp.step(st, Tx(rnd.choice(system.users), c.name, (c.name, ctor.name),
                                 {x.name: random_value(x.type, system, rnd) for x in ctor.params},
                                 rnd.randint(0, 2) if ctor.payable else 0, 0))
     for _ in range(rnd.randint(0, 4)):
-        tx = random_tx(system, rnd)
-        if tx.block_num >= st.block_num:
-            st = interp.step(st, tx)
+        st = interp.step(st, random_tx(system, rnd))
     return st
 
 
@@ -124,8 +123,6 @@ def samples(system: System, interp: Interpreter, rnd: random.Random, n: int):
     for i in range(n):
         st = random_state(system, rnd) if i % 2 else random_reachable_state(system, rnd, interp)
         tx = random_tx(system, rnd)
-        if system.uses_block_num and tx.block_num < st.block_num:
-            continue                    # excluded by the environment (DESIGN.md, Sect. 4)
         yield i, st, tx, interp.step(st, tx)
 
 
@@ -134,6 +131,25 @@ def setup(path):
     system = System.make(program, 2)
     enc = Encoder(system)
     return system, enc, Interpreter(system), random.Random(path)
+
+
+def test_transactions_increase_the_block_number():
+    """A transaction increases the block number by its `blocks` before the body runs; a
+    negative increase reverts, and a reverted transaction leaves the block number unchanged."""
+    program, _ = check(parse("contract C { int t; function f() { t = block.number } }"))
+    system = System.make(program, 1)
+    enc, interp = Encoder(system), Interpreter(system)
+    ev = Evaluator(enc.program()[0])
+    st = initial_state(system, {}, 5)
+    st.constructed["C"] = True
+    for blocks, reverts, block in [(2, False, 7), (0, False, 5), (-1, True, 5)]:
+        tx = Tx("u1", "C", ("C", "f"), {}, 0, blocks)
+        expected = interp.step(st, tx)
+        assert (expected.revert, expected.block_num) == (reverts, block)
+        assert reverts or expected.fields[("C", "t")] == block
+        actual = ev.eval(L.call("trans", state_literal(st, system, enc),
+                                tx_literal(tx, system, enc)), {})
+        assert actual == ev.eval(state_literal(expected, system, enc), {}), blocks
 
 
 def test_senders_of_transactions_and_of_calls():

@@ -22,6 +22,7 @@ from .model import NULL, System
 
 ST, TX, ADDR, PROC = "St", "Tx", "address", "proc"
 REVERT, BALANCE, BLOCK = "revert", "balance", "block_num"
+BLOCKS = "blocks"                # transition variable: the increase of the block number
 
 BINOPS = {"&&": "and", "||": "or", "->": "=>", "==": "=", "!=": "<>", "/": "div", "%": "mod",
           "+": "+", "-": "-", "*": "*", "<": "<", "<=": "<=", ">": ">", ">=": ">="}
@@ -134,12 +135,12 @@ class Encoder:
         return fields
 
     def tx_fields(self) -> List[Tuple[str, str]]:
-        """TransVars: sender, cx, fx, value, ParamVars, [block_num]."""
+        """TransVars: sender, cx, fx, value, ParamVars, [blocks]."""
         fields = [("sender", ADDR), ("cx", ADDR), ("fx", PROC), ("value", "int")]
         fields += [(param_var(v.contract, v.proc, v.name), base_type(v.type))
                    for v in self.system.param_vars]
         if self.system.uses_block_num:
-            fields.append((BLOCK, "int"))
+            fields.append((BLOCKS, "int"))
         return fields
 
     def map_value_types(self) -> List[S.Type]:
@@ -197,8 +198,8 @@ class Encoder:
                 return frame.sender
             if isinstance(e, S.Value):
                 return frame.value
-            if isinstance(e, S.TxBlockNum):
-                return L.Proj(frame.tx, BLOCK)
+            if isinstance(e, S.TxBlocks):
+                return L.Proj(frame.tx, BLOCKS)
         if other is not None:
             return other(e)
         raise KindHMLError(f"cannot encode expression {e!r}", getattr(e, "pos", None))
@@ -256,7 +257,7 @@ class Encoder:
         if isinstance(stmt, S.SetConstructed):
             return self.update(s, {constructed_var(stmt.contract): L.TRUE})
         if isinstance(stmt, S.SetBlockNum):
-            return self.update(s, {BLOCK: L.Proj(t, BLOCK)})
+            return self.update(s, {BLOCK: L.op("+", L.Proj(s, BLOCK), L.Proj(t, BLOCKS))})
         raise KindHMLError(f"cannot encode statement {stmt!r}", getattr(stmt, "pos", None))
 
     def send(self, stmt: S.Send, s: L.LExpr, t: L.LExpr) -> L.LExpr:
@@ -366,17 +367,22 @@ class Encoder:
         return L.Function("trans", [("s", ST), ("t", TX)], [("r", ST)],
                           equations=[("r", result)], comment="Trans")
 
+    def init_inputs(self) -> List[Tuple[str, str]]:
+        """The free initial values: the balances and, if used, the block number."""
+        return [("ib", map_type(S.INT))] + ([("iblock", "int")]
+                                            if self.system.uses_block_num else [])
+
     def init(self) -> L.Function:
-        """Init: the balances are given (and nonnegative, see the main node), contracts are
-        not constructed, all other variables have default values."""
+        """Init: the balances and the block number are given (and nonnegative, see the main
+        node), contracts are not constructed, all other variables have default values."""
         values = {BALANCE: L.Var("ib"), REVERT: L.FALSE}
         for c in self.system.contracts:
             values[constructed_var(c.name)] = L.FALSE
             for f in c.fields:
                 values[field_var(c.name, f.name)] = default_value(f.type, self.system)
         if self.system.uses_block_num:
-            values[BLOCK] = L.Int(0)
-        return L.Function("init", [("ib", map_type(S.INT))], [("r", ST)],
+            values[BLOCK] = L.Var("iblock")
+        return L.Function("init", self.init_inputs(), [("r", ST)],
                           equations=[("r", L.record(ST, [(n, values[n])
                                                          for n, _ in self.state_fields()]))],
                           comment="Init")
@@ -420,11 +426,13 @@ class Encoder:
         asserts = [L.conj([L.op(">=", L.Proj(ib, key_field(a)), L.Int(0))
                            for a in self.system.addresses])]
         if self.system.uses_block_num:
-            asserts.append(L.op(">=", L.Proj(t, BLOCK), L.Proj(s, BLOCK)))
+            asserts.append(L.op(">=", L.Var("iblock"), L.Int(0)))
+        inputs = self.init_inputs()
         return L.Function(
-            "main", [("t", TX), ("ib", map_type(S.INT))], [], locals=[("s", ST)],
+            "main", [("t", TX)] + inputs, [], locals=[("s", ST)],
             asserts=asserts,
-            equations=[("s", L.Arrow(L.call("init", ib), L.Pre(L.call("trans", s, t))))],
+            equations=[("s", L.Arrow(L.call("init", *[L.Var(n) for n, _ in inputs]),
+                                     L.Pre(L.call("trans", s, t))))],
             node=True, comment="The transition system (Init, Trans)")
 
     def lemmas(self) -> List[Tuple[str, L.LExpr]]:
