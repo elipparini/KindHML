@@ -60,8 +60,8 @@ rule Two_steps_drainability {
     exists f2: method .
     exists args2: calldataargs .
     exists msgvalue2 : int .
-    exists d1 : uint .
-    exists d2 : uint .
+    exists d1 : int .
+    exists d2 : int .
     (<< addr : Vault . f1(args1) $ msgvalue1 @ d1 >>
         << addr : Vault . f2(args2) $ msgvalue2 @ d2 >>
               (balance[recipient] ==  old(old(balance[recipient] +balance)))
@@ -77,7 +77,7 @@ rule Two_steps_drainability_non_inflation {
     forall f1 : method . forall f2 : method .
     forall args1 : calldataargs . forall args2 : calldataargs .
     forall msgvalue1 : int . forall msgvalue2 : int .
-    forall d1 : uint . forall d2 : uint .
+    forall d1 : int . forall d2 : int .
     (d1 + d2 < wait_time) ->
     << a : Vault . f1(args1) $ msgvalue1 @ d1 >>
         << b : Vault . f2(args2) $ msgvalue2 @ d2 >>

@@ -150,14 +150,23 @@ exclude `sender = C`. The tool adds an explicit first statement
   block_num := block_num + d`; Init: `block_num` any value >= 0; the environment assumption
   `Tx.block_num >= block_num` and the existential block of every modality are gone.
 * Vault files: the same two rules for all mutants, with explicit increases (drainability:
-  `∃d1, d2`; non-inflation: `∀d1, d2. d1 + d2 < wait_time -> ...`, any senders).
+  `∃d1, d2 : int`; non-inflation: `∀d1, d2 : int. d1 + d2 < wait_time -> ...`, any
+  senders), exactly the formulae now in the paper (`tab-properties.tex`); a negative
+  increase only makes the transaction revert, so no guard is needed.
   price-bet_v2 rules unchanged (all steps in one block).
+* Paper: the block number is now in the formal model (syntax, state, initial states,
+  transaction rule, modal operator and its typing, encoding, appendix); the `\CL` notes on
+  it are removed, except the one on reverted transactions.
 * Tests: `test_transactions_increase_the_block_number`, `test_block_increase_in_modality`;
   Trans differential test with negative increases; Kind 2 Trans test: 24 passed.
-* Benchmarks (`results/v1_benchmarks.csv`, 120 s): 33 of 34 match, including all six Vault
-  tasks (vault_v3 non-inflation now false, as in the paper's table); bank_v2 Liquidity
-  unknown at the edge of cvc5's half of the budget (see above). Regression files do not use
-  the block number, so their encoding is unchanged.
+* Benchmarks (`results/v1_benchmarks.csv`, 120 s; Vault rows with the `int` increases):
+  32 of 34 match; vault_v3 non-inflation is now false, as in the paper's table.
+  bank_v2 Liquidity: unknown at the edge of cvc5's half of the budget (see above).
+  vault drainability: valid in 52 s with `uint` increases; with `int`, in the batch cvc5 did
+  not finish within its 60 s and the run ended after 260 s with an error (Kind 2 should
+  have been stopped at about 140 s; not reproduced); run again alone, valid in 42 s with
+  the default strategy and in 45 s with cvc5 only. Regression files do not use the block
+  number, so their encoding is unchanged.
 
 ## Decisions taken after M1 (with the user)
 

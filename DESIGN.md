@@ -162,7 +162,8 @@ Deviations, still recorded as `\CL` notes in the paper where relevant:
    `require(Tx.blocks >= 0); block_num := block_num + Tx.blocks`, before `initPay`; as for
    any state variable, a revert restores the old value (also of `block_num`). In a modality
    the increase is `@ e` (a uint; 0 when omitted), so formulae quantify it explicitly,
-   e.g. `∃d : uint` for drainability and `∀d : uint` for non-inflation. Earlier versions
+   e.g. `∃d : int` for drainability and `∀d : int` for non-inflation, as in the paper's
+   Vault formulae (a negative `d` only makes the transaction revert). Earlier versions
    quantified the block existentially in every modality, which makes universal properties
    vacuous (examples.tex, `\CL` analysis note).
 4. **`h()` with a method variable.** Allowed; the parameters are existentially quantified
