@@ -48,15 +48,21 @@ class Fuzzer:
 
     # ------------------------------------------------------------ random values
 
-    def number(self, t: S.Type):
+    def number(self, t: S.Type, pool=()):
+        """A random number of type t; half of the time, if `pool` (the positive numbers of
+        the current state) is not empty, one of them, or its half or quarter: amounts that
+        fit the wallets and reserves make the transactions succeed more often."""
         r = self.rnd
+        if pool and r.random() < 0.5:
+            v = Fraction(r.choice(pool)) / r.choice([1, 1, 2, 4])
+            return v if t == S.REAL else int(v)
         if t == S.REAL:
             return Fraction(r.choice([0, 1, 2, 3, 4, 6, 10, r.randint(0, 40)]),
                             r.choice([1, 1, 1, 2, 4]))
         n = r.choice([0, 1, 1, 2, 3, 4, 5, 7, 10, 100, r.randint(-2, 20)])
         return max(n, 0) if t == S.UINT else n
 
-    def value(self, t: S.AnyType):
+    def value(self, t: S.AnyType, pool=()):
         if isinstance(t, S.MapType):
             return {a: self.value(t.value) for a in self.system.addresses}
         if t == S.BOOL:
@@ -66,16 +72,29 @@ class Fuzzer:
             if r < 0.7:
                 return self.rnd.choice(self.system.users)
             return self.rnd.choice(self.system.addresses)
-        return self.number(t)
+        return self.number(t, pool)
 
-    def amount(self):
-        return self.number(self.system.program.balance_type)
+    def amount(self, pool=()):
+        return self.number(self.system.program.balance_type, pool)
 
-    def transaction(self, c: S.Contract, p: S.Procedure) -> Tx:
+    @staticmethod
+    def pool(st: Optional[State]) -> List:
+        """The positive numbers of a state."""
+        if st is None:
+            return []
+        out = [v for v in st.balance.values() if v > 0]
+        for v in st.fields.values():
+            for x in (v.values() if isinstance(v, dict) else [v]):
+                if not isinstance(x, (bool, str)) and x > 0:
+                    out.append(x)
+        return out
+
+    def transaction(self, c: S.Contract, p: S.Procedure, st: Optional[State] = None) -> Tx:
+        pool = self.pool(st)
         sender = (self.rnd.choice(self.system.users) if self.rnd.random() < 0.95
                   else self.rnd.choice(self.system.addresses))
-        args = {x.name: self.value(x.type) for x in p.params}
-        value = self.amount() if p.payable else 0
+        args = {x.name: self.value(x.type, pool) for x in p.params}
+        value = self.amount(pool) if p.payable else 0
         blocks = self.rnd.choice([0, 0, 1, 2, 5, 10]) if self.system.uses_block_num else 0
         return Tx(sender, c.name, (c.name, p.name), args, value, blocks)
 
@@ -83,7 +102,7 @@ class Fuzzer:
 
     def traces(self) -> Iterator[Tuple[List[Tx], State]]:
         """The states of a random trace, each with the transactions that reach it: the
-        constructors first, then up to 6 random transactions."""
+        constructors first, then up to 12 random transactions (reverted ones left out)."""
         amount = self.system.program.balance_type
         st = initial_state(self.system, {a: abs(self.number(amount))
                                          for a in self.system.addresses if a != NULL},
@@ -100,10 +119,10 @@ class Fuzzer:
                     yield list(txs), st
                     break
         methods = [(c, p) for c, p in self.system.methods if p.name != S.CONSTRUCTOR]
-        for _ in range(self.rnd.randint(1, 8)):
+        for _ in range(self.rnd.randint(1, 12)):
             if not methods:
                 return
-            tx = self.transaction(*self.rnd.choice(methods))
+            tx = self.transaction(*self.rnd.choice(methods), st)
             nxt = self.interp.step(st, tx)
             if nxt.revert:                      # reverted transactions are left out
                 continue
