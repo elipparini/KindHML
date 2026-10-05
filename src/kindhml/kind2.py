@@ -58,30 +58,46 @@ class Kind2Output:
 
 
 MEMORY_LIMIT_GB = 3     # for Kind 2 and its solvers together (per process as a fallback)
-_SCOPE: Optional[List[str]] = None
+_HAVE_SCOPE: Optional[bool] = None
+
+
+def memory_limit_mb() -> int:
+    """The memory limit of a run: $KINDHML_MEMORY_GB if set, else the smaller of
+    MEMORY_LIMIT_GB and half of the memory available now. A fixed limit is not enough: a
+    run allowed 3 GB on a machine with less available memory caused a global OOM."""
+    if os.environ.get("KINDHML_MEMORY_GB"):
+        return int(float(os.environ["KINDHML_MEMORY_GB"]) * 1024)
+    limit = MEMORY_LIMIT_GB * 1024
+    try:
+        with open("/proc/meminfo") as f:
+            info = dict(line.split(":", 1) for line in f)
+        available = int(info["MemAvailable"].split()[0]) // 1024
+        limit = min(limit, max(available // 2, 256))
+    except (OSError, KeyError, ValueError):
+        pass
+    return limit
 
 
 def _memory_scope() -> List[str]:
     """A `systemd-run` prefix limiting the memory of Kind 2 and all its solvers together,
     or [] if systemd user scopes are not available."""
-    global _SCOPE
-    if _SCOPE is None:
-        scope = ["systemd-run", "--user", "--scope", "-q",
-                 "-p", f"MemoryMax={MEMORY_LIMIT_GB}G", "-p", "MemorySwapMax=0"]
+    global _HAVE_SCOPE
+    scope = ["systemd-run", "--user", "--scope", "-q",
+             "-p", f"MemoryMax={memory_limit_mb()}M", "-p", "MemorySwapMax=0"]
+    if _HAVE_SCOPE is None:
         try:
-            ok = shutil.which("systemd-run") and subprocess.run(
-                scope + ["true"], capture_output=True, timeout=10).returncode == 0
+            _HAVE_SCOPE = bool(shutil.which("systemd-run") and subprocess.run(
+                scope + ["true"], capture_output=True, timeout=10).returncode == 0)
         except (OSError, subprocess.TimeoutExpired):
-            ok = False
-        _SCOPE = scope if ok else []
-    return _SCOPE
+            _HAVE_SCOPE = False
+    return scope if _HAVE_SCOPE else []
 
 
 def _limit_memory():
     """Fallback limit (the address-space limit cannot be used: OCaml 5 reserves a large
     virtual heap at start-up)."""
     import resource
-    limit = MEMORY_LIMIT_GB * 1024 ** 3
+    limit = memory_limit_mb() * 1024 ** 2
     resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
 
 
