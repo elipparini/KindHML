@@ -24,6 +24,8 @@ OPEN = {
     ("two-donatees", "P4_true"): "needs an auxiliary invariant; unknown within the timeout",
     ("two-donatees", "P2b_true"): "valid by IC3 with z3 in about 30 s: at the edge of the timeout",
     ("two-donatees", "P3c_true"): "needs an auxiliary invariant; unknown within the timeout",
+    ("two-donatees", "P5_true"): "valid by IC3 in about 27 s with strategy kind2; the checks on "
+                                 "free states of the portfolio leave too little time",
     ("signature_error", "P5_true"): "valid by IC3 with z3, in 16 s to more than 30 s depending "
                                     "on the run: at the edge of the timeout",
 }

@@ -24,7 +24,13 @@ def main() -> int:
     ap.add_argument("contract", help="path of the contract file")
     ap.add_argument("property", help="rule name, or ALL")
     ap.add_argument("n_of_participants", type=int, help="number of user addresses")
-    ap.add_argument("timeout", type=float, help="Kind 2 timeout, in seconds")
+    ap.add_argument("timeout", type=float,
+                    help="time limit per rule, in seconds (0: no limit, the search goes on"
+                         " until there is a verdict)")
+    ap.add_argument("--strategy", choices=V.STRATEGIES, default="portfolio",
+                    help="portfolio (default): invariants, checks on free states, and Kind 2"
+                         " on the transition system, in rounds of doubling budgets; kind2:"
+                         " Kind 2 on the transition system only")
     ap.add_argument("--only_lus", action="store_true", help="only generate the Lustre files")
     ap.add_argument("--cex", action="store_true", help="print counterexamples")
     ap.add_argument("--solver", choices=("auto",) + SOLVERS, default="auto",
@@ -53,6 +59,7 @@ def main() -> int:
     name = V.stem(args.contract)
     timeout = int(args.timeout) if args.timeout == int(args.timeout) else args.timeout
     os.makedirs(args.out_lus, exist_ok=True)
+    context: dict = {}                  # invariants are proved once for all the rules
     code = 0
     for rule in rules:
         tag = f"{name}_{rule.name}_{args.n_of_participants}_{timeout}"
@@ -62,9 +69,10 @@ def main() -> int:
                 f.write(V.lustre_for(program, rule, args.n_of_participants, args.mode, expand))
             print(f"{name} - {rule.name}: {lus_path}")
             continue
-        outcome = V.verify(program, rule, args.n_of_participants, args.timeout,
+        outcome = V.verify(program, rule, args.n_of_participants, args.timeout or None,
                            mode=args.mode, expand=expand, lus_path=lus_path,
-                           solver=args.solver, cex=args.cex)
+                           solver=args.solver, cex=args.cex, strategy=args.strategy,
+                           context=context)
         line = f"{name} - {outcome.describe()}"
         print(line, flush=True)
         if args.cex and outcome.status == "invalid" and outcome.result.counterexample:

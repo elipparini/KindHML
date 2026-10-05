@@ -55,7 +55,9 @@ stmtBody : block | stmt ;
 
 // ---------------------------------------------------------------- rules
 
-rule_ : 'rule' name=ID '{' expr '}' ;
+// An `invariant` is a rule without modalities that the tool proves inductive and then
+// assumes when it checks the other rules (DESIGN.md, "Invariants").
+rule_ : kind=('rule' | 'invariant') name=ID '{' expr '}' ;
 
 // `method`/`proc` and `calldataargs`/`args` are identifiers (`args` is a common
 // variable name); the builder checks them.

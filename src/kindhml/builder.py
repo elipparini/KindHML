@@ -160,7 +160,8 @@ class _Builder(KindHMLVisitor):
     # ---------------------------------------------------------- rules
 
     def visitRule_(self, ctx):
-        return S.Rule(ctx.name.text, self.visit(ctx.expr()), self._groundtruth(ctx), _pos(ctx))
+        return S.Rule(ctx.name.text, self.visit(ctx.expr()), self._groundtruth(ctx), _pos(ctx),
+                      invariant=ctx.kind.text == "invariant")
 
     def _groundtruth(self, ctx) -> Optional[bool]:
         """The last `@groundtruth: True|False` comment right before the rule; otherwise

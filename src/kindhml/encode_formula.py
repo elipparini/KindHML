@@ -70,6 +70,12 @@ class FormulaEncoder:
             prop = self.inliner.run(prop, {})     # inline helpers and simplify
         return prop
 
+    def state_formula(self, e: S.Expr, state: L.LExpr) -> L.LExpr:
+        """Φ(φ) at `state` for a formula without modalities (an invariant): required in
+        every reachable state, so without the guard on construction."""
+        f = self.phi(e, Node(state), {})
+        return self.inliner.run(f, {}) if self.mode in ("levels", "inline") else f
+
     # ------------------------------------------------------------ formulae
 
     def phi(self, e: S.Expr, node: Node, env: Dict[str, object]) -> L.LExpr:

@@ -20,7 +20,8 @@ python3 src/kindHML.py <contract.sol> <Rule|ALL> <n_participants> <timeout> [opt
 ```
 
 - `n_participants`: number of user addresses (EOAs) besides `null` and the contracts.
-- `timeout`: time budget per rule, in seconds.
+- `timeout`: time limit per rule, in seconds; 0 for no limit (the search then goes on until
+  there is a verdict).
 
 Examples:
 
@@ -39,6 +40,10 @@ Options:
 - `--mode inline|levels|exists|subst`: encoding of modalities (default `inline`, see
   `DESIGN.md`).
 - `--expand address,method|none`: expand quantifiers over these finite types (default both).
+- `--strategy portfolio|kind2`: `portfolio` (default) proves the file's invariants, checks
+  each rule on an arbitrary state satisfying them, searches for the state that refutes it,
+  and runs Kind 2 on the transition system, in rounds with doubling budgets; `kind2` only
+  runs Kind 2 on the transition system. See `DESIGN.md`, Sect. 6.
 
 Each rule's Lustre file is saved in `out_lus/<contract>_<Rule>_<n>_<timeout>.lus`, and its
 verdict in `out_results/<contract>_<Rule>_<n>_<timeout>.out`. The verdict is compared with the
@@ -46,7 +51,8 @@ ground truth of the rule: a comment `// @groundtruth: True|False` right before i
 suffix `_true`/`_false` of its name.
 
 Each Kind 2 run, with its solvers, is placed in a `systemd-run --user` scope, which limits
-their memory to 3 GB and is stopped at the end of the run. Without systemd, the processes are
+their memory to the smaller of 3 GB and half of the available memory (or
+`$KINDHML_MEMORY_GB`) and is stopped at the end of the run. Without systemd, the processes are
 killed at the end of the run and the memory limit is per process.
 
 ## Input language
@@ -84,6 +90,10 @@ calldataargs`; modalities `<< sender : Contract . f(args) $ value @ blocks >> φ
 `blocks` (a uint, 0 when omitted) is the increase of the block number made by the
 transaction; `old(e)`; `lastReverted`; `is_EOA(e)`; `balance`, `balance[a]`,
 `block.number`, contract fields.
+
+Besides rules, a file may declare invariants, `invariant Name { φ }`, with `φ` without
+modalities. The tool proves those that are inductive and assumes them when it checks the
+other rules (see `tests/contracts/swap_pool.sol`); this helps much with nonlinear arithmetic.
 
 A file may contain several contracts, which can call each other (no cycles):
 `Token.mint(msg.sender, n) $ msg.value` calls `mint` of contract `Token`, transferring

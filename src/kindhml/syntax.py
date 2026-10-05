@@ -429,10 +429,13 @@ class Contract:
 
 @dataclass(frozen=True)
 class Rule:
+    """A rule, or an invariant: a rule without modalities, required in every reachable state
+    (also before the contracts are constructed), and assumed when checking other rules."""
     name: str
     formula: Expr
     groundtruth: Optional[bool] = None
     pos: Pos = _pos()
+    invariant: bool = False
 
 
 @dataclass(frozen=True)

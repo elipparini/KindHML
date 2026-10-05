@@ -175,6 +175,59 @@ Deviations, still recorded as `\CL` notes in the paper where relevant:
 6. **Unconstructed states.** The checked property is `(∧_C constructed_C) → Φ(φ)`, i.e. `φ` is
    required only in reachable states where all contracts are constructed.
 7. **Reals** (extension, not in the paper). See Sect. 5.
+8. **Invariants and checks on free states** (extension, not in the paper). See Sect. 6.
+
+## 6. Invariants and the portfolio strategy (`invariants.py`, `verify.verify`)
+
+Kind 2 checks `Φ(φ)` on the reachable states of `(Init, Trans)`, by BMC and k-induction
+through `Trans`. This fails when `Trans` is nonlinear and `φ` holds only because of facts
+about the reachable states: on a constant-product swap pool in reals, even the concrete
+round trip `swap0(10); swap1(out)` from reserves (100, 100) stays unknown, because Kind 2
+must establish, through the nonlinear swaps, that wallets and reserves are nonnegative.
+
+**Invariants.** A file may declare `invariant I { ψ }`, with ψ a formula without
+modalities, required in every reachable state (also before construction). The candidate
+invariants are the declared ones; the built-in lemma (balances are nonnegative) holds in
+every system and is assumed without checks (proving it for each file cost seconds that
+some regressions needed). The largest inductive subset C is found by Houdini: two Kind 2 runs on free values, without
+the transition system, check `Init ⇒ I` (any initial balances and block number) and
+`C(s) ⇒ I(Trans(s, t))` (any state s and transaction t, constructors included) for each
+candidate I; a refuted candidate is dropped and the checks are repeated. A candidate that
+survives is proved inductive, hence valid.
+
+**Checking a rule on a free state.** `C'(s) ⇒ ((∧ constructed) → Φ(φ))(s)` for an arbitrary
+state s, where C' are the invariants of C that share state variables with φ, transitively.
+If it holds, φ holds in every reachable state (all of them satisfy C): the proof is sound.
+Two details matter for the solvers. The invariants are a premise of the property, not Lustre
+assertions (with assertions, z3 did not prove the swap-pool round trip in 30 s; as a premise,
+in 1 s). Irrelevant invariants are left out: the balance lemma, over int, made the same query
+time out, as the mix of int and nonlinear real arithmetic keeps z3 from using nlsat. For the
+same reason, files over reals should use `pragma balance real`.
+
+If the check fails, its counterexample s* satisfies C' and violates φ, but may be
+unreachable (a counterexample to induction). A BMC search for s* in `(Init, Trans)` then
+either finds a trace to s*, which is a counterexample of φ, or not; s* is shown to the
+user when the time limit expires, as a hint for stronger invariants. Unreachability of s*
+cannot be decided in general.
+
+**Portfolio** (default; `--strategy kind2` gives the previous behaviour). The tool does not
+give up: it runs rounds of the tasks below, one Kind 2 job at a time, each with the round's
+budget (4 s, doubled at each round), until a task gives a verdict or the time limit expires
+(time limit 0: no limit). Task 4 gets 4 budgets per round, or, with a time limit, all the
+time left: a Kind 2 run restarts from scratch, and on the regressions the checks on free
+states succeed in 0.4–2.6 s or not at all. On the regressions and test contracts (30 s per
+rule), 28 rules are decided by free-state checks (0.4–2.6 s each); `two-donatees` P5, which
+Kind 2 alone proved in about 27 s, is now unknown at 30 s.
+1. Houdini on the invariants (once per file; shared by its rules).
+2. The rule on a free state under the proved invariants (z3, then cvc5: z3 decides nonlinear
+   real queries with nlsat, and Kind 2 cannot read cvc5's models of such queries).
+3. The BMC search for s*, once 2 has found it.
+4. Kind 2 on the transition system (as before; with BMC and k-induction only, after the
+   memory limit of a run killed a solver: the invariant generators and IC3 run in parallel
+   and each has its own solver, which exceeds the memory on nonlinear problems).
+
+Verdicts say how they were found: `inductive` (an invariant proved by Houdini),
+`invariants` (step 2), `reach` (step 3), `kind2` (step 4).
 
 ## 5. Real variables
 

@@ -183,6 +183,21 @@ exclude `sender = C`. The tool adds an explicit first statement
   budget). With integer balances (the file without the pragma), `Split_is_fair` and
   `Small_payment` become invalid, as expected.
 
+## After M5 — AMM and lending use cases, part 1: invariants (decisions 10–11 below)
+
+* Experiments on a constant-product AMM in reals (contracts/amm/amm.sol, 8 rules): with
+  Kind 2 on the transition system, 2 rules proved, 6 unknown after 30 s with both solvers.
+  With Kind 2's default engines, nonlinear runs exceeded the memory: a run with a 3 GB cap,
+  on a machine with 1.7 GB available, caused a global OOM (the editor was killed). Since
+  commit 22dd6ff the cap is the smaller of 3 GB and half of MemAvailable.
+* Diagnosis: rules hold because of invariants of the reachable states (nonnegative wallets and
+  reserves), which Kind 2 does not find through nonlinear transitions. Checked on a free
+  state with these invariants as premise, a rule is a single SMT query: the swap-pool round
+  trip is proved in 1 s, and the inductive step of the invariant in 0.8 s.
+* New: `invariant` declarations, Houdini, checks on free states, BMC search for the state
+  that refutes a rule, portfolio strategy in rounds (DESIGN.md, Sect. 6); the runner
+  reports when the memory limit killed a solver. Test contract `tests/contracts/swap_pool.sol`.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
@@ -214,3 +229,10 @@ exclude `sender = C`. The tool adds an explicit first statement
    and amounts real only with `pragma balance real;` in the file (default int), so files
    stay self-contained and existing benchmarks are unchanged. Tool only; the paper is not
    changed.
+10. (after M5) **AMM and lending use cases:** general models (unknown verdicts acceptable)
+    and, separately, simplified models; the integer version of each use case as a mutation;
+    the two tokens as ledgers embedded in the contract; lending prices set by a designated
+    oracle, and, as a version, by anyone (manipulable oracle).
+11. (after M5) **Invariant-assisted checking** (DESIGN.md, Sect. 6). The tool should not
+    answer "unknown" by itself but go on searching; a time limit is given only in tests.
+    Paper: only a `\CL` note for now.

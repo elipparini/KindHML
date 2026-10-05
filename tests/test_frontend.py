@@ -243,6 +243,16 @@ def test_amounts_are_real_with_real_balances():
                     " { x = msg.value } }")
 
 
+def test_invariant_declaration():
+    program = checked("invariant I { forall a : address . funds[a] >= 0 } rule R { true }")
+    assert [(r.name, r.invariant) for r in program.rules] == [("I", True), ("R", False)]
+
+
+def test_invariant_without_modalities():
+    with pytest.raises(KindHMLError, match="contains a modality"):
+        checked("invariant I { << null : Bank.deposit() $ 1 >> true }")
+
+
 def test_bad_pragma():
     for text in ("pragma balance bool;", "pragma value real;"):
         with pytest.raises(KindHMLError, match="only pragmas"):

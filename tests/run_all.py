@@ -37,6 +37,7 @@ def main():
     ap.add_argument("--solver", default="auto")
     ap.add_argument("--expand", default=",".join(V.DEFAULT_EXPAND))
     ap.add_argument("--rules", default="", help="comma-separated rule names to run (default all)")
+    ap.add_argument("--strategy", default="portfolio", choices=V.STRATEGIES)
     ap.add_argument("--csv", default="")
     args = ap.parse_args()
     expand = () if args.expand == "none" else tuple(args.expand.split(","))
@@ -56,13 +57,15 @@ def main():
         except KindHMLError as e:
             print(f"{V.stem(f)}: error: {e}")
             continue
+        context: dict = {}
         for rule in program.rules:
             if only and rule.name not in only:
                 continue
             start = time.time()
             try:
                 out = V.verify(program, rule, args.participants, args.timeout,
-                               mode=args.mode, expand=expand, solver=args.solver)
+                               mode=args.mode, expand=expand, solver=args.solver,
+                               strategy=args.strategy, context=context)
                 gt, desc = out.groundtruth_check(), out.describe()
                 status = out.status
             except KindHMLError as e:

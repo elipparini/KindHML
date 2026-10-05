@@ -152,6 +152,11 @@ class Checker:
     def _rule(self, r: S.Rule) -> S.Rule:
         self._bound, self._args_uses = set(), {}
         formula = self._expect(r.formula, S.BOOL, _Ctx(in_rule=True))
+        if r.invariant:
+            modal = _find(formula, S.Modal)
+            if modal is not None:
+                raise _err(f"invariant {r.name} contains a modality (an invariant is a"
+                           " state formula)", modal)
         return replace(r, formula=formula)
 
     # ------------------------------------------------------------ expressions
@@ -372,6 +377,20 @@ class Checker:
             return (S.QVar(a, S.ARGS, e.args[0].pos),)
         raise _err("a procedure given by a variable of type method takes a single argument"
                    " of type calldataargs", e)
+
+
+def _find(e, cls):
+    """A subexpression of e of class cls, or None."""
+    if isinstance(e, cls):
+        return e
+    for name in getattr(e, "__dataclass_fields__", ()):
+        v = getattr(e, name)
+        for x in (v if isinstance(v, tuple) else (v,)):
+            if isinstance(x, S.Expr):
+                found = _find(x, cls)
+                if found is not None:
+                    return found
+    return None
 
 
 def check(program: S.Program) -> Tuple[S.Program, List[str]]:

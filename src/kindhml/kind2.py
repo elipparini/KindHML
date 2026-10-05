@@ -55,6 +55,7 @@ class Kind2Output:
     properties: List[PropertyResult]
     errors: List[str] = field(default_factory=list)
     raw: str = ""
+    memory_killed: bool = False
 
 
 MEMORY_LIMIT_GB = 3     # for Kind 2 and its solvers together (per process as a fallback)
@@ -132,10 +133,27 @@ class _Watcher(threading.Thread):
     def __init__(self, pid: int):
         super().__init__(daemon=True)
         self.pid, self.seen, self.done = pid, set(), threading.Event()
+        self.events: Optional[str] = None   # memory.events of the scope's cgroup
+        self.oom_kills = 0                  # processes killed by the scope's memory limit
 
     def run(self):
         while not self.done.wait(0.2):
             self.seen.update(_descendants(self.pid))
+            self._poll_memory()
+
+    def _poll_memory(self):
+        try:
+            if self.events is None:
+                with open(f"/proc/{self.pid}/cgroup") as f:
+                    path = f.read().strip().split("::", 1)[1]
+                self.events = f"/sys/fs/cgroup{path}/memory.events"
+            with open(self.events) as f:
+                for line in f:
+                    key, value = line.split()
+                    if key == "oom_kill":
+                        self.oom_kills = max(self.oom_kills, int(value))
+        except (OSError, IndexError, ValueError):
+            pass
 
 
 def _cleanup(proc: subprocess.Popen, unit: Optional[str], watcher: "_Watcher"):
@@ -174,11 +192,12 @@ def solver_args(solver: str) -> List[str]:
     raise ValueError(f"unknown solver {solver}")
 
 
-def run(lustre: str, timeout: float, extra_args: Optional[List[str]] = None,
+def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] = None,
         kind2: Optional[str] = None, save_to: Optional[str] = None,
         solver: str = "z3", cex: bool = False) -> Kind2Output:
-    """Check all properties of a Lustre program. `timeout` is Kind 2's own timeout (s);
-    Kind 2 is killed, with its solvers, if it has not stopped 10 s later.
+    """Check all properties of a Lustre program. `timeout` is Kind 2's own timeout (s), or
+    None for no limit; Kind 2 is killed, with its solvers, if it has not stopped 10 s later.
+    `memory_killed` in the result tells whether the memory limit killed a process.
     With `cex`, Kind 2's JSON output is read, which contains the counterexamples. Without,
     the plain-text output is read, with counterexamples disabled: Kind 2 always builds them
     in JSON mode, which can take longer than finding them (and cannot be interrupted)."""
@@ -191,15 +210,16 @@ def run(lustre: str, timeout: float, extra_args: Optional[List[str]] = None,
         unit = f"kindhml-{os.getpid()}-{uuid.uuid4().hex[:8]}" if scope else None
         prefix = scope + [f"--unit={unit}"] if scope else []
         output = ["-json"] if cex else ["--color", "false", "--print_cex", "false"]
-        cmd = prefix + [kind2] + output + solver_args(solver) + [
-            "--timeout", str(timeout), "--output_dir", tmp] + (extra_args or []) + [path]
+        limit = ["--timeout", str(timeout)] if timeout is not None else []
+        cmd = prefix + [kind2] + output + solver_args(solver) + limit + [
+            "--output_dir", tmp] + (extra_args or []) + [path]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                 start_new_session=True,
                                 preexec_fn=None if scope else _limit_memory)
         watcher = _Watcher(proc.pid)
         watcher.start()
         try:
-            raw, err = proc.communicate(timeout=timeout + 10)
+            raw, err = proc.communicate(timeout=timeout + 10 if timeout is not None else None)
             killed = False
         except subprocess.TimeoutExpired:
             _cleanup(proc, unit, watcher)
@@ -213,6 +233,10 @@ def run(lustre: str, timeout: float, extra_args: Optional[List[str]] = None,
     out = parse_output(raw, err) if cex else parse_text(raw, err)
     if killed:
         out.errors.append("Kind 2 did not stop in time and was killed")
+    if watcher.oom_kills:
+        out.memory_killed = True
+        out.errors.append(f"the memory limit ({memory_limit_mb()} MB) killed"
+                          f" {watcher.oom_kills} process(es)")
     return out
 
 
