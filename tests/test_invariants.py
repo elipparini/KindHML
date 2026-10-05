@@ -8,7 +8,7 @@ import pytest
 from kindhml import kind2
 from kindhml import lustre as L
 from kindhml import verify as V
-from kindhml.invariants import Checks, constant, state_fields, state_values
+from kindhml.invariants import Checks, cases, constant, state_fields, state_values
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POOL = os.path.join(ROOT, "tests", "contracts", "swap_pool.sol")
@@ -38,11 +38,41 @@ def test_only_relevant_invariants_are_assumed():
     assert c.relevant(prop, list(c.candidates)) == ["Inv", "Small_reserves"]
 
 
+def test_premises_direct_then_transitive():
+    """In the AMM, the swaps share fields with Nonnegative only; Shares is connected to them
+    through `supply`, which occurs in Nonnegative."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    c = Checks(program, 2, "inline", ("address", "method"))
+    invariants = c.axioms + ["Nonnegative", "Shares"]
+    assert c.premises(program.rule("Swap_reversibility"), invariants) == \
+        [["Nonnegative"], ["Nonnegative", "Shares"]]
+
+
 def test_programs_have_no_transition_system():
     program, c = checks()
-    for lus in (c.step_check(["Inv"]), c.rule_check(program.rule("Swap_reversibility"), ["Inv"])):
+    step, about = c.step_check(["Inv"])
+    for lus in (step, c.rule_check(program.rule("Swap_reversibility"), ["Inv"])[0]):
         main = lus[lus.index("node main"):]
         assert "pre" not in main and "->" not in main.replace("=>", "")
+    # one step property per procedure, constructor included
+    assert sorted(about) == [f"step_Inv__Pool_{p}" for p in
+                             ("constructor", "init", "swap0", "swap1", "transfer0")]
+
+
+def test_cases_through_implications():
+    a, b, c_ = L.Var("a"), L.Var("b"), L.Var("c")
+    assert cases(L.op("=>", a, L.op("and", b, c_))) == [L.op("=>", a, b), L.op("=>", a, c_)]
+    assert cases(L.op("and", L.op("=>", a, b), c_)) == [L.op("=>", a, b), c_]
+
+
+def test_rule_split_into_cases():
+    """Swap_reversibility quantifies over the addresses but null: one case per user (with
+    the sender Pool, the transaction reverts, and its case simplifies to true)."""
+    program, c = checks()
+    _, names = c.rule_check(program.rule("Swap_reversibility"), ["Inv"], split=True)
+    assert names == ["Swap_reversibility__0", "Swap_reversibility__1"]
+    _, names = c.rule_check(program.rule("Swap_reversibility"), ["Inv"])
+    assert names == ["Swap_reversibility"]
 
 
 def test_state_values_of_a_counterexample():

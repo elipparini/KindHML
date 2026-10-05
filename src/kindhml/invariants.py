@@ -74,40 +74,89 @@ class Checks:
         _, main = self.enc.program()
         return list(main.asserts)
 
-    def step_check(self, names: List[str]) -> str:
-        """Properties `step_<I>`: C(s) ⇒ I(Trans(s, t)), with C the conjunction of `names`
-        and of the axioms."""
-        prog, s, s1 = self._program(), L.Var("s"), L.Var("s1")
-        assumption = self._conj(self.axioms + names, s)
-        node = L.Function(
-            "main", [("s", ST), ("t", TX)], [], locals=[("s1", ST)],
-            equations=[("s1", L.call("trans", s, L.Var("t")))],
-            properties=[(f"step_{n}", L.op("=>", assumption, self.candidates[n](s1)))
-                        for n in names],
-            comment="C(s) => I(Trans(s, t)), for every candidate invariant I")
-        return self._render(prog, node)
-
-    def rule_check(self, rule: S.Rule, invariants: List[str]) -> str:
-        """The rule on a free state satisfying the proved invariants that concern it.
-
-        The invariants are the premise of the property, not Lustre assertions (with
-        assertions, Kind 2 did not prove Swap_reversibility of the swap pool in 30 s; as a
-        premise, in 1 s). Only the invariants that share state variables with the rule,
-        transitively, are included: an irrelevant one can change the logic of the query
-        (the balance lemma over int, in a query over nonlinear reals, made z3 time out)."""
+    def step_check(self, names: List[str]) -> Tuple[str, Dict[str, str]]:
+        """C(s) ⇒ I(Trans(s, t)) for every candidate I in `names`, with C the conjunction of
+        `names` and of the axioms. One property per I and per procedure C.f (constructors
+        included): C(s) ⇒ Φ(∀a, x̄, v[, δ]. ⟨a : C.f(x̄) $ v @ δ⟩ I)(s), encoded like a
+        modality, so that only f is unfolded (passing the whole Trans and fixing t.fx made each
+        query much slower, and the step of the full AMM unknown after 60 s). A sender that
+        is not a user makes the transaction revert, which leaves the state unchanged, so
+        `a` ranges over the address domain. Returns the program and, for each property, the
+        candidate it is about."""
         prog, s = self._program(), L.Var("s")
-        prop = (self.fenc.state_formula(rule.formula, s) if rule.invariant
-                else self.fenc.rule(rule, s))
-        relevant = self.relevant(prop, invariants)
-        node = L.Function(
-            "main", [("s", ST)], [],
-            properties=[(rule.name, L.op("=>", self._conj(relevant, s), prop))],
-            comment=f"{rule.name} on every state satisfying the invariants"
-                    f" {', '.join(relevant) or '(none)'}")
-        return self._render(prog, node)
+        premise = self._conj(self.axioms + names, s)
+        props, about = [], {}
+        for c, p in self.enc.system.methods:
+            for n in names:
+                rule = self.program.rule(n)
+                prop = f"step_{n}__{c.name}_{p.name}"
+                after = self.fenc.state_formula(self._after(c, p, rule.formula), s)
+                props.append((prop, L.op("=>", premise, after)))
+                about[prop] = n
+        node = L.Function("main", [("s", ST)], [], properties=props,
+                          comment="C(s) => I after any transaction, for every candidate I")
+        return self._render(prog, node), about
 
-    def relevant(self, prop: L.LExpr, invariants: List[str]) -> List[str]:
-        """The invariants connected to `prop` by shared fields of the state s."""
+    def _after(self, c: S.Contract, p: S.Procedure, formula: S.Expr) -> S.Expr:
+        """∀a, x̄, v[, δ]. ⟨a : C.p(x̄) $ v @ δ⟩ formula, as a resolved formula."""
+        sender = S.QVar("__sender", S.ADDRESS)
+        args = tuple(S.QVar(f"__arg_{x.name}", x.type) for x in p.params)
+        value = S.QVar("__value", self.program.balance_type)
+        blocks = (S.QVar("__blocks", S.INT) if self.enc.system.uses_block_num
+                  else S.IntLit(0))
+        body: S.Expr = S.Modal(sender, c.name, S.ProcConst(c.name, p.name), args, value,
+                               blocks, formula)
+        for v in ([sender, value] + list(args) + ([blocks] if isinstance(blocks, S.QVar)
+                                                   else [])):
+            body = S.Quant("forall", v.name, v.type, body)
+        return body
+
+    def premises(self, rule: S.Rule, invariants: List[str]) -> List[List[str]]:
+        """The sets of invariants to assume when checking `rule`, to be tried in turn: those
+        that share state variables with the rule, then also those connected to them
+        (transitively), if different. Irrelevant invariants can make the query much harder:
+        the balance lemma over int, in a query over nonlinear reals, made z3 time out (the
+        mix of int and real keeps it from using nlsat); in the AMM, the invariant on the
+        liquidity shares, connected to the swap only through `supply`, turned a 1 s proof
+        of Swap_reversibility into a timeout. Fewer premises are always sound."""
+        prop = self._property(rule, L.Var("s"))
+        direct = self.relevant(prop, invariants, transitive=False)
+        closure = self.relevant(prop, invariants, transitive=True)
+        return [direct] + ([closure] if closure != direct else [])
+
+    def rule_check(self, rule: S.Rule, invariants: List[str],
+                   split: bool = False) -> Tuple[str, List[str]]:
+        """The rule on a free state satisfying the given invariants, as one property or, with
+        `split`, as one property per case. Returns the program and the property names.
+
+        The invariants are the premise of the property, not Lustre assertions: with
+        assertions, Kind 2 did not prove Swap_reversibility of the swap pool in 30 s; as a
+        premise, in 1 s. The cases are the conjuncts of the property, through implications
+        (`A ⇒ (B ∧ C)` gives `A ⇒ B` and `A ⇒ C`); the expansion of the quantifiers over
+        addresses and methods produces them. Neither form is always better: AMM Slippage
+        (any transaction of an adversary before a swap) is unknown after 60 s as one
+        property, and its 54 cases are proved in 3 s in one run; the swap-pool round trip is
+        proved in 1 s as one property, and its 2 cases are unknown after 20 s in one run
+        (0.6 s each in separate runs)."""
+        prog, s = self._program(), L.Var("s")
+        prop = L.op("=>", self._conj(invariants, s), self._property(rule, s))
+        parts = cases(prop) if split else [prop]
+        names = [rule.name] if len(parts) == 1 else [f"{rule.name}__{i}"
+                                                      for i in range(len(parts))]
+        node = L.Function(
+            "main", [("s", ST)], [], properties=list(zip(names, parts)),
+            comment=f"{rule.name} on every state satisfying the invariants"
+                    f" {', '.join(invariants) or '(none)'}")
+        return self._render(prog, node), names
+
+    def _property(self, rule: S.Rule, s: L.LExpr) -> L.LExpr:
+        return (self.fenc.state_formula(rule.formula, s) if rule.invariant
+                else self.fenc.rule(rule, s))
+
+    def relevant(self, prop: L.LExpr, invariants: List[str],
+                 transitive: bool = True) -> List[str]:
+        """The invariants sharing fields of the state s with `prop` (transitively, through
+        the fields of the invariants chosen, if `transitive`)."""
         s = L.Var("s")
         fields = {n: state_fields(self.candidates[n](s)) for n in invariants}
         used, chosen, changed = state_fields(prop), [], True
@@ -116,8 +165,9 @@ class Checks:
             for n in invariants:
                 if n not in chosen and fields[n] & used:
                     chosen.append(n)
-                    used |= fields[n]
-                    changed = True
+                    if transitive:
+                        used |= fields[n]
+                        changed = True
         return [n for n in invariants if n in chosen]
 
     def _conj(self, names: List[str], state: L.LExpr) -> L.LExpr:
@@ -130,6 +180,15 @@ class Checks:
         main.properties = [("unreachable", L.neg(L.conj(
             [eq(_path(p), v) for p, v in sorted(state.items())])))]
         return prog.render()
+
+
+def cases(e: L.LExpr) -> List[L.LExpr]:
+    """Formulas whose conjunction is equivalent to e: its conjuncts, through implications."""
+    if isinstance(e, L.Op) and e.op == "and":
+        return [c for a in e.args for c in cases(a)]
+    if isinstance(e, L.Op) and e.op == "=>":
+        return [L.op("=>", e.args[0], c) for c in cases(e.args[1])]
+    return [e]
 
 
 def state_fields(e: L.LExpr, var: str = "s") -> set:

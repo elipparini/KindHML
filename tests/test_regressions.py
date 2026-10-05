@@ -28,6 +28,9 @@ OPEN = {
                                  "free states of the portfolio leave too little time",
     ("signature_error", "P5_true"): "valid by IC3 with z3, in 16 s to more than 30 s depending "
                                     "on the run: at the edge of the timeout",
+    ("calls", "Report_sees_balance_after_transfer"): "invalid; found in 25-30 s (by the search "
+                                                     "of the counterexample to induction): at "
+                                                     "the edge of the timeout",
 }
 
 

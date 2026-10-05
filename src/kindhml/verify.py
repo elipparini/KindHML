@@ -130,6 +130,8 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
     invs = context[key]
     start, budget = time.time(), FIRST_BUDGET
     proof_open, target, engines = True, None, extra_args
+    premises: List[List[str]] = []
+    attempts: Optional[List[tuple]] = None
     last = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), [])
     while True:
         for task in ("invariants", "proof", "reach", "kind2"):
@@ -156,16 +158,31 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                 if invs.proved is not None and rule.invariant and rule.name in invs.proved:
                     return _valid(rule, "inductive", time.time() - start)
             elif task == "proof":
-                lus = invs.checks.rule_check(rule, invs.proved)
-                status, out, s = _free_run(lus, rule.name, b)
-                if status == "valid":
-                    return _valid(rule, "invariants", time.time() - start, s)
-                if status == "invalid":
-                    proof_open = False
-                    out = kind2.run(lus, b, solver=s, extra_args=LIGHT_ENGINES, cex=True)
-                    res = next((p for p in out.properties if p.name == rule.name), None)
-                    target = state_values(res.counterexample) if res else {}
-                    last.cti = describe_state(target)
+                # forms to try: for each premise, from the smallest, the rule as one property
+                # and split into cases; a counterexample under the last premise (the
+                # strongest) is the state searched for by "reach"
+                if attempts is None:
+                    premises = invs.checks.premises(rule, invs.proved)
+                    attempts = [(i, split) for i in range(len(premises))
+                                for split in (False, True)]
+                for i, split in list(attempts):
+                    if (i, split) not in attempts:
+                        continue
+                    lus, names = invs.checks.rule_check(rule, premises[i], split)
+                    status, refuted, s = _free_run(lus, names, b)
+                    if status == "valid":
+                        return _valid(rule, "invariants", time.time() - start, s)
+                    if status == "invalid":
+                        attempts = [a for a in attempts if a[0] != i]
+                        if i == len(premises) - 1:
+                            proof_open = False
+                            out = kind2.run(lus, b, solver=s, extra_args=LIGHT_ENGINES,
+                                            cex=True)
+                            res = next((p for p in out.properties if p.name == refuted),
+                                       None)
+                            target = state_values(res.counterexample) if res else {}
+                            last.cti = describe_state(target)
+                            break
             elif task == "reach":
                 lus = invs.checks.reach_check(target)
                 out = kind2.run(lus, b, solver="z3", extra_args=["--enable", "BMC"], cex=cex)
@@ -217,20 +234,25 @@ def _valid(rule: S.Rule, method: str, elapsed: float, solver: str = "") -> Outco
                    solver, method)
 
 
-def _free_run(lustre: str, name: str, budget: float):
-    """A check on free values with FREE_SOLVERS (half of the budget each, unless the first
-    decides). Returns (status of property `name`, Kind 2 output, solver)."""
-    status, out, used = "unknown", None, ""
+def _free_run(lustre: str, names: List[str], budget: float):
+    """A check on free values, with properties `names` (the cases of a rule), with
+    FREE_SOLVERS (3/4 of the budget for the first, which usually decides or gives up fast,
+    the rest for the second). Returns ("valid" if all
+    cases are valid, "invalid" if one is, else "unknown"; the refuted case; the solver)."""
     deadline = time.time() + budget
+    valid: set = set()
     for i, s in enumerate(FREE_SOLVERS):
         left = deadline - time.time()
-        b = max(left / 2 if i < len(FREE_SOLVERS) - 1 else left, 1)
+        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1)
         out = kind2.run(lustre, b, solver=s, extra_args=LIGHT_ENGINES)
-        res = next((p for p in out.properties if p.name == name), None)
-        status, used = (res.status if res else "error"), s
-        if status in ("valid", "invalid"):
-            break
-    return status, out, used
+        for p in out.properties:
+            if p.name in names and p.status == "invalid":
+                return "invalid", p.name, s
+            if p.status == "valid":
+                valid.add(p.name)
+        if valid >= set(names):
+            return "valid", None, s
+    return "unknown", None, ""
 
 
 class _Invariants:
@@ -252,9 +274,10 @@ class _Invariants:
             if not names:
                 self.proved = list(self.checks.axioms)
                 return
-            decided = {}
-            for label, lus in (("init", self.checks.init_check(names)),
-                               ("step", self.checks.step_check(names))):
+            decided: Dict[str, str] = {}
+            step, about = self.checks.step_check(names)
+            about.update({f"init_{n}": n for n in names})
+            for lus in (self.checks.init_check(names), step):
                 left = deadline - time.time()
                 if left <= 0:
                     return
@@ -263,18 +286,16 @@ class _Invariants:
                     for p in out.properties:
                         if p.status in ("valid", "invalid"):
                             decided.setdefault(p.name, p.status)
-                    if all(f"{label}_{n}" in decided for n in names):
+                    if all(p.name in decided for p in out.properties):
                         break
-            refuted = [n for n in names if "invalid" in (decided.get(f"init_{n}"),
-                                                         decided.get(f"step_{n}"))]
+            refuted = {about[p] for p, st in decided.items() if st == "invalid"}
             if refuted:
                 for n in refuted:
                     self.dropped[n] = ("initial state" if decided.get(f"init_{n}") == "invalid"
                                        else "inductive step")
                 self.candidates = [n for n in names if n not in refuted]
                 continue
-            if all(decided.get(f"{lbl}_{n}") == "valid" for n in names
-                   for lbl in ("init", "step")):
+            if all(decided.get(p) == "valid" for p in about):
                 self.proved = self.checks.axioms + names
             return
 
