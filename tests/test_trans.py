@@ -13,12 +13,13 @@ from fractions import Fraction
 
 import pytest
 
+from kindhml import concrete
 from kindhml import kind2
 from kindhml import lustre as L
 from kindhml import syntax as S
 from kindhml.builder import parse
-from kindhml.encode_trans import (BALANCE, BLOCK, BLOCKS, REVERT, Encoder, addr_const, constructed_var,
-                                  field_var, key_field, map_type, param_var, proc_const)
+from kindhml.concrete import state_literal, value_literal
+from kindhml.encode_trans import Encoder, key_field
 from kindhml.lustre_eval import Evaluator
 from kindhml.model import NULL, System
 from kindhml.reference import Interpreter, State, Tx, initial_state
@@ -37,39 +38,9 @@ except FileNotFoundError:
     HAVE_KIND2 = False
 
 
-def value_literal(v, t: S.AnyType, system: System) -> L.LExpr:
-    if isinstance(t, S.MapType):
-        return L.record(map_type(t.value), [(key_field(a), value_literal(v[a], t.value, system))
-                                            for a in system.addresses])
-    if t == S.BOOL:
-        return L.Bool(v)
-    if t == S.ADDRESS:
-        return L.Var(addr_const(v))
-    return L.Real(Fraction(v)) if t == S.REAL else L.Int(v)
-
-
-def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
-    values = {BALANCE: value_literal(st.balance, S.MapType(enc.amount), system),
-              REVERT: L.Bool(st.revert), BLOCK: L.Int(st.block_num)}
-    for c in system.contracts:
-        values[constructed_var(c.name)] = L.Bool(st.constructed[c.name])
-        for f in c.fields:
-            values[field_var(c.name, f.name)] = value_literal(st.fields[(c.name, f.name)],
-                                                              f.type, system)
-    return L.record("St", [(n, values[n]) for n, _ in enc.state_fields()])
-
-
 def tx_literal(tx: Tx, system: System, enc: Encoder) -> L.LExpr:
-    values = {"sender": L.Var(addr_const(tx.sender)), "cx": L.Var(addr_const(tx.contract)),
-              "fx": L.Var(proc_const(*tx.method)),
-              "value": value_literal(tx.value, enc.amount, system),
-              BLOCKS: L.Int(tx.blocks)}
-    for v in system.param_vars:
-        arg = tx.args.get(v.name) if (v.contract, v.proc) == tx.method else None
-        values[param_var(v.contract, v.proc, v.name)] = value_literal(
-            arg if arg is not None else random_value(v.type, system, random.Random(0)),
-            v.type, system)
-    return L.record("Tx", [(n, values[n]) for n, _ in enc.tx_fields()])
+    return concrete.tx_literal(tx, system, enc,
+                               lambda t: random_value(t, system, random.Random(0)))
 
 
 def random_value(t: S.AnyType, system: System, rnd: random.Random):

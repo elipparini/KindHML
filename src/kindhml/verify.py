@@ -13,6 +13,8 @@ from .builder import parse
 from .encode_formula import FormulaEncoder
 from .encode_trans import Encoder
 from .errors import KindHMLError
+from .concrete import describe_tx, state_literal
+from .fuzz import Fuzzer
 from .invariants import Checks, describe_state, state_values
 from .model import System
 from .typecheck import check
@@ -45,9 +47,7 @@ def lustre_for(program: S.Program, rule: S.Rule, n_users: int, mode: str = DEFAU
     prog, main = enc.program()
     if lemmas:
         main.properties += enc.lemmas()
-    fenc = FormulaEncoder(enc, mode, tuple(expand))
-    prop = fenc.state_formula(rule.formula, L.Var("s")) if rule.invariant else fenc.rule(rule)
-    main.properties.append((rule.name, prop))
+    main.properties.append((rule.name, FormulaEncoder(enc, mode, tuple(expand)).rule(rule)))
     return prog.render()
 
 
@@ -60,6 +60,7 @@ class Outcome:
     method: str = ""                 # kind2 | invariants | inductive | reach (see verify)
     cti: str = ""                    # a free state refuting the rule, possibly unreachable
     memory_killed: bool = False
+    trace: str = ""                  # method fuzz: the transactions reaching the counterexample
 
     @property
     def status(self) -> str:
@@ -82,6 +83,8 @@ class Outcome:
         how = "/".join(x for x in (self.method, self.solver) if x)
         how = f" [{how}]" if how else ""
         line = f"{self.rule.name}: {what}{how} (ground truth: {self.groundtruth_check()})"
+        if self.trace:
+            line += f"\n    counterexample reached by: {self.trace}"
         if self.cti and self.status not in ("valid", "invalid"):
             line += (f"\n    counterexample to induction (possibly unreachable; consider"
                      f" stronger invariants): {self.cti}")
@@ -128,13 +131,14 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
     if key not in context:
         context[key] = _Invariants(Checks(program, n_users, mode, expand))
     invs = context[key]
+    nonlinear = is_nonlinear(program)
     start, budget = time.time(), FIRST_BUDGET
     proof_open, target, engines = True, None, extra_args
     premises: List[List[str]] = []
     attempts: Optional[List[tuple]] = None
     last = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), [])
     while True:
-        for task in ("invariants", "proof", "reach", "kind2"):
+        for task in ("invariants", "proof", "reach", "fuzz", "kind2"):
             # the conditions are evaluated in turn: a counterexample found by "proof" is
             # searched for by "reach" in the same round
             if task == "invariants" and invs.proved is not None:
@@ -150,9 +154,13 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                 return last
             b = budget if left is None else min(budget, left)
             if task == "kind2":
-                # With a time limit, Kind 2 gets all the time left: it restarts from scratch
-                # at each run, and the other tasks succeed in seconds or not at all.
-                b = KIND2_SHARE * budget if left is None else left
+                # With a time limit and linear arithmetic, Kind 2 gets all the time left: it
+                # restarts from scratch at each run, and the other tasks succeed in seconds
+                # or not at all. With nonlinear arithmetic, Kind 2 rarely concludes, and the
+                # rounds go on.
+                b = KIND2_SHARE * budget
+                if left is not None:
+                    b = min(b, left) if nonlinear else left
             if task == "invariants":
                 invs.attempt(b)
                 if invs.proved is not None and rule.invariant and rule.name in invs.proved:
@@ -168,6 +176,10 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                 for i, split in list(attempts):
                     if (i, split) not in attempts:
                         continue
+                    left = None if deadline is None else deadline - time.time()
+                    if left is not None and left <= 1:
+                        break
+                    b = budget if left is None else min(budget, left)
                     lus, names = invs.checks.rule_check(rule, premises[i], split)
                     status, refuted, s = _free_run(lus, names, b)
                     if status == "valid":
@@ -176,13 +188,28 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                         attempts = [a for a in attempts if a[0] != i]
                         if i == len(premises) - 1:
                             proof_open = False
-                            out = kind2.run(lus, b, solver=s, extra_args=LIGHT_ENGINES,
-                                            cex=True)
+                            left = None if deadline is None else deadline - time.time()
+                            out = kind2.run(lus, b if left is None else max(min(b, left), 1),
+                                            solver=s, extra_args=LIGHT_ENGINES, cex=True)
                             res = next((p for p in out.properties if p.name == refuted),
                                        None)
                             target = state_values(res.counterexample) if res else {}
                             last.cti = describe_state(target)
                             break
+            elif task == "fuzz":
+                deadline_fuzz = time.time() + b
+                for txs, st in invs.fuzzer.candidates(rule, b / 2):
+                    left = deadline_fuzz - time.time()
+                    if left <= 1:
+                        break
+                    lus = invs.checks.concrete_check(
+                        rule, state_literal(st, invs.checks.enc.system, invs.checks.enc))
+                    status, _, s = _free_run(lus, [rule.name], left)
+                    if status == "invalid":
+                        res = kind2.PropertyResult(rule.name, "invalid", len(txs), "fuzz",
+                                                   time.time() - start)
+                        return Outcome(rule, res, [], s, "fuzz",
+                                       trace="; ".join(describe_tx(tx) for tx in txs))
             elif task == "reach":
                 lus = invs.checks.reach_check(target)
                 out = kind2.run(lus, b, solver="z3", extra_args=["--enable", "BMC"], cex=cex)
@@ -229,6 +256,25 @@ def kind2_search(rule: S.Rule, lustre: str, timeout: Optional[float],
     return outcome
 
 
+def is_nonlinear(program: S.Program) -> bool:
+    """Whether a contract multiplies two non-constant terms or divides by one."""
+    def constant(e):
+        return isinstance(e, (S.IntLit, S.RealLit)) or (
+            isinstance(e, S.ToReal) and constant(e.arg))
+
+    def visit(x) -> bool:
+        if isinstance(x, S.BinOp) and (
+                (x.op == "*" and not constant(x.left) and not constant(x.right))
+                or (x.op in ("/", "%") and not constant(x.right))):
+            return True
+        if isinstance(x, tuple):
+            return any(visit(y) for y in x)
+        if hasattr(x, "__dataclass_fields__"):
+            return any(visit(getattr(x, n)) for n in x.__dataclass_fields__)
+        return False
+    return visit(program.contracts)
+
+
 def _valid(rule: S.Rule, method: str, elapsed: float, solver: str = "") -> Outcome:
     return Outcome(rule, kind2.PropertyResult(rule.name, "valid", None, method, elapsed), [],
                    solver, method)
@@ -261,33 +307,52 @@ class _Invariants:
 
     def __init__(self, checks: Checks):
         self.checks = checks
+        self.fuzzer = Fuzzer(checks.enc.system)
         self.candidates = [n for n in checks.candidates if n not in checks.axioms]
         self.proved: Optional[List[str]] = None if self.candidates else list(checks.axioms)
         self.dropped: Dict[str, str] = {}
+        # for the current candidates: the check programs (initial state, one step program per
+        # procedure), each with its properties, and the properties decided so far
+        self._for: Optional[List[str]] = None
+        self._programs: List[tuple] = []
+        self._decided: Dict[str, str] = {}
 
     def attempt(self, budget: float):
-        """One Houdini pass within `budget`: drop the refuted candidates; `proved` (with the
-        axioms) is set if the remaining ones are all proved."""
+        """A Houdini pass within `budget`, which goes on from the previous one: each check
+        program not yet decided gets the budget (z3 3/4, cvc5 the rest); the refuted
+        candidates are dropped; `proved` (with the axioms) is set if the remaining ones are
+        all proved."""
         deadline = time.time() + budget
         while True:
             names = self.candidates
             if not names:
                 self.proved = list(self.checks.axioms)
                 return
-            decided: Dict[str, str] = {}
-            step, about = self.checks.step_check(names)
-            about.update({f"init_{n}": n for n in names})
-            for lus in (self.checks.init_check(names), step):
+            if self._for != names:
+                self._for, self._decided = list(names), {}
+                self._programs = [(self.checks.init_check(names),
+                                   {f"init_{n}": n for n in names})]
+                self._programs += self.checks.step_checks(names)
+            decided = self._decided
+            about = {p: n for _, props in self._programs for p, n in props.items()}
+            for lus, props in self._programs:
+                if all(p in decided for p in props):
+                    continue
                 left = deadline - time.time()
-                if left <= 0:
+                if left <= 1:
                     return
-                for s in FREE_SOLVERS:
-                    out = kind2.run(lus, max(left / 2, 1), solver=s, extra_args=LIGHT_ENGINES)
+                end = time.time() + left
+                for i, s in enumerate(FREE_SOLVERS):
+                    rest = end - time.time()
+                    b = max(rest * 3 / 4 if i < len(FREE_SOLVERS) - 1 else rest, 1)
+                    out = kind2.run(lus, b, solver=s, extra_args=LIGHT_ENGINES)
                     for p in out.properties:
                         if p.status in ("valid", "invalid"):
                             decided.setdefault(p.name, p.status)
-                    if all(p.name in decided for p in out.properties):
+                    if all(p in decided for p in props):
                         break
+                if any(decided.get(p) == "invalid" for p in about):
+                    break                       # drop the refuted candidates first
             refuted = {about[p] for p, st in decided.items() if st == "invalid"}
             if refuted:
                 for n in refuted:

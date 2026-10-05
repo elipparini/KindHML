@@ -189,20 +189,33 @@ must establish, through the nonlinear swaps, that wallets and reserves are nonne
 modalities, required in every reachable state (also before construction). The candidate
 invariants are the declared ones; the built-in lemma (balances are nonnegative) holds in
 every system and is assumed without checks (proving it for each file cost seconds that
-some regressions needed). The largest inductive subset C is found by Houdini: two Kind 2 runs on free values, without
-the transition system, check `Init ⇒ I` (any initial balances and block number) and
-`C(s) ⇒ I(Trans(s, t))` (any state s and transaction t, constructors included) for each
-candidate I; a refuted candidate is dropped and the checks are repeated. A candidate that
-survives is proved inductive, hence valid.
+some regressions needed). The largest inductive subset C is found by Houdini: two Kind 2
+runs on free values, without the transition system, check `Init ⇒ I` (any initial balances
+and block number) and `C(s) ⇒ I after any transaction`, for each candidate I; a refuted
+candidate is dropped and the checks are repeated. A candidate that survives is proved
+inductive, hence valid. The step has one property per invariant and procedure f
+(constructors included), `C(s) ⇒ Φ(∀a, x̄, v. ⟨a : C.f(x̄) $ v⟩ I)(s)`, encoded like a
+modality so that only f is unfolded (with the whole `Trans` and `t.fx` fixed, each query took
+about 10 s, and the step of the AMM invariants was unknown after 60 s; now 1.8 s).
 
 **Checking a rule on a free state.** `C'(s) ⇒ ((∧ constructed) → Φ(φ))(s)` for an arbitrary
-state s, where C' are the invariants of C that share state variables with φ, transitively.
-If it holds, φ holds in every reachable state (all of them satisfy C): the proof is sound.
-Two details matter for the solvers. The invariants are a premise of the property, not Lustre
-assertions (with assertions, z3 did not prove the swap-pool round trip in 30 s; as a premise,
-in 1 s). Irrelevant invariants are left out: the balance lemma, over int, made the same query
-time out, as the mix of int and nonlinear real arithmetic keeps z3 from using nlsat. For the
-same reason, files over reals should use `pragma balance real`.
+state s, where C' is a subset of C. If it holds, φ holds in every reachable state (all of them
+satisfy C): the proof is sound, for any C'. The solvers are sensitive to the form of the
+query, so the tool tries several forms in turn:
+* premises: first the invariants that share state variables with φ, then their transitive
+  closure (in the AMM, the invariant on the liquidity shares, connected to the swaps only
+  through `supply`, turned a 1 s proof of Swap_reversibility into a timeout; the balance
+  lemma over int, in a query over nonlinear reals, keeps z3 from using nlsat);
+* the property as a whole, then split into cases, its conjuncts through implications, one
+  property each (AMM Slippage: unknown after 60 s as a whole, 54 cases proved in 3 s; the
+  swap-pool round trip: proved in 1 s as a whole, its 2 cases unknown together in 20 s).
+The invariants are a premise of the property, not Lustre assertions (with assertions, z3
+did not prove the swap-pool round trip in 30 s; as a premise, in 1 s). The universal
+quantifiers in positive position become inputs of the node (`hoist`): a property is valid
+iff it holds for all inputs, and the solver then gets no quantifier (Kind 2 passes them to
+it, which keeps z3 from using nlsat: a swap round trip at a concrete state was unknown after
+20 s with `∀x`, refuted in 0.5 s with x an input). Files over reals should use
+`pragma balance real`, so that the queries are over reals only.
 
 If the check fails, its counterexample s* satisfies C' and violates φ, but may be
 unreachable (a counterexample to induction). A BMC search for s* in `(Init, Trans)` then
@@ -210,24 +223,40 @@ either finds a trace to s*, which is a counterexample of φ, or not; s* is shown
 user when the time limit expires, as a hint for stronger invariants. Unreachability of s*
 cannot be decided in general.
 
+**Random testing** (`fuzz.py`). Kind 2 rarely finds counterexamples through nonlinear
+transitions (on the integer AMM, BMC reaches depth 1 in 60 s, and a counterexample needs a
+constructor, a deposit and a swap). Random transactions, run by the reference interpreter
+(reverted ones left out), give reachable states; the rule is evaluated there with bounded
+quantifiers (and a sample of the arguments of all procedures). A state where it fails is a
+candidate, which Kind 2 checks exactly (the formula at that concrete state, `concrete_check`);
+a confirmed candidate is a counterexample, reported with its transactions. For a rule with
+an existential quantifier over numbers in positive position, the bounded evaluation almost
+always misses the witness, so new random states are checked exactly instead.
+
 **Portfolio** (default; `--strategy kind2` gives the previous behaviour). The tool does not
 give up: it runs rounds of the tasks below, one Kind 2 job at a time, each with the round's
 budget (4 s, doubled at each round), until a task gives a verdict or the time limit expires
-(time limit 0: no limit). Task 4 gets 4 budgets per round, or, with a time limit, all the
-time left: a Kind 2 run restarts from scratch, and on the regressions the checks on free
-states succeed in 0.4–2.6 s or not at all. On the regressions and test contracts (30 s per
-rule), 28 rules are decided by free-state checks (0.4–2.6 s each); `two-donatees` P5, which
-Kind 2 alone proved in about 27 s, is now unknown at 30 s.
+(time limit 0: no limit). Task 5 gets 4 budgets per round. With a time limit, on contracts
+with linear arithmetic it gets all the time left (a Kind 2 run restarts from scratch, and on
+the regressions the other tasks succeed in seconds or not at all); on nonlinear contracts (a
+product of two variables, a division by a variable) the rounds go on.
 1. Houdini on the invariants (once per file; shared by its rules).
-2. The rule on a free state under the proved invariants (z3, then cvc5: z3 decides nonlinear
-   real queries with nlsat, and Kind 2 cannot read cvc5's models of such queries).
+2. The rule on a free state under the proved invariants, in the forms above (z3 with 3/4 of
+   the budget, then cvc5: z3 decides nonlinear real queries with nlsat, and Kind 2 cannot
+   read cvc5's models of such queries).
 3. The BMC search for s*, once 2 has found it.
-4. Kind 2 on the transition system (as before; with BMC and k-induction only, after the
+4. Random testing, with exact confirmation.
+5. Kind 2 on the transition system (as before; with BMC and k-induction only, after the
    memory limit of a run killed a solver: the invariant generators and IC3 run in parallel
    and each has its own solver, which exceeds the memory on nonlinear problems).
 
 Verdicts say how they were found: `inductive` (an invariant proved by Houdini),
-`invariants` (step 2), `reach` (step 3), `kind2` (step 4).
+`invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `kind2` (task 5).
+
+On the regressions and test contracts (30 s per rule), 82 rules out of 89 match; 28 are
+decided by free-state checks (0.4–2.6 s each). Two rules at the edge of the time limit with
+Kind 2 alone (about 27 s) are now unknown: `two-donatees` P5 and `calls`
+Report_sees_balance_after_transfer.
 
 ## 5. Real variables
 

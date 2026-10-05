@@ -1,0 +1,61 @@
+"""Concrete states and transactions of the reference interpreter as Lustre literals."""
+
+from __future__ import annotations
+
+from fractions import Fraction
+
+from . import lustre as L
+from . import syntax as S
+from .encode_trans import (BALANCE, BLOCK, BLOCKS, REVERT, Encoder, addr_const, constructed_var,
+                           field_var, key_field, map_type, param_var, proc_const)
+from .model import System
+from .reference import State, Tx
+
+
+def value_literal(v, t: S.AnyType, system: System) -> L.LExpr:
+    if isinstance(t, S.MapType):
+        return L.record(map_type(t.value), [(key_field(a), value_literal(v[a], t.value, system))
+                                            for a in system.addresses])
+    if t == S.BOOL:
+        return L.Bool(v)
+    if t == S.ADDRESS:
+        return L.Var(addr_const(v))
+    return L.Real(Fraction(v)) if t == S.REAL else L.Int(v)
+
+
+def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
+    values = {BALANCE: value_literal(st.balance, S.MapType(enc.amount), system),
+              REVERT: L.Bool(st.revert), BLOCK: L.Int(st.block_num)}
+    for c in system.contracts:
+        values[constructed_var(c.name)] = L.Bool(st.constructed[c.name])
+        for f in c.fields:
+            values[field_var(c.name, f.name)] = value_literal(st.fields[(c.name, f.name)],
+                                                              f.type, system)
+    return L.record("St", [(n, values[n]) for n, _ in enc.state_fields()])
+
+
+def tx_literal(tx: Tx, system: System, enc: Encoder, default) -> L.LExpr:
+    """The transaction as a Tx record; `default(type)` gives the parameters of the other
+    procedures (Trans does not depend on them)."""
+    values = {"sender": L.Var(addr_const(tx.sender)), "cx": L.Var(addr_const(tx.contract)),
+              "fx": L.Var(proc_const(*tx.method)),
+              "value": value_literal(tx.value, enc.amount, system),
+              BLOCKS: L.Int(tx.blocks)}
+    for v in system.param_vars:
+        arg = tx.args.get(v.name) if (v.contract, v.proc) == tx.method else None
+        values[param_var(v.contract, v.proc, v.name)] = value_literal(
+            arg if arg is not None else default(v.type), v.type, system)
+    return L.record("Tx", [(n, values[n]) for n, _ in enc.tx_fields()])
+
+
+def describe_tx(tx: Tx) -> str:
+    args = ", ".join(f"{k}={_show(v)}" for k, v in tx.args.items())
+    value = f" $ {_show(tx.value)}" if tx.value else ""
+    blocks = f" @ {tx.blocks}" if tx.blocks else ""
+    return f"{tx.sender} : {tx.method[0]}.{tx.method[1]}({args}){value}{blocks}"
+
+
+def _show(v) -> str:
+    if isinstance(v, Fraction):
+        return str(v.numerator) if v.denominator == 1 else f"{v.numerator}/{v.denominator}"
+    return str(v)

@@ -18,6 +18,17 @@ from typing import List, Optional
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def _exit_on_sigterm(signum, frame):
+    """SIGTERM (e.g. from `timeout`) raises SystemExit, so that `run` stops Kind 2 and its
+    solvers in its `finally` (by default Python exits at once, leaving them running)."""
+    sys.exit(128 + signum)
+
+
+if threading.current_thread() is threading.main_thread() \
+        and signal.getsignal(signal.SIGTERM) == signal.SIG_DFL:
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
+
+
 def find_kind2() -> str:
     """$KIND2, else ./kind2/kind2 in the repository, else `kind2` on the PATH."""
     candidates = [os.environ.get("KIND2"), os.path.join(REPO, "kind2", "kind2"),

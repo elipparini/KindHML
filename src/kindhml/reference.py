@@ -271,11 +271,12 @@ class FormulaEvaluator:
     addresses but null, methods but constructors, args as records over ParamVars.
     For tests only: with an unbounded domain the result may differ."""
 
-    def __init__(self, system: System, int_domain):
+    def __init__(self, system: System, int_domain, max_records=None, rnd=None):
         self.system = system
         self.interp = Interpreter(system)
         self.ints = list(int_domain)
         self.reals = real_domain(self.ints)
+        self.max_records, self.rnd = max_records, rnd
 
     def values(self, t: S.Type, quantifier: bool = True):
         if t == S.INT:
@@ -293,11 +294,19 @@ class FormulaEvaluator:
         raise ValueError(t)
 
     def records(self, params):
-        """All assignments of the given parameters (ParamVar list)."""
+        """All assignments of the given parameters (ParamVar list), or, if there are more
+        than `max_records`, a random sample of them (bounded evaluation, for the search of
+        candidate counterexamples, `fuzz.py`)."""
+        domains = [(v, self.values(v.type, quantifier=False)) for v in params]
+        size = 1
+        for _, d in domains:
+            size *= len(d)
+        if self.max_records is not None and size > self.max_records:
+            return [{(v.contract, v.proc, v.name): self.rnd.choice(d) for v, d in domains}
+                    for _ in range(self.max_records)]
         out = [{}]
-        for v in params:
-            out = [{**r, (v.contract, v.proc, v.name): x} for r in out
-                   for x in self.values(v.type, quantifier=False)]
+        for v, d in domains:
+            out = [{**r, (v.contract, v.proc, v.name): x} for r in out for x in d]
         return out
 
     def holds(self, e: S.Expr, seq, env=None) -> bool:

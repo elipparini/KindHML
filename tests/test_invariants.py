@@ -8,7 +8,8 @@ import pytest
 from kindhml import kind2
 from kindhml import lustre as L
 from kindhml import verify as V
-from kindhml.invariants import Checks, cases, constant, state_fields, state_values
+from kindhml.fuzz import Fuzzer, has_witness
+from kindhml.invariants import Checks, cases, constant, hoist, state_fields, state_values
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POOL = os.path.join(ROOT, "tests", "contracts", "swap_pool.sol")
@@ -73,6 +74,39 @@ def test_rule_split_into_cases():
     assert names == ["Swap_reversibility__0", "Swap_reversibility__1"]
     _, names = c.rule_check(program.rule("Swap_reversibility"), ["Inv"])
     assert names == ["Swap_reversibility"]
+
+
+def test_hoist_universal_quantifiers():
+    x, y, a = L.Var("x"), L.Var("y"), L.Var("a")
+    inputs = []
+    e = L.op("=>", a, L.Quant("forall", (("x", "real"),),
+                              L.op("or", L.Quant("exists", (("y", "real"),), y), x)))
+    assert hoist(e, inputs) == L.op("=>", a, L.op("or", L.Quant("exists", (("y", "real"),), y), x))
+    assert inputs == [("x", "real")]
+    # not under a negation, nor in the premise of an implication
+    inputs = []
+    e = L.op("=>", L.Quant("forall", (("x", "real"),), x), L.neg(L.Quant("forall", (("y", "real"),), y)))
+    assert hoist(e, inputs) == e and inputs == []
+
+
+def test_fuzzer_reaches_constructed_states():
+    program, c = checks()
+    f = Fuzzer(c.enc.system, seed="test")
+    states = [st for _ in range(30) for _, st in f.traces()]
+    assert any(all(st.constructed.values()) for st in states)
+    assert all(not st.revert for st in states)
+
+
+def test_fuzzer_candidates_and_witnesses():
+    program, c = checks()
+    f = Fuzzer(c.enc.system, seed="test")
+    found = f.candidates(program.rule("Swap_takes_everything"), 5)
+    assert found and all(all(st.constructed.values()) for _, st in found)
+    assert not has_witness(program.rule("Swap_reversibility").formula)
+    amm, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    assert has_witness(amm.rule("Swap_additivity").formula)        # exists v12, v3
+    assert has_witness(amm.rule("Arbitrage").formula)              # exists x
+    assert not has_witness(amm.rule("Slippage").formula)
 
 
 def test_state_values_of_a_counterexample():

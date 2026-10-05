@@ -429,8 +429,9 @@ class Contract:
 
 @dataclass(frozen=True)
 class Rule:
-    """A rule, or an invariant: a rule without modalities, required in every reachable state
-    (also before the contracts are constructed), and assumed when checking other rules."""
+    """A rule, or an invariant: a rule without modalities, which the tool proves inductive
+    and then assumes when checking other rules. Both are required in the reachable states
+    where all contracts are constructed."""
     name: str
     formula: Expr
     groundtruth: Optional[bool] = None

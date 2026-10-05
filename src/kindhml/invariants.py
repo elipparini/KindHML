@@ -27,7 +27,7 @@ from typing import Callable, Dict, List, Sequence, Tuple
 from . import lustre as L
 from . import syntax as S
 from .encode_formula import FormulaEncoder
-from .encode_trans import ST, TX, Encoder
+from .encode_trans import ST, TX, Encoder, constructed_var, default_value, field_var
 from .lustre_subst import eq
 from .model import System
 
@@ -41,11 +41,24 @@ class Checks:
         self.fenc = FormulaEncoder(self.enc, mode, tuple(expand))
         lemmas = [(n, (lambda st, e=e: self.fenc.inliner.run(e, {"s": st})))
                   for n, e in self.enc.lemmas()]
-        mine = [(r.name, (lambda st, r=r: self.fenc.state_formula(r.formula, st)))
+        # an invariant, like a rule, is required in the states where all contracts are
+        # constructed: (∧_C constructed_C) → Φ(I)
+        mine = [(r.name, (lambda st, r=r: self.fenc.rule(r, st)))
                 for r in program.rules if r.invariant]
         # the built-in lemmas hold in every system (DESIGN.md, "Lemmas"): assumed, not checked
         self.axioms: List[str] = [n for n, _ in lemmas]
         self.candidates: Dict[str, StateFormula] = dict(lemmas + mine)
+
+    def defaults(self, st: L.LExpr) -> L.LExpr:
+        """Before C is constructed, the fields of C have their default values: they are
+        assigned only by the procedures of C, which require constructed_C, except the
+        constructor. Holds in every system; assumed in the step of the invariants, where it
+        gives the state from which the constructor starts."""
+        system = self.enc.system
+        return L.conj([L.op("=>", L.neg(L.proj(st, constructed_var(c.name))),
+                            L.conj([eq(L.proj(st, field_var(c.name, f.name)),
+                                       default_value(f.type, system)) for f in c.fields]))
+                       for c in system.contracts if c.fields])
 
     def _program(self) -> L.Program:
         """Types and functions of the encoding, without the main node."""
@@ -55,6 +68,12 @@ class Checks:
 
     @staticmethod
     def _render(prog: L.Program, node: L.Function) -> str:
+        """The program with the check node, whose properties have their universal
+        quantifiers in positive position replaced by inputs (`hoist`)."""
+        inputs: List[Tuple[str, str]] = []
+        node.properties = [(n, hoist(p, inputs)) for n, p in node.properties]
+        names = {n for n, _ in node.inputs}
+        node.inputs = node.inputs + [v for v in inputs if v[0] not in names]
         node.node = True
         prog.decls.append(node)
         return prog.render()
@@ -74,6 +93,22 @@ class Checks:
         _, main = self.enc.program()
         return list(main.asserts)
 
+    def step_checks(self, names: List[str]) -> List[Tuple[str, Dict[str, str]]]:
+        """The step of the invariants as one program per procedure: in a single program,
+        the 36 properties of the lending protocol were all unknown after 60 s; one program
+        per procedure proves them in 1-8 s each."""
+        lus, about = self.step_check(names)
+        head, node = lus[:lus.index("node main")], lus[lus.index("node main"):]
+        lines = node.splitlines()
+        body = [l for l in lines if "--%PROPERTY" not in l]
+        out = []
+        for c, p in self.enc.system.methods:
+            mine = {n: i for n, i in about.items() if n.endswith(f"__{c.name}_{p.name}")}
+            props = [l for l in lines if "--%PROPERTY" in l
+                     and any(f'"{n}"' in l for n in mine)]
+            out.append((head + "\n".join(body[:-1] + props + body[-1:]) + "\n", mine))
+        return out
+
     def step_check(self, names: List[str]) -> Tuple[str, Dict[str, str]]:
         """C(s) ⇒ I(Trans(s, t)) for every candidate I in `names`, with C the conjunction of
         `names` and of the axioms. One property per I and per procedure C.f (constructors
@@ -84,13 +119,17 @@ class Checks:
         `a` ranges over the address domain. Returns the program and, for each property, the
         candidate it is about."""
         prog, s = self._program(), L.Var("s")
-        premise = self._conj(self.axioms + names, s)
+        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s)])
+        constructed: S.Expr = S.BoolLit(True)
+        for c in self.enc.system.contracts:
+            constructed = S.BinOp("&&", constructed, S.Constructed(c.name))
         props, about = [], {}
         for c, p in self.enc.system.methods:
             for n in names:
                 rule = self.program.rule(n)
                 prop = f"step_{n}__{c.name}_{p.name}"
-                after = self.fenc.state_formula(self._after(c, p, rule.formula), s)
+                guarded = S.BinOp("->", constructed, rule.formula)
+                after = self.fenc.state_formula(self._after(c, p, guarded), s)
                 props.append((prop, L.op("=>", premise, after)))
                 about[prop] = n
         node = L.Function("main", [("s", ST)], [], properties=props,
@@ -149,17 +188,27 @@ class Checks:
                     f" {', '.join(invariants) or '(none)'}")
         return self._render(prog, node), names
 
+    def concrete_check(self, rule: S.Rule, state: L.LExpr) -> str:
+        """The rule at a concrete state (a record literal): exact, unlike the bounded
+        evaluation of `fuzz.py`. A Kind 2 counterexample means that the rule is false there."""
+        prog = self._program()
+        node = L.Function("main", [("dummy", "bool")], [],
+                          properties=[(rule.name, self._property(rule, state))],
+                          comment=f"{rule.name} at a concrete state")
+        return self._render(prog, node)
+
     def _property(self, rule: S.Rule, s: L.LExpr) -> L.LExpr:
-        return (self.fenc.state_formula(rule.formula, s) if rule.invariant
-                else self.fenc.rule(rule, s))
+        return self.fenc.rule(rule, s)
 
     def relevant(self, prop: L.LExpr, invariants: List[str],
                  transitive: bool = True) -> List[str]:
         """The invariants sharing fields of the state s with `prop` (transitively, through
-        the fields of the invariants chosen, if `transitive`)."""
+        the fields of the invariants chosen, if `transitive`). The construction flags do not
+        count: every rule and every invariant reads them."""
         s = L.Var("s")
-        fields = {n: state_fields(self.candidates[n](s)) for n in invariants}
-        used, chosen, changed = state_fields(prop), [], True
+        flags = {constructed_var(c.name) for c in self.enc.system.contracts}
+        fields = {n: state_fields(self.candidates[n](s)) - flags for n in invariants}
+        used, chosen, changed = state_fields(prop) - flags, [], True
         while changed:
             changed = False
             for n in invariants:
@@ -180,6 +229,24 @@ class Checks:
         main.properties = [("unreachable", L.neg(L.conj(
             [eq(_path(p), v) for p, v in sorted(state.items())])))]
         return prog.render()
+
+
+def hoist(e: L.LExpr, inputs: List[Tuple[str, str]]) -> L.LExpr:
+    """e without its universal quantifiers in positive position (under conjunctions,
+    disjunctions and the conclusions of implications), whose variables are added to `inputs`:
+    a node property is valid iff it holds for all values of the inputs, so `∀x. φ` and `φ`
+    with input x are equivalent. Quantified names are fresh, so hoisting through a
+    disjunction is sound. Kind 2 passes quantifiers to the solver, which then cannot use
+    nlsat: the swap round trip of the AMM with a fee, at a concrete state, was unknown after
+    20 s with `∀x`; with x an input, it is refuted at once."""
+    if isinstance(e, L.Quant) and e.kind == "forall":
+        inputs.extend(v for v in e.vars if v not in inputs)
+        return hoist(e.body, inputs)
+    if isinstance(e, L.Op) and e.op in ("and", "or"):
+        return L.Op(e.op, tuple(hoist(a, inputs) for a in e.args))
+    if isinstance(e, L.Op) and e.op == "=>":
+        return L.Op("=>", (e.args[0], hoist(e.args[1], inputs)))
+    return e
 
 
 def cases(e: L.LExpr) -> List[L.LExpr]:

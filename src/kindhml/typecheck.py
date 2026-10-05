@@ -299,7 +299,8 @@ class Checker:
             return replace(e, left=self._expect(e.left, S.BOOL, ctx),
                            right=self._expect(e.right, S.BOOL, ctx)), S.BOOL
         if op in ("+", "-", "*", "/", "%", "<", "<=", ">", ">="):
-            if op in ("/", "%") and ctx.in_rule:
+            if op in ("/", "%") and ctx.in_rule and not (
+                    isinstance(e.right, (S.IntLit, S.RealLit)) and e.right.value != 0):
                 self.warnings.append(f"{e.pos}: divisions in rules must be guarded (A3)")
             (left, lt), (right, rt) = self._number(e.left, ctx), self._number(e.right, ctx)
             real = S.REAL in (lt, rt)
