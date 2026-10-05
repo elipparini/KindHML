@@ -1,11 +1,16 @@
 """Fully parenthesised printing of expressions (raw or resolved), for debugging and messages."""
 
 from . import syntax as S
+from .lustre import render_real
 
 
 def expr(e: S.Expr) -> str:
     if isinstance(e, S.IntLit):
         return str(e.value)
+    if isinstance(e, S.RealLit):
+        return render_real(e.value) if e.value >= 0 else f"-{render_real(-e.value)}"
+    if isinstance(e, S.ToReal):
+        return f"real({expr(e.arg)})"
     if isinstance(e, S.BoolLit):
         return "true" if e.value else "false"
     if isinstance(e, S.NullLit):

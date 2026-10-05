@@ -7,12 +7,15 @@ addresses), A6 (no `sender`/`value` in formulae) and A7 (each `args` variable is
 exactly one modality).
 
 `check(program)` returns a resolved program: `Name`, `Member`, `FunCall` are replaced by
-the nodes they denote (see `syntax.py`).
+the nodes they denote (see `syntax.py`). An int used as a real is wrapped in `ToReal` (an
+int literal becomes a real one), and arithmetic on reals is marked (`BinOp.real`), since
+Kind 2 does not mix int and real (DESIGN.md, Sect. 5).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from typing import Dict, List, Optional, Tuple
 
 from . import syntax as S
@@ -27,8 +30,10 @@ def _err(msg: str, node) -> KindHMLError:
 
 
 def _compatible(expected: S.AnyType, actual: S.AnyType) -> bool:
-    """`actual` can be used where `expected` is required (int and uint mix)."""
-    return expected == actual or (S.is_int(expected) and S.is_int(actual))
+    """`actual` can be used where `expected` is required (int and uint mix; an int can be
+    used as a real, not conversely)."""
+    return (expected == actual or (S.is_int(expected) and S.is_int(actual))
+            or (expected == S.REAL and S.is_int(actual)))
 
 
 @dataclass
@@ -50,6 +55,7 @@ class _Ctx:
 class Checker:
     def __init__(self, program: S.Program):
         self.program = program
+        self.amount = program.balance_type      # type of balances, values and amounts
         self.warnings: List[str] = []
         # Per rule: quantified names (unique within a rule, so a name identifies its
         # binder) and the number of modalities using each `args` variable (A7).
@@ -64,7 +70,7 @@ class Checker:
         self._unique([r.name for r in p.rules], p.rules, "rule")
         contracts = tuple(self._contract(c) for c in p.contracts)
         rules = tuple(self._rule(r) for r in p.rules)
-        return S.Program(contracts, rules)
+        return S.Program(contracts, rules, p.balance_type)
 
     @staticmethod
     def _unique(names, nodes, what):
@@ -121,7 +127,7 @@ class Checker:
                            value=self._expect(s.value, decl.type.value, ctx))
         if isinstance(s, S.Transfer):
             return replace(s, to=self._expect(s.to, S.ADDRESS, ctx),
-                           amount=self._expect(s.amount, S.INT, ctx))
+                           amount=self._expect(s.amount, self.amount, ctx))
         if isinstance(s, S.Call):
             callee, _ = self._expr(s.callee, ctx)
             if not isinstance(callee, S.ContractAddr):
@@ -131,7 +137,8 @@ class Checker:
             if proc is None or proc.name == S.CONSTRUCTOR:
                 raise _err(f"contract {target.name} has no procedure '{s.proc}'", s)
             args = self._actuals(proc, s.args, ctx, s)
-            return replace(s, callee=callee, args=args, value=self._expect(s.value, S.INT, ctx))
+            return replace(s, callee=callee, args=args,
+                           value=self._expect(s.value, self.amount, ctx))
         raise _err(f"unknown statement {s!r}", s)
 
     def _actuals(self, proc: S.Procedure, args, ctx: _Ctx, node) -> Tuple[S.Expr, ...]:
@@ -153,12 +160,25 @@ class Checker:
         r, rt = self._expr(e, ctx)
         if not _compatible(t, rt):
             raise _err(f"expected an expression of type {t}, found {rt}", e)
-        return r
+        return self._real(r, rt) if t == S.REAL else r
+
+    def _real(self, e: S.Expr, t: S.AnyType) -> S.Expr:
+        """The resolved expression `e` of type `t` (a number) as a real."""
+        if t == S.REAL:
+            return e
+        if isinstance(e, S.IntLit):
+            return S.RealLit(Fraction(e.value), e.pos)
+        if isinstance(e, S.BinOp) and e.op == "/":
+            self.warnings.append(f"{e.pos}: integer division converted to real"
+                                 " (write a real operand for the division of reals)")
+        return S.ToReal(e, e.pos)
 
     def _expr(self, e: S.Expr, ctx: _Ctx) -> Tuple[S.Expr, S.AnyType]:
         """Resolve `e` and compute its type."""
         if isinstance(e, S.IntLit):
             return e, S.INT
+        if isinstance(e, S.RealLit):
+            return e, S.REAL
         if isinstance(e, S.BoolLit):
             return e, S.BOOL
         if isinstance(e, S.NullLit):
@@ -170,7 +190,7 @@ class Checker:
         if isinstance(e, (S.Sender, S.Value)):
             if ctx.in_rule:
                 raise _err("msg.sender and msg.value cannot occur in rules (A6)", e)
-            return e, (S.ADDRESS if isinstance(e, S.Sender) else S.INT)
+            return e, (S.ADDRESS if isinstance(e, S.Sender) else self.amount)
         if isinstance(e, S.BlockNum):
             return e, S.INT
         if isinstance(e, S.Reverted):
@@ -189,8 +209,10 @@ class Checker:
         if isinstance(e, S.Index):
             return self._index(e, ctx)
         if isinstance(e, S.UnOp):
-            t = S.BOOL if e.op == "!" else S.INT
-            return replace(e, arg=self._expect(e.arg, t, ctx)), t
+            if e.op == "!":
+                return replace(e, arg=self._expect(e.arg, S.BOOL, ctx)), S.BOOL
+            arg, t = self._number(e.arg, ctx)
+            return replace(e, arg=arg), (S.REAL if t == S.REAL else S.INT)
         if isinstance(e, S.BinOp):
             return self._binop(e, ctx)
         if isinstance(e, S.Quant):
@@ -223,7 +245,7 @@ class Checker:
             return S.ContractAddr(c.name, e.pos), S.ADDRESS
         if n == "balance":
             c = ctx.contract or self._single_contract(e)
-            return S.Index(S.Balance(e.pos), S.ContractAddr(c.name, e.pos), e.pos), S.INT
+            return S.Index(S.Balance(e.pos), S.ContractAddr(c.name, e.pos), e.pos), self.amount
         # fields
         owners = [ctx.contract] if ctx.contract else list(self.program.contracts)
         with_field = [c for c in owners if c.field_decl(n)]
@@ -260,7 +282,7 @@ class Checker:
     def _index(self, e: S.Index, ctx: _Ctx) -> Tuple[S.Expr, S.AnyType]:
         key = self._expect(e.key, S.ADDRESS, ctx)
         if isinstance(e.map, S.Balance) or (isinstance(e.map, S.Name) and e.map.name == "balance"):
-            return S.Index(S.Balance(e.map.pos), key, e.pos), S.INT
+            return S.Index(S.Balance(e.map.pos), key, e.pos), self.amount
         m, t = self._expr(e.map, ctx)
         if not isinstance(t, S.MapType):
             raise _err("only mappings (and balance) can be indexed", e)
@@ -274,16 +296,31 @@ class Checker:
         if op in ("+", "-", "*", "/", "%", "<", "<=", ">", ">="):
             if op in ("/", "%") and ctx.in_rule:
                 self.warnings.append(f"{e.pos}: divisions in rules must be guarded (A3)")
-            res = S.INT if op in ("+", "-", "*", "/", "%") else S.BOOL
-            return replace(e, left=self._expect(e.left, S.INT, ctx),
-                           right=self._expect(e.right, S.INT, ctx)), res
+            (left, lt), (right, rt) = self._number(e.left, ctx), self._number(e.right, ctx)
+            real = S.REAL in (lt, rt)
+            if real and op == "%":
+                raise _err("'%' is not defined on reals", e)
+            res = S.BOOL if op in ("<", "<=", ">", ">=") else (S.REAL if real else S.INT)
+            if real:
+                left, right = self._real(left, lt), self._real(right, rt)
+            return replace(e, left=left, right=right, real=real), res
         if op in ("==", "!="):
             left, lt = self._expr(e.left, ctx)
             right, rt = self._expr(e.right, ctx)
-            if isinstance(lt, S.MapType) or lt == S.ARGS or not _compatible(lt, rt):
+            if isinstance(lt, S.MapType) or lt == S.ARGS or not (
+                    _compatible(lt, rt) or _compatible(rt, lt)):
                 raise _err(f"cannot compare {lt} with {rt}", e)
-            return replace(e, left=left, right=right), S.BOOL
+            real = S.REAL in (lt, rt) and S.is_num(lt) and S.is_num(rt)
+            if real:
+                left, right = self._real(left, lt), self._real(right, rt)
+            return replace(e, left=left, right=right, real=real), S.BOOL
         raise _err(f"unknown operator '{op}'", e)
+
+    def _number(self, e: S.Expr, ctx: _Ctx) -> Tuple[S.Expr, S.AnyType]:
+        r, t = self._expr(e, ctx)
+        if not S.is_num(t):
+            raise _err(f"expected an expression of type int or real, found {t}", e)
+        return r, t
 
     def _quant(self, e: S.Quant, ctx: _Ctx) -> Tuple[S.Expr, S.AnyType]:
         if e.var in RESERVED or e.var in self._bound or any(
@@ -304,7 +341,7 @@ class Checker:
         if c is None:
             raise _err(f"unknown contract '{e.contract}'", e)
         sender = self._expect(e.sender, S.ADDRESS, ctx)
-        value = self._expect(e.value, S.INT, ctx)
+        value = self._expect(e.value, self.amount, ctx)
         # a uint: a negative increase makes the transaction revert, like a negative value
         blocks = self._expect(e.blocks, S.INT, ctx)
         name = e.proc.name

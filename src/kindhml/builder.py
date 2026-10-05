@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from fractions import Fraction
 from typing import List, Optional
 
 from antlr4 import CommonTokenStream, InputStream, Token
@@ -17,7 +18,7 @@ from .grammar.KindHMLVisitor import KindHMLVisitor
 GROUNDTRUTH_RE = re.compile(r"@groundtruth:\s*(True|False)\b")
 
 QTYPES = {
-    "int": S.INT, "uint": S.UINT, "bool": S.BOOL, "address": S.ADDRESS,
+    "int": S.INT, "uint": S.UINT, "real": S.REAL, "bool": S.BOOL, "address": S.ADDRESS,
     "method": S.METHOD, "proc": S.METHOD,
     "calldataargs": S.ARGS, "args": S.ARGS,
 }
@@ -41,9 +42,16 @@ class _Builder(KindHMLVisitor):
     # ---------------------------------------------------------- program
 
     def visitProgram(self, ctx):
+        balance_type = S.INT
+        for p in ctx.pragma():
+            t = self.visit(p.type_())
+            if p.key.text != "balance" or t not in (S.INT, S.REAL):
+                raise KindHMLError("the only pragmas are 'pragma balance int' and"
+                                   " 'pragma balance real'", _pos(p))
+            balance_type = t
         contracts = tuple(self.visit(c) for c in ctx.contract())
         rules = tuple(self.visit(r) for r in ctx.rule_())
-        return S.Program(contracts, rules)
+        return S.Program(contracts, rules, balance_type)
 
     def visitContract(self, ctx):
         fields: List[S.VarDecl] = []
@@ -82,6 +90,9 @@ class _Builder(KindHMLVisitor):
 
     def visitUintType(self, ctx):
         return S.UINT
+
+    def visitRealType(self, ctx):
+        return S.REAL
 
     def visitBoolType(self, ctx):
         return S.BOOL
@@ -179,6 +190,9 @@ class _Builder(KindHMLVisitor):
     def visitIntLit(self, ctx):
         return S.IntLit(int(ctx.getText()), _pos(ctx))
 
+    def visitRealLit(self, ctx):
+        return S.RealLit(Fraction(ctx.getText()), _pos(ctx))
+
     def visitBoolLit(self, ctx):
         return S.BoolLit(ctx.getText() == "true", _pos(ctx))
 
@@ -227,6 +241,8 @@ class _Builder(KindHMLVisitor):
         arg = self.visit(ctx.expr())
         if ctx.op.text == "-" and isinstance(arg, S.IntLit):
             return S.IntLit(-arg.value, _pos(ctx))
+        if ctx.op.text == "-" and isinstance(arg, S.RealLit):
+            return S.RealLit(-arg.value, _pos(ctx))
         return S.UnOp(ctx.op.text, arg, _pos(ctx))
 
     def _binop(self, ctx, op=None):

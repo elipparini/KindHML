@@ -1,5 +1,7 @@
 """Structural tests of the statement encoding S^i(s)."""
 
+from fractions import Fraction
+
 import pytest
 
 from kindhml import desugar
@@ -55,6 +57,31 @@ def test_division_is_guarded():
     assert isinstance(level, L.Ite)
     assert level.cond == L.op("<>", L.Proj(L.Var("t"), "C_g_d"), L.Int(0))
     assert dict(level.orelse.fields)["revert"] == L.TRUE
+
+
+def test_real_division_is_guarded_and_typed():
+    """Kind 2 does not mix int and real: the int k is converted, the guard compares with
+    0.0, and the division of reals is `/` (`div` is the Euclidean division)."""
+    program, _ = check(parse("contract C { real r; function g(int k) { r = r / k } }"))
+    enc = Encoder(System.make(program, 1))
+    c = program.contracts[0]
+    level = enc.levels(desugar.body(enc.system, c, c.proc("g").body), 0, L.Var("t"))[1]
+    k = L.call("real", L.Proj(L.Var("t"), "C_g_k"))
+    assert level.cond == L.op("<>", k, L.Real(Fraction(0)))
+    assert dict(level.then.fields)["C_r"] == L.op("/", L.Proj(L.Var("s"), "C_r"), k)
+    assert str(level.cond) == "(real(t.C_g_k) <> 0.0)"
+
+
+def test_real_literals_rendered():
+    assert [L.render(L.Real(Fraction(x))) for x in ("2", "1/4", "-3/2", "1/3")] == \
+        ["2.0", "0.25", "(- 1.5)", "(1.0 / 3.0)"]
+
+
+def test_real_balances():
+    program, _ = check(parse("pragma balance real; contract C { function f() payable { } }"))
+    enc = Encoder(System.make(program, 1))
+    assert dict(enc.state_fields())["balance"] == "Map_real"
+    assert dict(enc.tx_fields())["value"] == "real"
 
 
 def test_cyclic_calls_rejected_A4():

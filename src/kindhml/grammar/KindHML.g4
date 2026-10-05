@@ -6,7 +6,11 @@
 
 grammar KindHML;
 
-program : contract+ rule_* EOF ;
+program : pragma* contract+ rule_* EOF ;
+
+// `pragma balance real;` makes balances, values and amounts real (default: int). The key is
+// an identifier (`balance` must remain one); the builder checks it.
+pragma : 'pragma' key=ID type_ ';'? ;
 
 // ---------------------------------------------------------------- contracts
 
@@ -26,6 +30,7 @@ param  : type_ name=ID ;
 type_
     : 'int'                                                       # IntType
     | 'uint'                                                      # UintType
+    | 'real'                                                      # RealType
     | 'bool'                                                      # BoolType
     | 'address'                                                   # AddressType
     | 'mapping' '(' 'address' '=>' type_ ')'                      # MappingType
@@ -54,7 +59,7 @@ rule_ : 'rule' name=ID '{' expr '}' ;
 
 // `method`/`proc` and `calldataargs`/`args` are identifiers (`args` is a common
 // variable name); the builder checks them.
-qtype : 'int' | 'uint' | 'bool' | 'address' | ID ;
+qtype : 'int' | 'uint' | 'real' | 'bool' | 'address' | ID ;
 
 qvars : ID (',' ID)* ':' qtype ;
 
@@ -65,6 +70,7 @@ qvars : ID (',' ID)* ':' qtype ;
 expr
     : '(' expr ')'                                                # ParenExpr
     | INT                                                         # IntLit
+    | REAL                                                        # RealLit
     | ('true' | 'false')                                          # BoolLit
     | 'null'                                                      # NullLit
     | 'payable' '(' expr ')'                                      # PayableExpr
@@ -89,6 +95,7 @@ exprs : expr (',' expr)* ;
 
 // ---------------------------------------------------------------- lexer
 
+REAL : [0-9]+ '.' [0-9]+ ;
 INT : [0-9]+ ;
 ID  : [a-zA-Z_] [a-zA-Z_0-9]* ;
 

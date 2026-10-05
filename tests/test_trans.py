@@ -9,6 +9,7 @@ with Kind 2.
 import glob
 import os
 import random
+from fractions import Fraction
 
 import pytest
 
@@ -44,11 +45,11 @@ def value_literal(v, t: S.AnyType, system: System) -> L.LExpr:
         return L.Bool(v)
     if t == S.ADDRESS:
         return L.Var(addr_const(v))
-    return L.Int(v)
+    return L.Real(Fraction(v)) if t == S.REAL else L.Int(v)
 
 
 def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
-    values = {BALANCE: value_literal(st.balance, S.MapType(S.INT), system),
+    values = {BALANCE: value_literal(st.balance, S.MapType(enc.amount), system),
               REVERT: L.Bool(st.revert), BLOCK: L.Int(st.block_num)}
     for c in system.contracts:
         values[constructed_var(c.name)] = L.Bool(st.constructed[c.name])
@@ -60,7 +61,8 @@ def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
 
 def tx_literal(tx: Tx, system: System, enc: Encoder) -> L.LExpr:
     values = {"sender": L.Var(addr_const(tx.sender)), "cx": L.Var(addr_const(tx.contract)),
-              "fx": L.Var(proc_const(*tx.method)), "value": L.Int(tx.value),
+              "fx": L.Var(proc_const(*tx.method)),
+              "value": value_literal(tx.value, enc.amount, system),
               BLOCKS: L.Int(tx.blocks)}
     for v in system.param_vars:
         arg = tx.args.get(v.name) if (v.contract, v.proc) == tx.method else None
@@ -77,11 +79,22 @@ def random_value(t: S.AnyType, system: System, rnd: random.Random):
         return rnd.random() < 0.5
     if t == S.ADDRESS:
         return rnd.choice(system.addresses)
-    return rnd.randint(-2, 4)
+    return random_number(t, -2, 4, rnd)
+
+
+def random_number(t: S.Type, low: int, high: int, rnd: random.Random):
+    """An integer in [low, high], or, if t is real, a multiple of 1/2 in [low, high]."""
+    if t == S.REAL:
+        return Fraction(rnd.randint(2 * low, 2 * high), 2)
+    return rnd.randint(low, high)
+
+
+def random_balances(system: System, rnd: random.Random):
+    return {a: random_number(system.program.balance_type, 0, 5, rnd) for a in system.addresses}
 
 
 def random_state(system: System, rnd: random.Random) -> State:
-    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.addresses})
+    st = initial_state(system, random_balances(system, rnd))
     for c in system.contracts:
         st.constructed[c.name] = rnd.random() < 0.9
         for f in c.fields:
@@ -97,19 +110,20 @@ def random_tx(system: System, rnd: random.Random) -> Tx:
     contract = c.name if rnd.random() < 0.95 else rnd.choice(system.addresses)
     args = {x.name: random_value(x.type, system, rnd) for x in p.params}
     sender = rnd.choice(system.users) if rnd.random() < 0.85 else rnd.choice(system.addresses)
-    value = rnd.randint(-1, 3) if p.payable or rnd.random() < 0.1 else 0
+    value = (random_number(system.program.balance_type, -1, 3, rnd)
+             if p.payable or rnd.random() < 0.1 else 0)
     return Tx(sender, contract, (c.name, p.name), args, value, rnd.randint(-1, 3))
 
 
 def random_reachable_state(system: System, rnd: random.Random, interp: Interpreter) -> State:
     """The state reached by a random sequence of transactions from an initial state."""
-    st = initial_state(system, {a: rnd.randint(0, 5) for a in system.addresses},
-                       rnd.randint(0, 3))
+    st = initial_state(system, random_balances(system, rnd), rnd.randint(0, 3))
     for c in system.contracts:
         ctor = c.procs[0]
         st = interp.step(st, Tx(rnd.choice(system.users), c.name, (c.name, ctor.name),
                                 {x.name: random_value(x.type, system, rnd) for x in ctor.params},
-                                rnd.randint(0, 2) if ctor.payable else 0, 0))
+                                random_number(system.program.balance_type, 0, 2, rnd)
+                                if ctor.payable else 0, 0))
     for _ in range(rnd.randint(0, 4)):
         st = interp.step(st, random_tx(system, rnd))
     return st

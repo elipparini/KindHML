@@ -168,6 +168,21 @@ exclude `sender = C`. The tool adds an explicit first statement
   the default strategy and in 45 s with cvc5 only. Regression files do not use the block
   number, so their encoding is unchanged.
 
+## After M5 — real variables (decision 9 below)
+
+* Type `real` for fields, mapping values, parameters and quantified variables; real
+  literals; implicit conversion int → real; `pragma balance real;` makes balances, values
+  and amounts real (the block number stays int). Details and the Kind 2 points in DESIGN.md,
+  Sect. 5.
+* The Lustre output of all 104 existing rules is unchanged (compared before and after).
+* Tests: front end (conversions, `%` on reals, real into int, pragma, warning), encoding
+  (guard `<> 0.0`, `/`, literals, real balances), counterexample values; the Trans and
+  formula differential tests now cover `tests/contracts/reals.sol` and
+  `tests/contracts/real_balances.sol` (values: halves; real quantifiers: the integer domain
+  and its midpoints). 15 new rules, all matching their ground truth with Kind 2 (20 s
+  budget). With integer balances (the file without the pragma), `Split_is_fair` and
+  `Small_payment` become invalid, as expected.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
@@ -195,3 +210,7 @@ exclude `sender = C`. The tool adds an explicit first statement
    number (`@ d`, uint, 0 when omitted); applied at the start of the transaction, before
    `initPay`; a revert leaves the state, block number included, unchanged (`\CL` note on
    this); initial block number any value >= 0. Plan for the paper in a `\CL` note.
+9. (after M5) **Reals:** implicit int → real conversion (no real → int); balances, values
+   and amounts real only with `pragma balance real;` in the file (default int), so files
+   stay self-contained and existing benchmarks are unchanged. Tool only; the paper is not
+   changed.

@@ -33,6 +33,7 @@ Experiments with Kind 2 v2.3.0 (see `PROGRESS.md`, Milestone 1) fix the followin
 * `type proc = enum { <C>_<f>, ... }`.
 * Maps `address => τ` are records with one field per address (Kind 2 cannot inline functions
   over arrays inside quantified properties). `balance` is such a map.
+* Numbers are Lustre `int`, or `real` for the type `real` (Sect. 5).
 * `St` is a record with one field per state variable of `StateVars` (`balance`, `constructed_C`,
   the contract fields, `revert`, optionally `block_num`).
 * `Tx` is a record with one field per transition variable of `TransVars` (`sender`, `cx`, `fx`,
@@ -173,3 +174,33 @@ Deviations, still recorded as `\CL` notes in the paper where relevant:
    expressions reverts, also under `&&`/`||` (this is `def^i(s)`).
 6. **Unconstructed states.** The checked property is `(∧_C constructed_C) → Φ(φ)`, i.e. `φ` is
    required only in reachable states where all contracts are constructed.
+7. **Reals** (extension, not in the paper). See Sect. 5.
+
+## 5. Real variables
+
+Fields, mapping values, parameters and quantified variables may have type `real`. With
+`pragma balance real;` at the start of a file, `balance`, `msg.value`, transfer amounts and
+the values of calls and modalities are real too (`Program.balance_type`); the block number
+and its increase stay int. The encoding is the paper's, over real instead of integer terms.
+
+Kind 2 (v2.3.0) differs from the integer case in the following points, each checked by an
+experiment.
+
+* **No mixing.** Lustre does not convert between int and real: `x + 1` with `x : real` is a
+  type error, and literals must be written `1.0`. The type checker therefore inserts
+  `ToReal` (printed `real(e)`) wherever an int is used as a real, turns int literals into
+  real ones, and marks the arithmetic on reals (`BinOp.real`). There is no conversion from
+  real to int (Kind 2's `int(x)` is the floor, e.g. `int(-1.5) = -2`).
+* **Division.** `/` on reals is the division of reals, `div` (Euclidean) on ints; `%` is not
+  defined on reals. As for `div`, `x / 0.0` is an unspecified value in SMT-LIB (Kind 2
+  finds `1.0/0.0 ≠ 2.0/0.0`), so the guards def^i(s) also cover real divisions, with the
+  zero `0.0`. `r = n / 2` with `n : int` is the integer division, converted; the type
+  checker warns about it.
+* **Solvers.** On quantified real properties the solvers are complementary: z3 does not
+  prove `∃x : real. x > r ∧ x < r + 1` (true up to 0 steps), which cvc5 proves; cvc5 does
+  not prove some properties that z3 proves (`Ltree.fold` in the inductive step, as for
+  ints). The default strategy (cvc5, then z3) covers both (e.g. `real_balances.sol`
+  Small_payment is proved by z3 after cvc5's half of the budget). Nonlinear real
+  arithmetic works with k-induction; cvc5's IC3 fails on it, as on nonlinear integers.
+* **Counterexamples.** In JSON, Kind 2 writes a real as `{"num": n, "den": d}`; the
+  formatter prints `n/d`.

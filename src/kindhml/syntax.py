@@ -9,6 +9,7 @@ Both use the classes below; `Name` and `Member` never occur in a resolved AST.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import Optional, Tuple, Union
 
 
@@ -32,7 +33,7 @@ def _pos():
 
 @dataclass(frozen=True)
 class Type:
-    """Base types: int, uint, bool, address, method, args."""
+    """Base types: int, uint, real, bool, address, method, args."""
     name: str
 
     def __str__(self) -> str:
@@ -50,6 +51,7 @@ class MapType:
 
 INT = Type("int")
 UINT = Type("uint")
+REAL = Type("real")
 BOOL = Type("bool")
 ADDRESS = Type("address")
 METHOD = Type("method")
@@ -63,6 +65,16 @@ def is_int(t: AnyType) -> bool:
     return t in (INT, UINT)
 
 
+def is_num(t: AnyType) -> bool:
+    """Numbers: int, uint, real. An int can be used where a real is expected."""
+    return t in (INT, UINT, REAL)
+
+
+def zero(t: Type) -> "Expr":
+    """The literal 0 of the number type t."""
+    return RealLit(Fraction(0)) if t == REAL else IntLit(0)
+
+
 # ------------------------------------------------------------------ expressions
 
 class Expr:
@@ -72,6 +84,20 @@ class Expr:
 @dataclass(frozen=True)
 class IntLit(Expr):
     value: int
+    pos: Pos = _pos()
+
+
+@dataclass(frozen=True)
+class RealLit(Expr):
+    value: Fraction
+    pos: Pos = _pos()
+
+
+@dataclass(frozen=True)
+class ToReal(Expr):
+    """The conversion of an integer to a real (resolved AST only; inserted by the type
+    checker where an int is used as a real)."""
+    arg: Expr
     pos: Pos = _pos()
 
 
@@ -126,10 +152,14 @@ class UnOp(Expr):
 
 @dataclass(frozen=True)
 class BinOp(Expr):
+    """In a resolved AST, `real` is set iff the operands are numbers and at least one of them
+    is real; then both are real (the type checker inserts `ToReal`), and `/` is the division
+    of reals (otherwise Euclidean)."""
     op: str            # * / % + - < <= > >= == != && || ->
     left: Expr
     right: Expr
     pos: Pos = _pos()
+    real: bool = False
 
 
 @dataclass(frozen=True)
@@ -409,6 +439,7 @@ class Rule:
 class Program:
     contracts: Tuple[Contract, ...]
     rules: Tuple[Rule, ...]
+    balance_type: Type = INT        # of balances, values and amounts (`pragma balance real`)
 
     def contract(self, name: str) -> Optional[Contract]:
         return next((c for c in self.contracts if c.name == name), None)

@@ -61,8 +61,10 @@ def callee(system: System, c: S.Contract, p: S.Procedure,
     """initPay, the constructed guard, the uint guards, and the body of `p`; `stack` lists
     the procedures being unfolded (to reject cyclic calls)."""
     this = S.ContractAddr(c.name)
+    amount = system.program.balance_type
     stmts: List[S.Stmt] = [S.Send(S.Sender(), this, S.Value()) if p.payable
-                           else S.Require(S.BinOp("==", S.Value(), S.IntLit(0)))]
+                           else S.Require(S.BinOp("==", S.Value(), S.zero(amount),
+                                                  real=amount == S.REAL))]
     if p.name == S.CONSTRUCTOR:
         stmts += [S.Require(S.UnOp("!", S.Constructed(c.name))), S.SetConstructed(c.name)]
     else:

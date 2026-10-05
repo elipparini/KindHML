@@ -12,6 +12,7 @@ Lustre representation (see DESIGN.md, Sect. 2):
 
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import desugar
@@ -60,7 +61,13 @@ def param_var(contract: str, proc: str, name: str) -> str:
 
 
 def base_type(t: S.Type) -> str:
-    return {S.INT: "int", S.UINT: "int", S.BOOL: "bool", S.ADDRESS: ADDR, S.METHOD: PROC}[t]
+    return {S.INT: "int", S.UINT: "int", S.REAL: "real", S.BOOL: "bool", S.ADDRESS: ADDR,
+            S.METHOD: PROC}[t]
+
+
+def zero(t: S.Type) -> L.LExpr:
+    """The constant 0 of the number type t (Kind 2 does not mix int and real)."""
+    return L.Real(Fraction(0)) if t == S.REAL else L.Int(0)
 
 
 def map_type(t: S.Type) -> str:
@@ -75,20 +82,21 @@ def default_value(t: S.AnyType, system: System) -> L.LExpr:
     if isinstance(t, S.MapType):
         v = default_value(t.value, system)
         return L.record(map_type(t.value), [(key_field(a), v) for a in system.addresses])
-    return {"int": L.Int(0), "bool": L.FALSE, ADDR: L.Var(addr_const(NULL))}[base_type(t)]
+    return {"int": L.Int(0), "real": zero(S.REAL), "bool": L.FALSE,
+            ADDR: L.Var(addr_const(NULL))}[base_type(t)]
 
 
-def divisors(e: S.Expr) -> List[S.Expr]:
-    """The divisors e'' of all subexpressions e'/e'' (and e' % e'') of e."""
-    out: List[S.Expr] = []
+def divisions(e: S.Expr) -> List[S.BinOp]:
+    """All subexpressions e'/e'' (and e' % e'') of e."""
+    out: List[S.BinOp] = []
 
     def visit(x):
         if isinstance(x, S.BinOp):
             visit(x.left)
             visit(x.right)
             if x.op in ("/", "%"):
-                out.append(x.right)
-        elif isinstance(x, (S.UnOp, S.Old, S.IsEOA)):
+                out.append(x)
+        elif isinstance(x, (S.UnOp, S.Old, S.IsEOA, S.ToReal)):
             visit(x.arg)
         elif isinstance(x, S.Index):
             visit(x.key)
@@ -121,12 +129,13 @@ class Frame:
 class Encoder:
     def __init__(self, system: System):
         self.system = system
+        self.amount = system.program.balance_type      # of balances, values and amounts
 
     # ------------------------------------------------------------ variables
 
     def state_fields(self) -> List[Tuple[str, str]]:
         """StateVars: balance, revert, constructed_C, contract fields, [block_num]."""
-        fields = [(BALANCE, map_type(S.INT)), (REVERT, "bool")]
+        fields = [(BALANCE, map_type(self.amount)), (REVERT, "bool")]
         fields += [(constructed_var(c.name), "bool") for c in self.system.contracts]
         fields += [(field_var(c.name, f.name), lustre_type(f.type))
                    for c in self.system.contracts for f in c.fields]
@@ -136,7 +145,7 @@ class Encoder:
 
     def tx_fields(self) -> List[Tuple[str, str]]:
         """TransVars: sender, cx, fx, value, ParamVars, [blocks]."""
-        fields = [("sender", ADDR), ("cx", ADDR), ("fx", PROC), ("value", "int")]
+        fields = [("sender", ADDR), ("cx", ADDR), ("fx", PROC), ("value", base_type(self.amount))]
         fields += [(param_var(v.contract, v.proc, v.name), base_type(v.type))
                    for v in self.system.param_vars]
         if self.system.uses_block_num:
@@ -144,7 +153,7 @@ class Encoder:
         return fields
 
     def map_value_types(self) -> List[S.Type]:
-        types = [S.INT]
+        types = [self.amount]
         for c in self.system.contracts:
             for f in c.fields:
                 if isinstance(f.type, S.MapType):
@@ -163,6 +172,10 @@ class Encoder:
         rec = lambda x: self.expr(x, s, t, other)
         if isinstance(e, S.IntLit):
             return L.Int(e.value)
+        if isinstance(e, S.RealLit):
+            return L.Real(e.value)
+        if isinstance(e, S.ToReal):
+            return L.call("real", rec(e.arg))
         if isinstance(e, S.BoolLit):
             return L.Bool(e.value)
         if isinstance(e, S.NullLit):
@@ -175,7 +188,7 @@ class Encoder:
             return L.proj(s, field_var(e.contract, e.name))
         if isinstance(e, S.Index):
             if isinstance(e.map, S.Balance):
-                return self.get(S.INT, L.proj(s, BALANCE), rec(e.key))
+                return self.get(self.amount, L.proj(s, BALANCE), rec(e.key))
             ft = self.system.field_type(e.map.contract, e.map.name)
             return self.get(ft.value, L.proj(s, field_var(e.map.contract, e.map.name)), rec(e.key))
         if isinstance(e, S.Constructed):
@@ -189,7 +202,8 @@ class Encoder:
         if isinstance(e, S.UnOp):
             return L.neg(rec(e.arg)) if e.op == "!" else L.op("-", rec(e.arg))
         if isinstance(e, S.BinOp):
-            return L.op(BINOPS[e.op], rec(e.left), rec(e.right))
+            op = "/" if e.op == "/" and e.real else BINOPS[e.op]
+            return L.op(op, rec(e.left), rec(e.right))
         if t is not None:
             frame = Frame.of(t)
             if isinstance(e, S.Param):
@@ -212,8 +226,8 @@ class Encoder:
 
     def definedness(self, exprs: List[S.Expr], s: L.LExpr, t: L.LExpr) -> L.LExpr:
         """def^i: all divisors occurring in `exprs` are nonzero."""
-        return L.conj([L.op("<>", self.expr(d, s, t), L.Int(0))
-                       for e in exprs for d in divisors(e)])
+        return L.conj([L.op("<>", self.expr(d.right, s, t), zero(S.REAL if d.real else S.INT))
+                       for e in exprs for d in divisions(e)])
 
     # ------------------------------------------------------------ statements
 
@@ -265,9 +279,9 @@ class Encoder:
         revert^{i+1} = true)."""
         src, dst, amount = (self.expr(x, s, t) for x in (stmt.src, stmt.dst, stmt.amount))
         bal = L.Proj(s, BALANCE)
-        enabled = L.conj([L.op(">=", self.get(S.INT, bal, src), amount),
-                          L.op(">=", amount, L.Int(0)), L.op("<>", src, dst)])
-        sent = L.record(map_type(S.INT), [
+        enabled = L.conj([L.op(">=", self.get(self.amount, bal, src), amount),
+                          L.op(">=", amount, zero(self.amount)), L.op("<>", src, dst)])
+        sent = L.record(map_type(self.amount), [
             (key_field(a), L.ite(addr_is(a, src),
                                  L.op("-", L.Proj(bal, key_field(a)), amount),
                                  L.ite(addr_is(a, dst),
@@ -369,7 +383,7 @@ class Encoder:
 
     def init_inputs(self) -> List[Tuple[str, str]]:
         """The free initial values: the balances and, if used, the block number."""
-        return [("ib", map_type(S.INT))] + ([("iblock", "int")]
+        return [("ib", map_type(self.amount))] + ([("iblock", "int")]
                                             if self.system.uses_block_num else [])
 
     def init(self) -> L.Function:
@@ -423,7 +437,7 @@ class Encoder:
     def main_node(self) -> L.Function:
         """The transition system: s = Init -> pre Trans(s, t)."""
         s, t, ib = L.Var("s"), L.Var("t"), L.Var("ib")
-        asserts = [L.conj([L.op(">=", L.Proj(ib, key_field(a)), L.Int(0))
+        asserts = [L.conj([L.op(">=", L.Proj(ib, key_field(a)), zero(self.amount))
                            for a in self.system.addresses])]
         if self.system.uses_block_num:
             asserts.append(L.op(">=", L.Var("iblock"), L.Int(0)))
@@ -440,7 +454,7 @@ class Encoder:
         (Init makes them so, and a transfer requires 0 <= amount <= balance of the source)."""
         bal = L.Proj(L.Var("s"), BALANCE)
         return [("_lemma_balances_nonnegative",
-                 L.conj([L.op(">=", L.Proj(bal, key_field(a)), L.Int(0))
+                 L.conj([L.op(">=", L.Proj(bal, key_field(a)), zero(self.amount))
                          for a in self.system.addresses]))]
 
     def program(self) -> Tuple[L.Program, L.Function]:

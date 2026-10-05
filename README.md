@@ -71,7 +71,15 @@ rule Liquidity {
 }
 ```
 
-Formulas: `forall`/`exists x : T .` with `T` in `int, uint, bool, address, method,
+Types of fields and parameters: `int`, `uint`, `real`, `bool`, `address`,
+`mapping (address => T)`. An `int` can be used where a `real` is expected (the tool
+converts it); a `real` cannot be used as an `int`. Real literals are written `0.5`; `%` is
+not defined on reals; `a / b` is the division of reals if an operand is real, and the
+Euclidean division otherwise (so `r = n / 2` with `n : int` converts `n div 2`, with a
+warning). Balances, `msg.value` and amounts are `int`, or `real` if the file starts with
+`pragma balance real;` (see `tests/contracts/real_balances.sol`).
+
+Formulas: `forall`/`exists x : T .` with `T` in `int, uint, real, bool, address, method,
 calldataargs`; modalities `<< sender : Contract . f(args) $ value @ blocks >> φ`, where
 `blocks` (a uint, 0 when omitted) is the increase of the block number made by the
 transaction; `old(e)`; `lastReverted`; `is_EOA(e)`; `balance`, `balance[a]`,

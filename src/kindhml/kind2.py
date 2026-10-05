@@ -315,9 +315,16 @@ def format_counterexample(cex: list, main: str = "main") -> str:
     width = max(len(n) for n, _ in rows)
     lines = [" " * width + "".join(f" | step {k:<6}" for k in range(steps))]
     for name, values in sorted(rows, key=lambda r: (not r[0].startswith("t."), r[0])):
-        lines.append(name.ljust(width) + "".join(f" | {str(values.get(k, '')):<11}"
+        lines.append(name.ljust(width) + "".join(f" | {_value(values.get(k, '')):<11}"
                                                  for k in range(steps)))
     return "\n".join(lines)
+
+
+def _value(v) -> str:
+    """A value of a stream; Kind 2 writes a real as {"num": n, "den": d}."""
+    if isinstance(v, dict) and set(v) == {"num", "den"}:
+        return str(v["num"]) if v["den"] == 1 else f"{v['num']}/{v['den']}"
+    return str(v)
 
 
 def _trace_length(cex: list) -> int:

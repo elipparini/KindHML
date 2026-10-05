@@ -19,7 +19,7 @@ def free_vars(e: L.LExpr) -> set:
     """Names of the variables occurring free in e (enum constants excluded)."""
     if isinstance(e, L.Var):
         return set() if is_const(e) else {e.name}
-    if isinstance(e, (L.Int, L.Bool)):
+    if isinstance(e, (L.Int, L.Real, L.Bool)):
         return set()
     if isinstance(e, L.Op):
         return set().union(*(free_vars(a) for a in e.args))
@@ -57,7 +57,7 @@ def eq(a: L.LExpr, b: L.LExpr) -> L.LExpr:
         return L.FALSE
     if isinstance(a, L.Bool) and isinstance(b, L.Bool):
         return L.Bool(a.value == b.value)
-    if isinstance(a, L.Int) and isinstance(b, L.Int):
+    if isinstance(a, (L.Int, L.Real)) and type(a) is type(b):
         return L.Bool(a.value == b.value)
     return L.Op("=", (a, b))
 
@@ -109,7 +109,7 @@ class Inliner:
         r = lambda x: self.run(x, env)
         if isinstance(e, L.Var):
             return env.get(e.name, e)
-        if isinstance(e, (L.Int, L.Bool)):
+        if isinstance(e, (L.Int, L.Real, L.Bool)):
             return e
         if isinstance(e, L.Op):
             return op(e.op, [r(a) for a in e.args])

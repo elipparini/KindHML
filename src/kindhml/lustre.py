@@ -6,6 +6,7 @@ Expressions are printed fully parenthesised, so no precedence reasoning is neede
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import List, Sequence, Tuple
 
 
@@ -26,13 +27,19 @@ class Int(LExpr):
 
 
 @dataclass(frozen=True)
+class Real(LExpr):
+    value: Fraction
+
+
+@dataclass(frozen=True)
 class Bool(LExpr):
     value: bool
 
 
 @dataclass(frozen=True)
 class Op(LExpr):
-    """Unary (one argument) or binary operator: not - and or => = <> < <= > >= + * div mod."""
+    """Unary (one argument) or binary operator: not - and or => = <> < <= > >= + * div mod /.
+    Kind 2 does not mix int and real: the arguments have the same type."""
     op: str
     args: Tuple[LExpr, ...]
 
@@ -147,6 +154,8 @@ def render(e: LExpr) -> str:
         return e.name
     if isinstance(e, Int):
         return str(e.value) if e.value >= 0 else f"(- {-e.value})"
+    if isinstance(e, Real):
+        return render_real(e.value) if e.value >= 0 else f"(- {render_real(-e.value)})"
     if isinstance(e, Bool):
         return "true" if e.value else "false"
     if isinstance(e, Op):
@@ -170,6 +179,21 @@ def render(e: LExpr) -> str:
     if isinstance(e, Pre):
         return f"(pre {render(e.arg)})"
     raise TypeError(f"unknown Lustre expression {e!r}")
+
+
+def render_real(v: Fraction) -> str:
+    """A nonnegative rational as a Lustre real literal: a decimal (e.g. 2.0, 0.25), or the
+    quotient of two decimals if it has no finite decimal expansion."""
+    d, twos, fives = v.denominator, 0, 0
+    while d % 2 == 0:
+        d, twos = d // 2, twos + 1
+    while d % 5 == 0:
+        d, fives = d // 5, fives + 1
+    if d != 1:
+        return f"({v.numerator}.0 / {v.denominator}.0)"
+    k = max(twos, fives)                 # v * 10^k is an integer
+    digits = str(v.numerator * 10 ** k // v.denominator).rjust(k + 1, "0")
+    return f"{digits[:-k]}.{digits[-k:]}" if k else f"{digits}.0"
 
 
 # ------------------------------------------------------------------ declarations

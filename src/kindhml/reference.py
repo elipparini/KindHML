@@ -13,7 +13,8 @@ plus assumption A5 and the extensions of DESIGN.md, Sect. 4:
 * `uint` parameters must be nonnegative, and so must values assigned to `uint` fields;
 * a transfer requires 0 <= amount <= balance of the contract and a recipient different
   from the contract;
-* division by zero reverts; division is Euclidean, as in SMT-LIB (`div`, `mod`);
+* division by zero reverts; division is Euclidean, as in SMT-LIB (`div`, `mod`), or of
+  reals (Fractions) if an operand is real;
 * the transaction increases `block_num` by its `blocks` (>= 0, else it reverts), before
   `initPay`; a reverted transaction leaves the state, hence the block number, unchanged.
 
@@ -23,6 +24,7 @@ A flagged state is represented by a `State` (with `revert` as the flag b).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import Dict, Tuple
 
 from . import syntax as S
@@ -43,6 +45,13 @@ def smt_div(a: int, b: int) -> int:
 
 def smt_mod(a: int, b: int) -> int:
     return a - b * smt_div(a, b)
+
+
+def divide(e: S.BinOp, a, b):
+    """a / b or a % b (b nonzero): of reals if e is real, else Euclidean."""
+    if e.real:
+        return Fraction(a) / b
+    return smt_div(a, b) if e.op == "/" else smt_mod(a, b)
 
 
 @dataclass
@@ -72,7 +81,7 @@ class Tx:
 def default(t: S.AnyType, system: System):
     if isinstance(t, S.MapType):
         return {a: default(t.value, system) for a in system.addresses}
-    return {S.INT: 0, S.UINT: 0, S.BOOL: False, S.ADDRESS: NULL}[t]
+    return {S.INT: 0, S.UINT: 0, S.REAL: Fraction(0), S.BOOL: False, S.ADDRESS: NULL}[t]
 
 
 def initial_state(system: System, balances: Dict[str, int], block_num: int = 0) -> State:
@@ -196,8 +205,10 @@ class Interpreter:
     # ------------------------------------------------------------ expressions
 
     def eval(self, e: S.Expr, st: State, env):
-        if isinstance(e, (S.IntLit, S.BoolLit)):
+        if isinstance(e, (S.IntLit, S.RealLit, S.BoolLit)):
             return e.value
+        if isinstance(e, S.ToReal):
+            return Fraction(self.eval(e.arg, st, env))
         if isinstance(e, S.NullLit):
             return NULL
         if isinstance(e, S.ContractAddr):
@@ -236,7 +247,7 @@ class Interpreter:
             if op in ("/", "%"):
                 if b == 0:
                     raise Revert
-                return smt_div(a, b) if op == "/" else smt_mod(a, b)
+                return divide(e, a, b)
             return {"+": lambda: a + b, "-": lambda: a - b, "*": lambda: a * b,
                     "<": lambda: a < b, "<=": lambda: a <= b, ">": lambda: a > b,
                     ">=": lambda: a >= b, "==": lambda: a == b, "!=": lambda: a != b}[op]()
@@ -245,20 +256,32 @@ class Interpreter:
 
 # ---------------------------------------------------------------- formulae
 
+def real_domain(int_domain) -> list:
+    """The integers of `int_domain` and the midpoints of consecutive ones (bounded
+    evaluation of real quantifiers, for tests)."""
+    ints = sorted(set(int_domain))
+    return sorted({Fraction(v) for v in ints}
+                  | {Fraction(a + b, 2) for a, b in zip(ints, ints[1:])})
+
+
 class FormulaEvaluator:
     """Bounded evaluation of formulae (Fig. `fig:logSem`) over a sequence of flagged states,
-    head first. Quantified integers range over `int_domain`; the other domains are those of
-    DESIGN.md: addresses but null, methods but constructors, args as records over ParamVars.
+    head first. Quantified integers range over `int_domain`, reals over `int_domain` and the
+    midpoints of its consecutive elements; the other domains are those of DESIGN.md:
+    addresses but null, methods but constructors, args as records over ParamVars.
     For tests only: with an unbounded domain the result may differ."""
 
     def __init__(self, system: System, int_domain):
         self.system = system
         self.interp = Interpreter(system)
         self.ints = list(int_domain)
+        self.reals = real_domain(self.ints)
 
     def values(self, t: S.Type, quantifier: bool = True):
         if t == S.INT:
             return self.ints
+        if t == S.REAL:
+            return self.reals
         if t == S.UINT:
             return [v for v in self.ints if v >= 0]
         if t == S.BOOL:
@@ -283,8 +306,10 @@ class FormulaEvaluator:
     def eval(self, e: S.Expr, seq, env):
         st = seq[0]
         ev = lambda x: self.eval(x, seq, env)
-        if isinstance(e, (S.IntLit, S.BoolLit)):
+        if isinstance(e, (S.IntLit, S.RealLit, S.BoolLit)):
             return e.value
+        if isinstance(e, S.ToReal):
+            return Fraction(ev(e.arg))
         if isinstance(e, S.NullLit):
             return NULL
         if isinstance(e, S.ContractAddr):
@@ -317,7 +342,7 @@ class FormulaEvaluator:
             if op in ("/", "%"):
                 if b == 0:
                     return 0                   # unspecified, as in lustre_eval
-                return smt_div(a, b) if op == "/" else smt_mod(a, b)
+                return divide(e, a, b)
             return {"&&": lambda: a and b, "||": lambda: a or b, "->": lambda: (not a) or b,
                     "+": lambda: a + b, "-": lambda: a - b, "*": lambda: a * b,
                     "<": lambda: a < b, "<=": lambda: a <= b, ">": lambda: a > b,

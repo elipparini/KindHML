@@ -1,6 +1,6 @@
 """Reading Kind 2's JSON and plain-text outputs (no Kind 2 needed)."""
 
-from kindhml.kind2 import parse_output, parse_text
+from kindhml.kind2 import format_counterexample, parse_output, parse_text
 
 RAW = """[
 {
@@ -109,3 +109,14 @@ def test_text_output_of_a_killed_run():
     out = parse_text(TEXT[:TEXT.index("----")])
     assert {p.name: p.status for p in out.properties} == {"L": "valid", "P": "valid",
                                                           "Q": "invalid"}
+
+
+def test_counterexample_with_reals():
+    """Kind 2 writes a real as {"num": n, "den": d} (output of Kind 2 v2.3.0)."""
+    cex = [{"name": "main", "streams": [
+        {"name": "t.value", "type": "real",
+         "instantValues": [[0, {"num": 0, "den": 1}], [1, {"num": 3, "den": 2}]]},
+        {"name": "s.revert", "type": "bool", "instantValues": [[0, False], [1, True]]}]}]
+    rows = format_counterexample(cex).splitlines()
+    assert rows[1].split() == ["t.value", "|", "0", "|", "3/2"]
+    assert rows[2].split() == ["s.revert", "|", "False", "|", "True"]

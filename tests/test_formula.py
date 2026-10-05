@@ -26,7 +26,8 @@ from kindhml import verify as V
 import test_trans as T
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FILES = sorted(glob.glob(os.path.join(ROOT, "contracts", "*", "*.sol")))
+FILES = sorted(glob.glob(os.path.join(ROOT, "contracts", "*", "*.sol"))
+               + glob.glob(os.path.join(ROOT, "tests", "contracts", "*.sol")))
 INTS = (-1, 0, 1, 2)
 STATES = 6
 BUDGET = 3.0            # seconds per rule and configuration; later states are skipped

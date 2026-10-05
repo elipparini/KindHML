@@ -183,3 +183,67 @@ def test_assign_to_parameter():
 def test_assign_whole_mapping():
     with pytest.raises(KindHMLError, match="whole mapping"):
         checked("", "contract C { mapping(address => int) m; function f() { m = 1 } }")
+
+
+# ---------------------------------------------------------------- reals
+
+POOL = """
+contract P {
+    real r;
+    int n;
+    mapping (address => real) m;
+    function f(real x, int k) payable { r = x + k; m[msg.sender] = 1; n = k }
+}
+"""
+
+
+def test_int_converted_to_real():
+    assert formula("r + n > 1 && r == 2", POOL) == "(((r + real(n)) > 1.0) && (r == 2.0))"
+    assert formula("n + 1 > 1", POOL) == "((n + 1) > 1)"
+
+
+def test_real_literals():
+    assert formula("r > -0.25 && m[null] < 1.5", POOL) == "((r > -0.25) && (m[null] < 1.5))"
+
+
+def test_real_quantifier():
+    assert formula("forall x : real . x * x >= 0", POOL) == "(forall x:real. ((x * x) >= 0.0))"
+
+
+def test_real_division_flag():
+    program = checked("rule R { r / 2 == n / 2 }", POOL)
+    eq = program.rules[0].formula
+    assert eq.real and eq.left.real and not eq.right.arg.real    # real(n div 2)
+
+
+def test_mod_on_reals():
+    rejects("r % 2 == 0", "not defined on reals", POOL)
+
+
+def test_real_into_int():
+    with pytest.raises(KindHMLError, match="type int, found real"):
+        checked("", "contract C { int n; function f(real x) { n = x } }")
+
+
+def test_integer_division_converted_to_real_warns():
+    _, warnings = check(parse("contract C { real r; function f(int a) { r = a / 2 } }"))
+    assert any("integer division converted to real" in w for w in warnings)
+
+
+def test_real_value_needs_real_balances():
+    rejects("<< null : P.f(1, 1) $ 0.5 >> true", "type int, found real", POOL)
+    program = checked("rule R { << null : P.f(1, 1) $ 0.5 >> balance > 0.25 }",
+                      "pragma balance real;" + POOL)
+    assert program.balance_type == S.REAL
+
+
+def test_amounts_are_real_with_real_balances():
+    with pytest.raises(KindHMLError, match="type int, found real"):
+        checked("", "pragma balance real; contract C { int x; function f() payable"
+                    " { x = msg.value } }")
+
+
+def test_bad_pragma():
+    for text in ("pragma balance bool;", "pragma value real;"):
+        with pytest.raises(KindHMLError, match="only pragmas"):
+            checked("", text + " contract C { }")

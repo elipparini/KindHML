@@ -14,6 +14,11 @@ class KindHMLVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by KindHMLParser#pragma.
+    def visitPragma(self, ctx:KindHMLParser.PragmaContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by KindHMLParser#contract.
     def visitContract(self, ctx:KindHMLParser.ContractContext):
         return self.visitChildren(ctx)
@@ -56,6 +61,11 @@ class KindHMLVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by KindHMLParser#UintType.
     def visitUintType(self, ctx:KindHMLParser.UintTypeContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by KindHMLParser#RealType.
+    def visitRealType(self, ctx:KindHMLParser.RealTypeContext):
         return self.visitChildren(ctx)
 
 
@@ -206,6 +216,11 @@ class KindHMLVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by KindHMLParser#EqExpr.
     def visitEqExpr(self, ctx:KindHMLParser.EqExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by KindHMLParser#RealLit.
+    def visitRealLit(self, ctx:KindHMLParser.RealLitContext):
         return self.visitChildren(ctx)
 
 
