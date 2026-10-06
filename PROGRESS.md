@@ -222,6 +222,46 @@ need about six specific steps; then implementation; then the 182-rule batch, log
 4. Later, mostly for linear contracts: prove s* unreachable with k-induction or IC3 on
    `s ≠ s*` and add the invariants that Kind 2 prints to the assumed ones (refinement).
 
+## Planned (2026-10-06): soundness gaps, certificates, invariant generation
+
+Soundness gaps (DESIGN.md, Sect. 6):
+* Forbid `lastReverted` in invariants (a reverted transaction changes the revert flag, which
+  the step of Houdini does not cover), or cover reverted transactions in the step.
+* Check the built-in facts once per file (balances nonnegative; fields of an unconstructed
+  contract have default values) with the same initial and step checks, instead of assuming
+  them.
+
+Certificates (the tool should justify each verdict):
+* invalid: the trace (replayable with the reference interpreter) and, at its last state,
+  the values of the universally quantified variables that falsify the formula (from the
+  model of the hoisted inputs), checkable by evaluation; when falsity at that state needs
+  refuting an existential (e.g. "no attack succeeds"), an unsatisfiability proof.
+* valid: the invariants C and the proof obligations as SMT-LIB files (initiation;
+  consecution per procedure; the free-state query), each with a proof from a
+  proof-producing solver (cvc5: Alethe, checkable with Carcara; or Kind 2's `--certif` and
+  `--proof` (LFSC), to be tested); for verdicts of Kind 2 on the transition system, its own
+  `--certif` certificate (a k-inductive invariant).
+* To check: proof production for nonlinear arithmetic (cvc5 leaves trusted steps); the
+  certificates are relative to our encoding, which remains trusted (paper's theorem,
+  differential tests); a cheaper, weaker alternative is to re-solve each obligation with
+  the other solver.
+
+Invariant generation (today Houdini only selects among the invariants written by the user):
+* Kind 2 generates invariants internally (template-based INVGEN engines on the terms of the
+  program, IC3 lemmas; `--print_invs` exports them), but on the nonlinear use cases they
+  exceeded the memory, they work on the quantified property as Kind 2 sees it, and their
+  templates (equalities and orderings between pairs of terms) cannot express sums over the
+  addresses (AMM Shares, lending Totals) or polynomial relations (lending Exchange_rate).
+* Own generator of candidates for Houdini, from the contract: signs of numeric fields and
+  map entries; zero entries for non-user addresses; positivity equivalences between fields
+  (r0 > 0 ⇔ r1 > 0); sums of map entries against total fields (the addresses are finite);
+  bounds by the constants of the contract; relations suggested by paired assignments
+  (`m[s] += e; total += e`); possibly the invariants exported by Kind 2 on cheaper runs.
+  Candidates first filtered on the reachable states of the fuzzer (as Daikon does), then
+  proved by Houdini.
+* Evaluation: does it rediscover the invariants written by hand in the use cases, and how
+  many rules are then proved without user invariants?
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
