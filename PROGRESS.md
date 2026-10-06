@@ -197,6 +197,30 @@ exclude `sender = C`. The tool adds an explicit first statement
 * New: `invariant` declarations, Houdini, checks on free states, BMC search for the state
   that refutes a rule, portfolio strategy in rounds (DESIGN.md, Sect. 6); the runner
   reports when the memory limit killed a solver. Test contract `tests/contracts/swap_pool.sol`.
+* Then: random testing with exact confirmation (`fuzz.py`), hoisting of universal
+  quantifiers, invariants required after construction, Houdini per procedure and
+  incremental, use cases `contracts/{amm,amm-simple,lending,lending-simple}` (DESIGN.md,
+  Sect. 6). The batch of the 182 use-case rules with the final tool was stopped when the
+  session ended (its log was in the scratchpad); to be rerun with logs in `runs/`.
+
+## Planned (agreed with the user, 2026-10-06): better search for counterexamples
+
+The search for the state s* that refutes a rule on a free state (task 3 of the portfolio)
+asks BMC for a state equal to s* in every field, through the whole Trans at every step;
+in the runs so far it found 7 counterexamples, fuzzing most of the others. Plan, in this
+order (experiments first, on the false lending rules still unknown, whose counterexamples
+need about six specific steps; then implementation; then the 182-rule batch, logged in
+`runs/`):
+1. Generalise s*: search only the fields read by the rule (possibly the constraints of its
+   premise instead of exact values), as IC3 generalises its counterexamples to induction.
+2. Guided fuzzing: score reachable states by their distance to the target (s*, or the
+   premise of the rule) and extend the best traces first (hill climbing or evolutionary).
+3. Symbolic search over fixed sequences of procedures: senders and arguments symbolic,
+   one SMT query per sequence ("do these transactions reach a state where φ fails?"),
+   built with the modality encoding (one procedure unfolded per step); sequences limited
+   to the procedures that write the fields of the rule, or proposed by the fuzzer.
+4. Later, mostly for linear contracts: prove s* unreachable with k-induction or IC3 on
+   `s ≠ s*` and add the invariants that Kind 2 prints to the assumed ones (refinement).
 
 ## Decisions taken after M1 (with the user)
 
