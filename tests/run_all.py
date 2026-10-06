@@ -50,7 +50,14 @@ def main():
             files.append(f)
     only = set(args.rules.split(",")) if args.rules else None
 
-    rows, tally = [], {}
+    # The CSV is written row by row, so that an interrupted run keeps its partial results.
+    fields = ["file", "rule", "status", "method", "groundtruth", "check", "wall"]
+    out_csv = open(args.csv, "w", newline="") if args.csv else None
+    writer = csv.DictWriter(out_csv, fieldnames=fields) if out_csv else None
+    if writer:
+        writer.writeheader()
+        out_csv.flush()
+    tally = {}
     for f in files:
         try:
             program, _ = V.load(f)
@@ -67,20 +74,21 @@ def main():
                                mode=args.mode, expand=expand, solver=args.solver,
                                strategy=args.strategy, context=context)
                 gt, desc = out.groundtruth_check(), out.describe()
-                status = out.status
+                status, method = out.status, out.method
             except KindHMLError as e:
-                gt, desc, status = "error", f"{rule.name}: error: {e}", "error"
+                gt, desc, status, method = "error", f"{rule.name}: error: {e}", "error", ""
             wall = time.time() - start
             tally[gt] = tally.get(gt, 0) + 1
             print(f"{V.stem(f):>18} - {desc} [{wall:.1f}s]", flush=True)
-            rows.append({"file": os.path.relpath(f, ROOT), "rule": rule.name, "status": status,
-                         "groundtruth": rule.groundtruth, "check": gt, "wall": round(wall, 2)})
+            if writer:
+                writer.writerow({"file": os.path.relpath(f, ROOT), "rule": rule.name,
+                                 "status": status, "method": method,
+                                 "groundtruth": rule.groundtruth, "check": gt,
+                                 "wall": round(wall, 2)})
+                out_csv.flush()
     print("summary:", ", ".join(f"{k}: {v}" for k, v in sorted(tally.items())))
-    if args.csv:
-        with open(args.csv, "w", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
-            w.writeheader()
-            w.writerows(rows)
+    if out_csv:
+        out_csv.close()
 
 
 if __name__ == "__main__":
