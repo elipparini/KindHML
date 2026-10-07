@@ -262,6 +262,27 @@ Invariant generation (today Houdini only selects among the invariants written by
 * Evaluation: does it rediscover the invariants written by hand in the use cases, and how
   many rules are then proved without user invariants?
 
+Done (2026-10-07, commit 7772ac4; DESIGN.md, Sect. 6): `invgen.py` (templates, filter on
+the fuzzer's states, `minimize` after Houdini), `sum(m)`, counterexample-guided Houdini
+(one conjunction query per procedure), invariant phase per file. With the generated
+invariants only (`--no_user_invariants`, 60 s per rule, `runs/invgen_rules3.log`):
+* AMM main: 135 templates, 31 after the fuzzer, all proved in 7.5 s; 8 of 10 rules proved,
+  the same as with the invariants written by hand (which are proved as rules in 0.5 s);
+  unknown: Sandwich, Arbitrage (existentials over reals).
+* Lending main: 249 templates, 67 after the fuzzer, 61 proved in 47 s; 8 of 11 rules
+  proved, the same as with the invariants written by hand (proved as rules in 0.6 s);
+  unknown: Liquidation_defence, Liquidation_attack (false), Exchange_rate_monotone.
+* Lessons: one property per candidate copies the inlined call into every property (71
+  lending candidates not decided in 64 s; as one conjunction, 1-6 s per procedure);
+  address quantifiers exclude null, so `m[null]` needs its own templates; minimizing before
+  Houdini loses candidates implied by false ones; Houdini needs its own phase (inside the
+  rounds of each rule it did not finish on the lending protocol); runs killed by the
+  memory limit must not count as undecided.
+* Regressions and test contracts with the generator on (default; 30 s per rule,
+  `runs/regressions_invgen.log`): 84 of 90 rules match (82 before), no wrong verdict; the 6
+  unknown are in the OPEN list of `tests/test_regressions.py`; the invariant phase takes
+  0-13 s per file.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
