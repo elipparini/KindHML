@@ -37,6 +37,12 @@ rule Total_nonnegative {
     total >= 0 && count >= 0
 }
 
+// The total is the sum of the shares (sum over all addresses).
+// @groundtruth: True
+invariant Shares_total {
+    sum(share) == total
+}
+
 // @groundtruth: False
 rule Rate_positive {
     rate > 0

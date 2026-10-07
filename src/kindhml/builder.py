@@ -211,6 +211,11 @@ class _Builder(KindHMLVisitor):
             return S.Old(args[0], pos)
         if fn == "is_EOA" and len(args) == 1:
             return S.IsEOA(args[0], pos)
+        if fn == "sum" and len(args) == 1:
+            arg = args[0]
+            if isinstance(arg, S.Name) and arg.name == "balance":
+                arg = S.Balance(arg.pos)
+            return S.SumMap(arg, pos)
         raise KindHMLError(f"unknown function '{fn}' with {len(args)} argument(s)", pos)
 
     def visitNameExpr(self, ctx):
@@ -289,4 +294,19 @@ def parse(text: str) -> S.Program:
     parser.removeErrorListeners()
     parser.addErrorListener(_RaisingErrorListener())
     tree = parser.program()
+    return _Builder(tokens).visit(tree)
+
+
+def parse_expr(text: str) -> S.Expr:
+    """Parse a single expression (raw AST), e.g. a generated invariant. Raises KindHMLError."""
+    lexer = KindHMLLexer(InputStream(text))
+    lexer.removeErrorListeners()
+    lexer.addErrorListener(_RaisingErrorListener())
+    tokens = CommonTokenStream(lexer)
+    parser = KindHMLParser(tokens)
+    parser.removeErrorListeners()
+    parser.addErrorListener(_RaisingErrorListener())
+    tree = parser.expr()
+    if tokens.LA(1) != Token.EOF:
+        raise KindHMLError(f"unexpected text after the expression in '{text}'")
     return _Builder(tokens).visit(tree)

@@ -44,6 +44,11 @@ Options:
   each rule on an arbitrary state satisfying them, searches for the state that refutes it,
   and runs Kind 2 on the transition system, in rounds with doubling budgets; `kind2` only
   runs Kind 2 on the transition system. See `DESIGN.md`, Sect. 6.
+- `--no_invgen`: do not generate candidate invariants (only those of the file are used).
+- `--no_user_invariants`: ignore the invariants declared in the file.
+- `--print_invariants`: print the invariants proved (declared and generated).
+- `--invariants_timeout`: time limit of the invariant phase, which runs once before the
+  rules (default: 3 times `timeout`).
 
 Each rule's Lustre file is saved in `out_lus/<contract>_<Rule>_<n>_<timeout>.lus`, and its
 verdict in `out_results/<contract>_<Rule>_<n>_<timeout>.out`. The verdict is compared with the
@@ -89,11 +94,14 @@ Formulas: `forall`/`exists x : T .` with `T` in `int, uint, real, bool, address,
 calldataargs`; modalities `<< sender : Contract . f(args) $ value @ blocks >> φ`, where
 `blocks` (a uint, 0 when omitted) is the increase of the block number made by the
 transaction; `old(e)`; `lastReverted`; `is_EOA(e)`; `balance`, `balance[a]`,
-`block.number`, contract fields.
+`block.number`, contract fields; `sum(m)`, the sum of a mapping `m` (or of `balance`) over
+all addresses.
 
 Besides rules, a file may declare invariants, `invariant Name { φ }`, with `φ` without
-modalities. The tool proves those that are inductive and assumes them when it checks the
-other rules (see `tests/contracts/swap_pool.sol`); this helps much with nonlinear arithmetic.
+modalities, required where all contracts are constructed. The tool also generates
+candidate invariants from templates (signs, bounds, totals such as `sum(m) == total`, ...).
+It proves those that are inductive and assumes them when it checks the other rules (see
+`tests/contracts/swap_pool.sol`); this helps much with nonlinear arithmetic.
 
 A file may contain several contracts, which can call each other (no cycles):
 `Token.mint(msg.sender, n) $ msg.value` calls `mint` of contract `Token`, transferring
@@ -111,3 +119,6 @@ bash run_experiments.sh              # the benchmarks of the paper
 ```
 
 `tools/gen_parser.sh` regenerates the parser from `src/kindhml/grammar/KindHML.g4`.
+
+
+// TODO change "rule" into "property"

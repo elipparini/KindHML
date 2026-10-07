@@ -211,6 +211,13 @@ class Checker:
             return replace(e, arg=arg), t
         if isinstance(e, S.IsEOA):
             return replace(e, arg=self._expect(e.arg, S.ADDRESS, ctx)), S.BOOL
+        if isinstance(e, S.SumMap):
+            if isinstance(e.map, S.Balance):
+                return e, self.amount
+            m, t = self._expr(e.map, ctx)
+            if not (isinstance(t, S.MapType) and S.is_num(t.value)):
+                raise _err("sum(...) needs a mapping to numbers (or balance)", e)
+            return replace(e, map=m), (S.REAL if t.value == S.REAL else S.INT)
         if isinstance(e, S.Index):
             return self._index(e, ctx)
         if isinstance(e, S.UnOp):
@@ -392,6 +399,12 @@ def _find(e, cls):
                 if found is not None:
                     return found
     return None
+
+
+def check_rule(program: S.Program, rule: S.Rule) -> S.Rule:
+    """Resolve and type-check a raw rule against an already resolved program (e.g. a
+    generated invariant). Raises KindHMLError."""
+    return Checker(program)._rule(rule)
 
 
 def check(program: S.Program) -> Tuple[S.Program, List[str]]:

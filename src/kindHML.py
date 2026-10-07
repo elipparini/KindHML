@@ -10,6 +10,7 @@ the verdict in out_results/<contract>_<Rule>_<n>_<timeout>.out.
 import argparse
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,6 +32,15 @@ def main() -> int:
                     help="portfolio (default): invariants, checks on free states, and Kind 2"
                          " on the transition system, in rounds of doubling budgets; kind2:"
                          " Kind 2 on the transition system only")
+    ap.add_argument("--no_invgen", action="store_true",
+                    help="do not generate candidate invariants (only those of the file)")
+    ap.add_argument("--no_user_invariants", action="store_true",
+                    help="ignore the invariants declared in the file")
+    ap.add_argument("--print_invariants", action="store_true",
+                    help="print the invariants proved (declared and generated)")
+    ap.add_argument("--invariants_timeout", type=float, default=None,
+                    help="time limit of the invariant phase, before the rules (default: 3 x"
+                         " timeout; 0: no limit)")
     ap.add_argument("--only_lus", action="store_true", help="only generate the Lustre files")
     ap.add_argument("--cex", action="store_true", help="print counterexamples")
     ap.add_argument("--solver", choices=("auto",) + SOLVERS, default="auto",
@@ -60,6 +70,15 @@ def main() -> int:
     timeout = int(args.timeout) if args.timeout == int(args.timeout) else args.timeout
     os.makedirs(args.out_lus, exist_ok=True)
     context: dict = {}                  # invariants are proved once for all the rules
+    if args.strategy == "portfolio" and not args.only_lus:
+        start = time.time()
+        limit = (args.invariants_timeout if args.invariants_timeout is not None
+                 else 3 * args.timeout)
+        invs = V.prove_invariants(program, args.n_of_participants, limit or None,
+                                  context, mode=args.mode, expand=expand,
+                                  invgen=not args.no_invgen,
+                                  user_invariants=not args.no_user_invariants)
+        print(f"{name} - {V.invariant_summary(invs)} [{time.time() - start:.1f}s]", flush=True)
     code = 0
     for rule in rules:
         tag = f"{name}_{rule.name}_{args.n_of_participants}_{timeout}"
@@ -72,7 +91,8 @@ def main() -> int:
         outcome = V.verify(program, rule, args.n_of_participants, args.timeout or None,
                            mode=args.mode, expand=expand, lus_path=lus_path,
                            solver=args.solver, cex=args.cex, strategy=args.strategy,
-                           context=context)
+                           context=context, invgen=not args.no_invgen,
+                           user_invariants=not args.no_user_invariants)
         line = f"{name} - {outcome.describe()}"
         print(line, flush=True)
         if args.cex and outcome.status == "invalid" and outcome.result.counterexample:
@@ -82,6 +102,9 @@ def main() -> int:
             f.write(line + "\n")
         if outcome.status == "error":
             code = 1
+    if args.print_invariants:
+        for line in V.invariant_report(context):
+            print(f"{name} - {line}")
     return code
 
 

@@ -59,4 +59,6 @@ def expr(e: S.Expr) -> str:
         return f"old({expr(e.arg)})"
     if isinstance(e, S.IsEOA):
         return f"is_EOA({expr(e.arg)})"
+    if isinstance(e, S.SumMap):
+        return f"sum({expr(e.map)})"
     raise TypeError(f"unknown expression {e!r}")

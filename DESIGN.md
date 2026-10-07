@@ -186,17 +186,62 @@ round trip `swap0(10); swap1(out)` from reserves (100, 100) stays unknown, becau
 must establish, through the nonlinear swaps, that wallets and reserves are nonnegative.
 
 **Invariants.** A file may declare `invariant I { ψ }`, with ψ a formula without
-modalities, required in every reachable state (also before construction). The candidate
-invariants are the declared ones; the built-in lemma (balances are nonnegative) holds in
-every system and is assumed without checks (proving it for each file cost seconds that
-some regressions needed). The largest inductive subset C is found by Houdini: two Kind 2
-runs on free values, without the transition system, check `Init ⇒ I` (any initial balances
-and block number) and `C(s) ⇒ I after any transaction`, for each candidate I; a refuted
-candidate is dropped and the checks are repeated. A candidate that survives is proved
-inductive, hence valid. The step has one property per invariant and procedure f
-(constructors included), `C(s) ⇒ Φ(∀a, x̄, v. ⟨a : C.f(x̄) $ v⟩ I)(s)`, encoded like a
-modality so that only f is unfolded (with the whole `Trans` and `t.fx` fixed, each query took
-about 10 s, and the step of the AMM invariants was unknown after 60 s; now 1.8 s).
+modalities, required, like a rule, in the reachable states where all contracts are
+constructed. The candidates are the declared invariants and the generated ones (below).
+Built-in facts, true in every system, are assumed without checks: balances are
+nonnegative; the fields of an unconstructed contract have their default values (only the
+procedures of a contract assign its fields, and all but the constructor require it to be
+constructed). The largest inductive subset C is found by Houdini (Flanagan, Leino 2001):
+* initiation is trivial (no contract is constructed in the initial states);
+* the step, for each procedure f (constructors included), is one query on free values,
+  without the transition system: `C(s) ⇒ Φ(∀a, x̄, v. ⟨a : C.f(x̄) $ v⟩ (constructed → ∧C))(s)`,
+  encoded like a modality so that only f is unfolded (with the whole `Trans` and `t.fx`
+  fixed, each query took about 10 s);
+* if it is refuted, its counterexample gives a free state satisfying C and the arguments of
+  the call; the reference interpreter runs the call from that state (for every sender),
+  and the candidates false afterwards are not inductive; if none is identified, or the
+  query is not decided, the step of f is checked with one property per candidate
+  (slower: the inlined call is copied into every property; on the lending protocol, 71
+  candidates were not decided in 64 s that way, while each conjunction takes 1-6 s);
+* the candidates refuted in a pass are dropped together, and the steps are checked again;
+  generated candidates still undecided after 16 s are dropped too (declared ones wait).
+
+Houdini runs once per file, before its rules, as a phase with its own time limit
+(`prove_invariants`; in `run_all.py` and the CLI, `--invariants_timeout`, by default 3 times
+the time limit of a rule; its time is printed); if it does not finish, the rules go on with
+it in their rounds. A run killed by the memory limit says nothing about the candidates: the
+pass stops and a later one tries again (under memory pressure, all the AMM candidates were
+once dropped as undecided). Within the rounds of
+each rule, Houdini shared the time with the other tasks and restarted from small budgets:
+on the lending protocol it did not finish within 11 rules of 60 s, while alone it takes
+about 110 s.
+
+The rules assume the proved invariants minus the generated ones implied by other proved
+ones (`invgen.minimize`, syntactic: `f >= 0` by `f > 0`, an implication by the equivalence,
+`sum(m) <= f` by `sum(m) == f`, ...): fewer, stronger premises are faster for the solvers.
+Minimizing before Houdini would lose candidates: `res0 > 0 -> sc0 > 0` is implied by
+`(res0 > 0) == (sc0 > 0)`, which survives the fuzzer but is false (all the reserves can be
+borrowed).
+
+**Invariant generation** (`invgen.py`). Houdini only selects among candidates, so the tool
+generates them from templates over the fields of the contracts: signs (`f >= 0`, `f > 0`,
+`∀u. m[u] >= 0`), bounds by the constants of the contracts, positivity relations
+(`(f > 0) == (g > 0)`, `f > 0 -> g > 0`), holders (`∀u. !is_EOA(u) -> m[u] == 0`,
+`m[null] == 0`; address quantifiers exclude null, so `m[null]` needs its own templates, or
+`sum(m) == f` does not bound the entries of a free state), totals (`sum(m) == f`,
+`sum(m) <= f`, `∀u. m[u] <= f`), definitions (`G -> f == e` and `G && d != 0 -> f * d == e'`
+for the assignments `f = e` and `f = e' / d` under the conditions G of the enclosing ifs),
+and `a != null` for address fields. `sum(m)` is a new built-in (also for users): the sum of
+m over all addresses, finite (A1). The candidates are written as source text and
+type-checked like declared invariants; those false in a reachable state of the fuzzer (2 s
+of random transactions) are discarded first (as Daikon does). Kind 2's own generators do
+not replace this: they relate pairs of terms of the Lustre program (no sums over the
+addresses, no polynomial relations), and on the nonlinear use cases they exceeded the
+memory. Results (generated candidates only, the declared invariants ignored): AMM, 123
+templates, 31 after the fuzzer, all proved in 10 s; lending, 248 templates, 71 after the
+fuzzer, 61 proved in 111 s; in both, the proved ones include every invariant written by
+hand for the use case (e.g. `sum(minted) == supply`, and the exchange rate
+`sc0 > 0 -> xr0 * sc0 == res0 + ssdebt * idx`).
 
 **Checking a rule on a free state.** `C'(s) ⇒ ((∧ constructed) → Φ(φ))(s)` for an arbitrary
 state s, where C' is a subset of C. If it holds, φ holds in every reachable state (all of them
@@ -231,7 +276,12 @@ quantifiers (and a sample of the arguments of all procedures). A state where it 
 candidate, which Kind 2 checks exactly (the formula at that concrete state, `concrete_check`);
 a confirmed candidate is a counterexample, reported with its transactions. For a rule with
 an existential quantifier over numbers in positive position, the bounded evaluation almost
-always misses the witness, so new random states are checked exactly instead.
+always misses the witness, so new random states are checked exactly instead. The random
+values are chosen half of the time among the numbers of the current state (or their half
+or quarter), and the sender, with probability 0.2, among the users stored in address
+fields (an owner, an oracle): otherwise the procedures restricted to them almost never
+succeed (on the lending protocol, `accrue` was not called, and false candidate invariants
+such as `xr0 == 1` survived the filter).
 
 **Portfolio** (default; `--strategy kind2` gives the previous behaviour). The tool does not
 give up: it runs rounds of the tasks below, one Kind 2 job at a time, each with the round's

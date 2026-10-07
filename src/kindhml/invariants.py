@@ -5,31 +5,32 @@ Trans. When Trans is nonlinear and the rule holds only because of facts about th
 states (e.g. nonnegative reserves), this often fails. The checks below avoid the transition
 system: each is one Kind 2 run on free values (a node without `pre`), i.e. one SMT query.
 
-* An invariant I is proved inductive by two checks: Init ⇒ I, for any initial balances and
-  block number; and C(s) ⇒ I(Trans(s, t)) for every state s and transaction t, where C is
-  the conjunction of the candidate invariants. Candidates refuted by a check are dropped
-  until the remaining set is inductive (Houdini). The built-in lemma (balances are
-  nonnegative) is a candidate too.
+* Invariants, like rules, are required in the states where all contracts are constructed:
+  (∧_C constructed_C) → I. So they hold trivially in the initial states, and a set C of
+  candidates is inductive if, for every procedure f (constructors included),
+  C(s) ⇒ C(Trans(s, t)) for every state s and call t of f (`step_conj_checks`;
+  `step_check` with one property per candidate). Candidates refuted are dropped until the
+  remaining set is inductive (Houdini, `verify._Invariants`). The built-in facts
+  (balances are nonnegative; an unconstructed contract has default fields) are assumed.
 * A rule φ is checked on a free state s: C(s) ⇒ ((∧_C constructed_C) → Φ(φ))(s), with C the
   proved invariants. If it holds, φ holds in every reachable state (they all satisfy C).
   If it fails, the counterexample s* may be unreachable; `reach_check(s*)` asks BMC
   whether s* is reachable, which gives a counterexample of φ.
-
-An invariant itself is required in every reachable state, including those before the
-construction of the contracts, so its formula has no guard on construction.
 """
 
 from __future__ import annotations
 
 from fractions import Fraction
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import lustre as L
 from . import syntax as S
+from .concrete import python_value, state_from_values
 from .encode_formula import FormulaEncoder
 from .encode_trans import ST, TX, Encoder, constructed_var, default_value, field_var
 from .lustre_subst import eq
 from .model import System
+from .reference import FormulaEvaluator, Interpreter, Tx
 
 StateFormula = Callable[[L.LExpr], L.LExpr]
 
@@ -78,57 +79,90 @@ class Checks:
         prog.decls.append(node)
         return prog.render()
 
-    def init_check(self, names: List[str]) -> str:
-        """Properties `init_<I>`: I holds in the initial state."""
-        prog, inputs = self._program(), self.enc.init_inputs()
+    def step_conj_checks(self, names: List[str]) -> List[Tuple[str, S.Contract, S.Procedure]]:
+        """The step of Houdini, one program per procedure f, with one property: all the
+        candidates in `names` hold after any call of f from a state satisfying them,
+        C(s) ⇒ Φ(∀a, x̄, v[, δ]. ⟨a : C.f(x̄) $ v @ δ⟩ (constructed → ∧ names))(s). If it is
+        refuted, its counterexample identifies the candidates that do not hold after the
+        call (`refuted_after`). With one property per candidate, the inlined call is copied
+        into every property: on the lending protocol, 71 candidates were not decided in
+        64 s; as one conjunction, each procedure takes 1-6 s."""
+        conj: S.Expr = S.BoolLit(True)
+        for n in names:
+            conj = S.BinOp("&&", conj, self.program.rule(n).formula)
         s = L.Var("s")
-        node = L.Function(
-            "main", inputs, [], locals=[("s", ST)], asserts=self._init_assumptions(),
-            equations=[("s", L.call("init", *[L.Var(n) for n, _ in inputs]))],
-            properties=[(f"init_{n}", self.candidates[n](s)) for n in names],
-            comment="Init => I, for every candidate invariant I")
-        return self._render(prog, node)
-
-    def _init_assumptions(self) -> List[L.LExpr]:
-        _, main = self.enc.program()
-        return list(main.asserts)
-
-    def step_checks(self, names: List[str]) -> List[Tuple[str, Dict[str, str]]]:
-        """The step of the invariants as one program per procedure: in a single program,
-        the 36 properties of the lending protocol were all unknown after 60 s; one program
-        per procedure proves them in 1-8 s each."""
-        lus, about = self.step_check(names)
-        head, node = lus[:lus.index("node main")], lus[lus.index("node main"):]
-        lines = node.splitlines()
-        body = [l for l in lines if "--%PROPERTY" not in l]
+        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s)])
         out = []
         for c, p in self.enc.system.methods:
-            mine = {n: i for n, i in about.items() if n.endswith(f"__{c.name}_{p.name}")}
-            props = [l for l in lines if "--%PROPERTY" in l
-                     and any(f'"{n}"' in l for n in mine)]
-            out.append((head + "\n".join(body[:-1] + props + body[-1:]) + "\n", mine))
+            after = self.fenc.state_formula(self._after(c, p, self._guard(conj)), s)
+            node = L.Function("main", [("s", ST)], [],
+                              properties=[("step", L.op("=>", premise, after))],
+                              comment=f"the candidate invariants after a call of {p.name}")
+            out.append((self._render(self._program(), node), c, p))
         return out
 
-    def step_check(self, names: List[str]) -> Tuple[str, Dict[str, str]]:
-        """C(s) ⇒ I(Trans(s, t)) for every candidate I in `names`, with C the conjunction of
-        `names` and of the axioms. One property per I and per procedure C.f (constructors
-        included): C(s) ⇒ Φ(∀a, x̄, v[, δ]. ⟨a : C.f(x̄) $ v @ δ⟩ I)(s), encoded like a
-        modality, so that only f is unfolded (passing the whole Trans and fixing t.fx made each
-        query much slower, and the step of the full AMM unknown after 60 s). A sender that
-        is not a user makes the transaction revert, which leaves the state unchanged, so
-        `a` ranges over the address domain. Returns the program and, for each property, the
-        candidate it is about."""
-        prog, s = self._program(), L.Var("s")
-        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s)])
+    def refuted_after(self, counterexample: list, names: List[str], c: S.Contract,
+                      p: S.Procedure) -> set:
+        """The candidates false after the call of `p` given by a counterexample of its
+        conjunction step: its free state s satisfies all the candidates (the premise), and
+        the reference interpreter runs the call, with the arguments of the counterexample
+        (inputs after `hoist`), for every sender (the sender is expanded, not an input)."""
+        values: Dict[str, object] = {}
+        for block in counterexample or []:
+            for stream in block.get("streams", []):
+                vals = dict((int(k), v) for k, v in stream.get("instantValues", []))
+                if 0 in vals:
+                    values[stream["name"]] = vals[0]
+        system = self.enc.system
+        st = state_from_values(values, system, self.enc)
+        inputs = {}
+        for name, v in values.items():
+            if name.startswith("q___") and "_" in name[4:]:
+                inputs[name[4:].rsplit("_", 1)[0]] = python_value(v)
+        args = {x.name: inputs.get(f"arg_{x.name}", 0) for x in p.params}
+        tx = dict(value=inputs.get("value", 0), blocks=inputs.get("blocks", 0))
+        interp = Interpreter(system)
+        ev = FormulaEvaluator(system, range(-1, 4))
+        out = set()
+        for sender in system.addresses:
+            post = interp.step(st, Tx(sender, c.name, (c.name, p.name), args, **tx))
+            if not all(post.constructed.values()):
+                continue
+            for n in names:
+                try:
+                    if not ev.holds(self.program.rule(n).formula, [post]):
+                        out.add(n)
+                except (ZeroDivisionError, KeyError, TypeError):
+                    pass
+        return out
+
+    def _guard(self, formula: S.Expr) -> S.Expr:
         constructed: S.Expr = S.BoolLit(True)
         for c in self.enc.system.contracts:
             constructed = S.BinOp("&&", constructed, S.Constructed(c.name))
+        return S.BinOp("->", constructed, formula)
+
+    def step_check(self, names: List[str],
+                   only: Optional[Tuple[S.Contract, S.Procedure]] = None
+                   ) -> Tuple[str, Dict[str, str]]:
+        """C(s) ⇒ I(Trans(s, t)) for every candidate I in `names`, with C the conjunction of
+        `names` and of the axioms: one property per I and per procedure C.f (constructors
+        included; only `only` if given), C(s) ⇒ Φ(∀a, x̄, v[, δ]. ⟨a : C.f(x̄) $ v @ δ⟩ I)(s),
+        encoded like a modality, so that only f is unfolded (passing the whole Trans and
+        fixing t.fx made each query much slower). A sender that is not a user makes the
+        transaction revert, which leaves the state unchanged, so `a` ranges over the address
+        domain. Returns the program and, for each property, the candidate it is about. Used
+        when the conjunction of `step_conj_checks` is not decided, or its counterexample does
+        not identify a candidate."""
+        prog, s = self._program(), L.Var("s")
+        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s)])
         props, about = [], {}
         for c, p in self.enc.system.methods:
+            if only is not None and (c.name, p.name) != (only[0].name, only[1].name):
+                continue
             for n in names:
-                rule = self.program.rule(n)
                 prop = f"step_{n}__{c.name}_{p.name}"
-                guarded = S.BinOp("->", constructed, rule.formula)
+                guarded = self._guard(self.program.rule(n).formula)
                 after = self.fenc.state_formula(self._after(c, p, guarded), s)
                 props.append((prop, L.op("=>", premise, after)))
                 about[prop] = n

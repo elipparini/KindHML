@@ -38,6 +38,13 @@ def main():
     ap.add_argument("--expand", default=",".join(V.DEFAULT_EXPAND))
     ap.add_argument("--rules", default="", help="comma-separated rule names to run (default all)")
     ap.add_argument("--strategy", default="portfolio", choices=V.STRATEGIES)
+    ap.add_argument("--no_invgen", action="store_true", help="no generated invariants")
+    ap.add_argument("--no_user_invariants", action="store_true",
+                    help="ignore the invariants declared in the files")
+    ap.add_argument("--print_invariants", action="store_true",
+                    help="print the invariants proved for each file")
+    ap.add_argument("--invariants_timeout", type=float, default=None,
+                    help="time limit of the invariant phase of a file (default: 3 x timeout)")
     ap.add_argument("--csv", default="")
     args = ap.parse_args()
     expand = () if args.expand == "none" else tuple(args.expand.split(","))
@@ -65,6 +72,17 @@ def main():
             print(f"{V.stem(f)}: error: {e}")
             continue
         context: dict = {}
+        if args.strategy == "portfolio":
+            # the invariant phase of the file, with its own time limit
+            start = time.time()
+            limit = (args.invariants_timeout if args.invariants_timeout is not None
+                     else 3 * args.timeout)
+            invs = V.prove_invariants(program, args.participants, limit, context,
+                                      mode=args.mode, expand=expand,
+                                      invgen=not args.no_invgen,
+                                      user_invariants=not args.no_user_invariants)
+            print(f"{V.stem(f):>18}   {V.invariant_summary(invs)} [{time.time()-start:.1f}s]",
+                  flush=True)
         for rule in program.rules:
             if only and rule.name not in only:
                 continue
@@ -72,7 +90,9 @@ def main():
             try:
                 out = V.verify(program, rule, args.participants, args.timeout,
                                mode=args.mode, expand=expand, solver=args.solver,
-                               strategy=args.strategy, context=context)
+                               strategy=args.strategy, context=context,
+                               invgen=not args.no_invgen,
+                               user_invariants=not args.no_user_invariants)
                 gt, desc = out.groundtruth_check(), out.describe()
                 status, method = out.status, out.method
             except KindHMLError as e:
@@ -86,6 +106,9 @@ def main():
                                  "groundtruth": rule.groundtruth, "check": gt,
                                  "wall": round(wall, 2)})
                 out_csv.flush()
+        if args.print_invariants:
+            for line in V.invariant_report(context):
+                print(f"{V.stem(f):>18}   {line}", flush=True)
     print("summary:", ", ".join(f"{k}: {v}" for k, v in sorted(tally.items())))
     if out_csv:
         out_csv.close()

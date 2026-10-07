@@ -269,6 +269,14 @@ class IsEOA(Expr):
     pos: Pos = _pos()
 
 
+@dataclass(frozen=True)
+class SumMap(Expr):
+    """`sum(m)`: the sum of m[a] over all addresses a (they are finite, A1). In a resolved
+    AST, `map` is a `Field` (a mapping to numbers) or `Balance`."""
+    map: Expr
+    pos: Pos = _pos()
+
+
 # ------------------------------------------------------------------ statements
 
 class Stmt:

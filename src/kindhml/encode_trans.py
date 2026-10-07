@@ -199,6 +199,14 @@ class Encoder:
             return L.proj(s, REVERT)
         if isinstance(e, S.IsEOA):
             return L.call("is_eoa", rec(e.arg))
+        if isinstance(e, S.SumMap):
+            m = (L.proj(s, BALANCE) if isinstance(e.map, S.Balance)
+                 else L.proj(s, field_var(e.map.contract, e.map.name)))
+            terms = [L.proj(m, key_field(a)) for a in self.system.addresses]
+            out = terms[0]
+            for x in terms[1:]:
+                out = L.op("+", out, x)
+            return out
         if isinstance(e, S.UnOp):
             return L.neg(rec(e.arg)) if e.op == "!" else L.op("-", rec(e.arg))
         if isinstance(e, S.BinOp):

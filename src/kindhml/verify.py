@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 from . import kind2
 from . import lustre as L
+from . import pretty
 from .builder import parse
 from .encode_formula import FormulaEncoder
 from .encode_trans import Encoder
@@ -16,6 +17,7 @@ from .errors import KindHMLError
 from .concrete import describe_tx, state_literal
 from .fuzz import Fuzzer
 from .invariants import Checks, describe_state, state_values
+from .invgen import generate as generate_invariants, minimize as minimize_invariants
 from .model import System
 from .typecheck import check
 from . import syntax as S
@@ -94,6 +96,8 @@ class Outcome:
 STRATEGIES = ("portfolio", "kind2")
 FIRST_BUDGET = 4.0                  # seconds per task in the first round; doubled each round
 KIND2_SHARE = 4                     # without a time limit, Kind 2 gets 4 budgets per round
+INVGEN_SECONDS = 2.0                # random testing that filters the generated invariants
+STUCK_AFTER = 16.0                  # Houdini drops generated candidates undecided after this
 LIGHT_ENGINES = ["--enable", "BMC", "--enable", "IND"]
 FREE_SOLVERS = ("z3", "cvc5")       # z3 first: nlsat for nonlinear real queries
 
@@ -102,20 +106,23 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
            mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND, lus_path: Optional[str] = None,
            extra_args: Optional[List[str]] = None, solver: str = "auto",
            cex: bool = False, strategy: str = "portfolio",
-           context: Optional[dict] = None) -> Outcome:
+           context: Optional[dict] = None, invgen: bool = True,
+           user_invariants: bool = True) -> Outcome:
     """Check one rule within `timeout` seconds (None or 0: no limit, the search goes on until
     there is a verdict). With `cex`, an invalid rule comes with a counterexample (slower).
 
     Strategy "kind2": Kind 2 on (Init, Trans) and Φ(φ) (`kind2_search`).
     Strategy "portfolio" (default): rounds of the following tasks, one Kind 2 job at a time,
-    each with the round's budget (FIRST_BUDGET, doubled at each round; task 4 gets
-    KIND2_SHARE budgets, or, with a time limit, all the time left):
-      1. prove the invariants of the program (`invariants.py`; shared by the rules of a
-         run through `context`);
+    each with the round's budget (FIRST_BUDGET, doubled at each round; task 5 gets
+    KIND2_SHARE budgets, or, with a time limit and linear arithmetic, all the time left):
+      1. prove the invariants (`invariants.py`; shared by the rules of a run through
+         `context`): those of the file (unless `user_invariants` is false) and, with
+         `invgen`, the generated candidates (`invgen.py`);
       2. "invariants": check the rule on a free state satisfying them; a counterexample s*
          ends this task and starts task 3;
       3. "reach": BMC search for s* in the transition system (a counterexample of the rule);
-      4. "kind2": `kind2_search`, with BMC and k-induction only after the memory limit
+      4. "fuzz": random testing, confirmed exactly (`fuzz.py`);
+      5. "kind2": `kind2_search`, with BMC and k-induction only after the memory limit
          killed a solver.
     An invariant proved inductive (task 1) is valid ("inductive")."""
     lustre = lustre_for(program, rule, n_users, mode, expand)
@@ -127,10 +134,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
         return kind2_search(rule, lustre, timeout or None, extra_args, solver, cex)
     if context is None:
         context = {}
-    key = (id(program), n_users, mode, tuple(expand))
-    if key not in context:
-        context[key] = _Invariants(Checks(program, n_users, mode, expand))
-    invs = context[key]
+    invs = _entry(context, program, n_users, mode, expand, invgen, user_invariants)
     nonlinear = is_nonlinear(program)
     start, budget = time.time(), FIRST_BUDGET
     proof_open, target, engines = True, None, extra_args
@@ -170,7 +174,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                 # and split into cases; a counterexample under the last premise (the
                 # strongest) is the state searched for by "reach"
                 if attempts is None:
-                    premises = invs.checks.premises(rule, invs.proved)
+                    premises = invs.checks.premises(rule, invs.assumed())
                     attempts = [(i, split) for i in range(len(premises))
                                 for split in (False, True)]
                 for i, split in list(attempts):
@@ -227,6 +231,37 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                 o.method, o.cti = "kind2", last.cti
                 last = o
         budget *= 2
+
+
+def _entry(context: dict, program: S.Program, n_users: int, mode: str, expand,
+           invgen: bool, user_invariants: bool) -> "_Invariants":
+    """The invariants of `program` in `context` (created on first use)."""
+    key = (id(program), n_users, mode, tuple(expand), invgen, user_invariants)
+    if key not in context:
+        context[key] = _Invariants.make(program, n_users, mode, expand, invgen,
+                                        user_invariants)
+    return context[key]
+
+
+def prove_invariants(program: S.Program, n_users: int, timeout: Optional[float],
+                     context: dict, mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND,
+                     invgen: bool = True, user_invariants: bool = True) -> "_Invariants":
+    """The invariant phase of a file, before its rules, with its own time limit (None: no
+    limit): candidates (declared and generated) and Houdini, in passes with doubling
+    budgets, until the inductive subset is found. The rules of the file then use it through
+    `context`; if the phase does not finish, `verify` goes on with it in its rounds. Without
+    a separate phase, Houdini shared the time of each rule with the other tasks, and on the
+    lending protocol it did not finish within the 11 rules of 60 s."""
+    invs = _entry(context, program, n_users, mode, expand, invgen, user_invariants)
+    deadline = time.time() + timeout if timeout else None
+    b = FIRST_BUDGET
+    while invs.proved is None:
+        left = None if deadline is None else deadline - time.time()
+        if left is not None and left <= 1:
+            break
+        invs.attempt(b if left is None else min(b, left))
+        b *= 2
+    return invs
 
 
 def kind2_search(rule: S.Rule, lustre: str, timeout: Optional[float],
@@ -301,27 +336,107 @@ def _free_run(lustre: str, names: List[str], budget: float):
     return "unknown", None, ""
 
 
+def _free_run_cex(lustre: str, name: str, budget: float):
+    """A check on free values with one property, with FREE_SOLVERS (3/4 of the budget for
+    the first): (status, the property's result with its counterexample, solver, whether the
+    memory limit killed a process)."""
+    deadline = time.time() + budget
+    status, res, used, killed = "unknown", None, "", False
+    for i, s in enumerate(FREE_SOLVERS):
+        left = deadline - time.time()
+        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1)
+        out = kind2.run(lustre, b, solver=s, extra_args=LIGHT_ENGINES, cex=True)
+        killed = killed or out.memory_killed
+        res = next((p for p in out.properties if p.name == name), None)
+        status, used = (res.status if res else "unknown"), s
+        if status in ("valid", "invalid"):
+            break
+    return status, res, used, killed
+
+
+def _free_run_all(lustre: str, budget: float):
+    """A check on free values with several properties: (the decided ones, by name; whether
+    the memory limit killed a process)."""
+    deadline = time.time() + budget
+    decided: Dict[str, str] = {}
+    names: set = set()
+    killed = False
+    for i, s in enumerate(FREE_SOLVERS):
+        left = deadline - time.time()
+        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1)
+        out = kind2.run(lustre, b, solver=s, extra_args=LIGHT_ENGINES)
+        killed = killed or out.memory_killed
+        names |= {p.name for p in out.properties}
+        for p in out.properties:
+            if p.status in ("valid", "invalid"):
+                decided.setdefault(p.name, p.status)
+        if names and names <= set(decided):
+            break
+    return decided, killed
+
+
 class _Invariants:
     """The candidate invariants of a program and, once known, the largest inductive subset
     found by Houdini (`proved`); `dropped` maps a refuted candidate to the failed check."""
 
-    def __init__(self, checks: Checks):
+    def __init__(self, checks: Checks, generated: Optional[set] = None):
         self.checks = checks
+        self.generated = generated or set()     # names of the generated candidates
+        self.keys: Dict[str, tuple] = {}        # their template keys (invgen.minimize)
         self.fuzzer = Fuzzer(checks.enc.system)
         self.candidates = [n for n in checks.candidates if n not in checks.axioms]
         self.proved: Optional[List[str]] = None if self.candidates else list(checks.axioms)
         self.dropped: Dict[str, str] = {}
-        # for the current candidates: the check programs (initial state, one step program per
-        # procedure), each with its properties, and the properties decided so far
+        # for the current candidates: the step programs (one per procedure), and the
+        # procedures whose step is proved
         self._for: Optional[List[str]] = None
         self._programs: List[tuple] = []
-        self._decided: Dict[str, str] = {}
+        self._done: set = set()
+
+    @staticmethod
+    def make(program: S.Program, n_users: int, mode: str, expand, invgen: bool = True,
+             user_invariants: bool = True) -> "_Invariants":
+        """The candidates: the invariants of the file (if `user_invariants`) and, with
+        `invgen`, the generated ones that hold in the reachable states of the fuzzer."""
+        rules = [r for r in program.rules if user_invariants or not r.invariant]
+        generated: List[S.Rule] = []
+        keys: Dict[str, tuple] = {}
+        if invgen:
+            generated, _, keys = generate_invariants(
+                program, Fuzzer(System.make(program, n_users)), INVGEN_SECONDS)
+        extended = S.Program(program.contracts, tuple(rules) + tuple(generated),
+                             program.balance_type)
+        invs = _Invariants(Checks(extended, n_users, mode, expand), {r.name for r in generated})
+        invs.keys = {r.name: keys[r.name] for r in generated}
+        return invs
+
+    def assumed(self) -> List[str]:
+        """The proved invariants that the checks of the rules assume: all of them, but the
+        generated ones implied by other proved ones (`invgen.minimize`); fewer, stronger
+        premises are faster for the solvers."""
+        proved = self.proved or []
+        gen = [n for n in proved if n in self.keys]
+        kept = set(minimize_invariants([self.keys[n] for n in gen]))
+        return [n for n in proved if n not in self.keys or self.keys[n] in kept]
 
     def attempt(self, budget: float):
-        """A Houdini pass within `budget`, which goes on from the previous one: each check
-        program not yet decided gets the budget (z3 3/4, cvc5 the rest); the refuted
-        candidates are dropped; `proved` (with the axioms) is set if the remaining ones are
-        all proved."""
+        """A Houdini pass within `budget`, which goes on from the previous one.
+
+        Initiation holds trivially: candidates are required where all contracts are
+        constructed, and none is in the initial states; the constructor's step establishes
+        them. For each procedure not yet done, the conjunction step (`step_conj_checks`)
+        gets the time left, at most `budget` (z3 3/4, cvc5 the rest; a program starts only
+        with at least min(budget, FIRST_BUDGET) seconds left, since a program cut short says
+        nothing):
+        * valid: the procedure is done for the current candidates;
+        * invalid: the candidates false after the call of its counterexample are refuted;
+        * otherwise, or if the counterexample identifies none, the step is checked with one
+          property per candidate (`step_check`): the refuted ones are refuted, and generated
+          candidates still undecided after at least STUCK_AFTER seconds are dropped
+          (generated candidates are best effort; those of the user wait for more time).
+        The candidates refuted in a pass are dropped together (a candidate not inductive
+        relative to the current candidates is not inductive relative to fewer), and the
+        procedures are checked again; `proved` (with the axioms) is set when all are done."""
         deadline = time.time() + budget
         while True:
             names = self.candidates
@@ -329,40 +444,86 @@ class _Invariants:
                 self.proved = list(self.checks.axioms)
                 return
             if self._for != names:
-                self._for, self._decided = list(names), {}
-                self._programs = [(self.checks.init_check(names),
-                                   {f"init_{n}": n for n in names})]
-                self._programs += self.checks.step_checks(names)
-            decided = self._decided
-            about = {p: n for _, props in self._programs for p, n in props.items()}
-            for lus, props in self._programs:
-                if all(p in decided for p in props):
+                self._for, self._done = list(names), set()
+                self._programs = self.checks.step_conj_checks(names)
+            refuted: Dict[str, str] = {}
+            killed = False
+            for i, (lus, c, p) in enumerate(self._programs):
+                if i in self._done:
                     continue
                 left = deadline - time.time()
-                if left <= 1:
-                    return
-                end = time.time() + left
-                for i, s in enumerate(FREE_SOLVERS):
-                    rest = end - time.time()
-                    b = max(rest * 3 / 4 if i < len(FREE_SOLVERS) - 1 else rest, 1)
-                    out = kind2.run(lus, b, solver=s, extra_args=LIGHT_ENGINES)
-                    for p in out.properties:
-                        if p.status in ("valid", "invalid"):
-                            decided.setdefault(p.name, p.status)
-                    if all(p in decided for p in props):
-                        break
-                if any(decided.get(p) == "invalid" for p in about):
-                    break                       # drop the refuted candidates first
-            refuted = {about[p] for p, st in decided.items() if st == "invalid"}
+                if left < min(budget, FIRST_BUDGET):
+                    break
+                given = min(left, budget)
+                status, res, solver, killed = _free_run_cex(lus, "step", given)
+                if status == "valid":
+                    self._done.add(i)
+                    continue
+                found = set()
+                if status == "invalid" and res is not None:
+                    found = self.checks.refuted_after(res.counterexample, names, c, p)
+                if found:
+                    refuted.update({n: f"inductive step ({p.name})" for n in found})
+                    continue
+                if killed:
+                    # the memory limit killed a run: it says nothing about the candidates
+                    # (under memory pressure, all the AMM candidates were dropped as
+                    # undecided); stop the pass, a later one tries again
+                    break
+                # localise with one property per candidate
+                left = deadline - time.time()
+                if left < min(budget, FIRST_BUDGET):
+                    break
+                given = min(left, budget)
+                lus1, about = self.checks.step_check(names, only=(c, p))
+                decided, killed = _free_run_all(lus1, given)
+                refuted.update({about[q]: f"inductive step ({p.name})"
+                                for q, st in decided.items() if st == "invalid"})
+                if killed:
+                    break
+                if given >= STUCK_AFTER:
+                    refuted.update({n: "undecided" for q, n in about.items()
+                                    if q not in decided and n in self.generated
+                                    and n not in refuted})
+            if killed and not refuted:
+                return
             if refuted:
-                for n in refuted:
-                    self.dropped[n] = ("initial state" if decided.get(f"init_{n}") == "invalid"
-                                       else "inductive step")
+                self.dropped.update(refuted)
                 self.candidates = [n for n in names if n not in refuted]
+                if deadline - time.time() <= 1:
+                    return
                 continue
-            if all(decided.get(p) == "valid" for p in about):
+            if len(self._done) == len(self._programs):
                 self.proved = self.checks.axioms + names
             return
+
+
+def invariant_summary(invs: "_Invariants") -> str:
+    """One line: how many candidates (declared, generated) were proved, and dropped."""
+    if invs.proved is None:
+        return (f"invariants: not proved within the time ({len(invs.candidates)} candidates"
+                f" left, {len(invs.dropped)} dropped)")
+    proved = [n for n in invs.proved if n not in invs.checks.axioms]
+    gen = sum(1 for n in proved if n in invs.generated)
+    return (f"invariants: {len(proved)} proved ({len(proved) - gen} declared, {gen}"
+            f" generated), {len(invs.dropped)} dropped")
+
+
+def invariant_report(context: dict) -> List[str]:
+    """The invariants proved for the programs of a run (generated or declared), and the
+    number of candidates dropped."""
+    lines = []
+    for invs in context.values():
+        if invs.proved is None:
+            lines.append("invariants: not proved within the time")
+            continue
+        for n in invs.proved:
+            if n not in invs.checks.axioms:
+                kind = "generated" if n in invs.generated else "declared"
+                lines.append(f"{kind} invariant {n}: "
+                             f"{pretty.expr(invs.checks.program.rule(n).formula)}")
+        lines.append(f"candidates dropped by Houdini: {len(invs.dropped)}")
+    return lines
 
 
 def select_rules(program: S.Program, name: str) -> List[S.Rule]:

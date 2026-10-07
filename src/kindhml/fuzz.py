@@ -89,10 +89,29 @@ class Fuzzer:
                     out.append(x)
         return out
 
+    @staticmethod
+    def addresses(st: Optional[State]) -> List[str]:
+        """The users stored in address fields of a state (e.g. an owner or an oracle)."""
+        if st is None:
+            return []
+        out = []
+        for v in st.fields.values():
+            for x in (v.values() if isinstance(v, dict) else [v]):
+                if isinstance(x, str) and not x.startswith("A_"):
+                    out.append(x)
+        return out
+
     def transaction(self, c: S.Contract, p: S.Procedure, st: Optional[State] = None) -> Tx:
         pool = self.pool(st)
-        sender = (self.rnd.choice(self.system.users) if self.rnd.random() < 0.95
-                  else self.rnd.choice(self.system.addresses))
+        stored = [a for a in self.addresses(st) if a in self.system.users]
+        r = self.rnd.random()
+        if stored and r < 0.2:
+            # procedures restricted to an owner or an oracle succeed only with that sender
+            sender = self.rnd.choice(stored)
+        elif r < 0.95:
+            sender = self.rnd.choice(self.system.users)
+        else:
+            sender = self.rnd.choice(self.system.addresses)
         args = {x.name: self.value(x.type, pool) for x in p.params}
         value = self.amount(pool) if p.payable else 0
         blocks = self.rnd.choice([0, 0, 1, 2, 5, 10]) if self.system.uses_block_num else 0

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from fractions import Fraction
+from typing import Dict
 
 from . import lustre as L
 from . import syntax as S
 from .encode_trans import (BALANCE, BLOCK, BLOCKS, REVERT, Encoder, addr_const, constructed_var,
                            field_var, key_field, map_type, param_var, proc_const)
 from .model import System
-from .reference import State, Tx
+from .reference import State, Tx, initial_state
 
 
 def value_literal(v, t: S.AnyType, system: System) -> L.LExpr:
@@ -46,6 +47,47 @@ def tx_literal(tx: Tx, system: System, enc: Encoder, default) -> L.LExpr:
         values[param_var(v.contract, v.proc, v.name)] = value_literal(
             arg if arg is not None else default(v.type), v.type, system)
     return L.record("Tx", [(n, values[n]) for n, _ in enc.tx_fields()])
+
+
+def python_value(v):
+    """A value of a Kind 2 counterexample (JSON) as a value of the reference interpreter."""
+    if isinstance(v, dict) and set(v) == {"num", "den"}:
+        return Fraction(v["num"], v["den"])
+    if isinstance(v, str) and v.startswith("A_"):
+        return v[2:]                        # an address constant
+    return v
+
+
+def state_from_values(values: Dict[str, object], system: System, enc: Encoder) -> State:
+    """The reference state with the values of the record `s` of a Kind 2 counterexample,
+    given by path (`s.f` or `s.f.k_a`), e.g. a free state of a check of `invariants.py`."""
+    fields = {}
+    for c in system.contracts:
+        for f in c.fields:
+            fields[field_var(c.name, f.name)] = (c.name, f.name, f.type)
+    st = initial_state(system, {})
+    st.constructed = {c.name: False for c in system.contracts}
+    for path, v in values.items():
+        parts = path.split(".")
+        if parts[0] != "s" or len(parts) < 2:
+            continue
+        name, key = parts[1], (parts[2][2:] if len(parts) > 2 else None)
+        v = python_value(v)
+        if name == BALANCE and key is not None:
+            st.balance[key] = v
+        elif name == REVERT:
+            st.revert = v
+        elif name == BLOCK:
+            st.block_num = v
+        elif name.startswith("constructed_"):
+            st.constructed[name[len("constructed_"):]] = v
+        elif name in fields:
+            c, f, t = fields[name]
+            if key is None:
+                st.fields[(c, f)] = v
+            else:
+                st.fields[(c, f)][key] = v
+    return st
 
 
 def describe_tx(tx: Tx) -> str:

@@ -47,6 +47,11 @@ def smt_mod(a: int, b: int) -> int:
     return a - b * smt_div(a, b)
 
 
+def sum_map(e: S.SumMap, st: "State"):
+    m = st.balance if isinstance(e.map, S.Balance) else st.fields[(e.map.contract, e.map.name)]
+    return sum(m.values())
+
+
 def divide(e: S.BinOp, a, b):
     """a / b or a % b (b nonzero): of reals if e is real, else Euclidean."""
     if e.real:
@@ -230,6 +235,8 @@ class Interpreter:
             return st.block_num
         if isinstance(e, S.IsEOA):
             return self.eval(e.arg, st, env) in self.system.users
+        if isinstance(e, S.SumMap):
+            return sum_map(e, st)
         if isinstance(e, S.UnOp):
             v = self.eval(e.arg, st, env)
             return (not v) if e.op == "!" else -v
@@ -342,6 +349,8 @@ class FormulaEvaluator:
             return self.eval(e.arg, seq[1:], env)
         if isinstance(e, S.IsEOA):
             return ev(e.arg) in self.system.users
+        if isinstance(e, S.SumMap):
+            return sum_map(e, st)
         if isinstance(e, S.UnOp):
             v = ev(e.arg)
             return (not v) if e.op == "!" else -v

@@ -8,7 +8,14 @@ import pytest
 from kindhml import kind2
 from kindhml import lustre as L
 from kindhml import verify as V
+from kindhml import invgen, pretty
+from kindhml import syntax as S
+from kindhml.builder import parse
+from kindhml.errors import KindHMLError
 from kindhml.fuzz import Fuzzer, has_witness
+from kindhml.model import System
+from kindhml.reference import FormulaEvaluator, initial_state
+from kindhml.typecheck import check
 from kindhml.invariants import Checks, cases, constant, hoist, state_fields, state_values
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,6 +81,61 @@ def test_rule_split_into_cases():
     assert names == ["Swap_reversibility__0", "Swap_reversibility__1"]
     _, names = c.rule_check(program.rule("Swap_reversibility"), ["Inv"])
     assert names == ["Swap_reversibility"]
+
+
+def test_sum_of_a_mapping():
+    """sum(m): typed as the values of m, encoded as the sum of the fields of the record,
+    evaluated by the reference interpreter."""
+    program, _ = V.load(os.path.join(ROOT, "tests", "contracts", "reals.sol"))
+    rule = program.rule("Shares_total")
+    assert isinstance(rule.formula.left, S.SumMap) and rule.formula.real
+    c = Checks(program, 2, "inline", ("address", "method"))
+    text = L.render(c.fenc.rule(rule, L.Var("s")))
+    assert "(((s.Pool_share.k_null + s.Pool_share.k_Pool) + s.Pool_share.k_u1)" in text
+    st = initial_state(c.enc.system, {})
+    st.fields[("Pool", "share")]["u1"] = Fraction(3, 2)
+    st.fields[("Pool", "total")] = Fraction(3, 2)
+    assert FormulaEvaluator(c.enc.system, range(2)).holds(rule.formula, [st])
+    with pytest.raises(KindHMLError, match="mapping to numbers"):
+        check(parse("contract C { int x; } rule R { sum(x) == 0 }"))
+
+
+def test_invariant_templates():
+    """The generated candidates include the invariants written by hand for the AMM."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    texts = invgen.templates(program)
+    for t in ("AMM.r0 >= 0", "(AMM.r0 > 0) == (AMM.r1 > 0)", "sum(AMM.minted) == AMM.supply",
+              "forall _u : address . !is_EOA(_u) -> AMM.minted[_u] == 0",
+              "AMM.minted[null] == 0"):
+        assert t in texts, t
+    assert len(invgen.candidates(program)) == len(texts)      # all well typed
+
+
+def test_invariant_definitions():
+    """An assignment f = e / d under the conditions G gives G && d != 0 -> f * d == e."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "lending", "lending.sol"))
+    texts = invgen.templates(program)
+    assert ("((Lending.sc0 > (0)) && Lending.sc0 != 0) -> Lending.xr0 * Lending.sc0 == "
+            "(Lending.res0 + (Lending.ssdebt * Lending.idx))") in texts
+    assert "((Lending.sc0 == (0))) -> Lending.xr0 == (1)" in texts
+
+
+def test_generated_candidates_filtered_by_reachable_states():
+    """r0 <= 1 is false in reachable states of the pool (deposits of any size)."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    alive, n, keys = invgen.generate(program, Fuzzer(System.make(program, 2), seed="test"), 1.0)
+    texts = {pretty.expr(r.formula) for r in alive}
+    assert "(sum(minted) == supply)" in texts and "(r0 <= 1.0)" not in texts
+    assert 0 < len(alive) < n
+
+
+def test_minimize_keeps_the_strongest():
+    f, g = "C.f", "C.g"
+    keys = [("ge", f, Fraction(0)), ("gt", f), ("ge", f, Fraction(1)), ("le", g, Fraction(2)),
+            ("le", g, Fraction(1)), ("pimp", f, g), ("peq", f, g), ("sum_eq", "C.m", f),
+            ("sum_le", "C.m", f), ("null_eq", "C.m"), ("null_ge", "C.m")]
+    assert invgen.minimize(keys) == [("ge", f, Fraction(1)), ("le", g, Fraction(1)),
+                                     ("peq", f, g), ("sum_eq", "C.m", f), ("null_eq", "C.m")]
 
 
 def test_hoist_universal_quantifiers():
