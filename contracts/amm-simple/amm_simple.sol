@@ -34,8 +34,9 @@ contract AMM {
 
     // sells x tokens T0 for at least ymin tokens T1
     function swap0(real x, real ymin) {
-        require(x > 0 && t0[msg.sender] >= x && r0 > 0 && r1 > 0);
+        require(x > 0 && t0[msg.sender] >= x);
         out1 = x * r1 / (r0 + x);
+        // require(out1 < r1); on the reals it is not needed, but it is on the ints 
         require(out1 >= ymin);
         t0[msg.sender] -= x;
         r0 += x;
@@ -45,8 +46,9 @@ contract AMM {
 
     // sells x tokens T1 for at least ymin tokens T0
     function swap1(real x, real ymin) {
-        require(x > 0 && t1[msg.sender] >= x && r0 > 0 && r1 > 0);
+        require(x > 0 && t1[msg.sender] >= x);
         out0 = x * r0 / (r1 + x);
+        // require(out0 < r0); on the reals it is not needed, but it is on the ints 
         require(out0 >= ymin);
         t1[msg.sender] -= x;
         r1 += x;
@@ -60,6 +62,7 @@ invariant Nonnegative {
     (forall u : address . t0[u] >= 0 && t1[u] >= 0)
     && r0 >= 0 && r1 >= 0 && (r0 > 0) == (r1 > 0)
 }
+// todo: no need for r0 >= 0 (check: we want to verify states only after construction)
 
 // Slippage protection against front-running (as in amm.sol).
 // @groundtruth: True
@@ -71,6 +74,7 @@ rule Slippage {
     << b : AMM.f(args) >> << a : AMM.swap0(x, ymin) >>
         (lastReverted || t1[a] >= old(t1[a]) + ymin)
 }
+// todo what's the purpose of "<< b : AMM.f(args) >>"? no need to talk about front running
 
 // Sandwich attack, with an explicit strategy: b front-runs with all its tokens T0.
 // @groundtruth: True
@@ -82,6 +86,13 @@ rule Sandwich {
     << b : AMM.swap1(t1[b] - old(old(t1[b])), 0) >>
         (t0[b] > old(old(old(t0[b]))) && t1[b] == old(old(old(t1[b]))))
 }
+// todo there's shouldnt be the need 
+// todo lets rename b 'adv'
+// todo no need for r0>0 etc 
+
+
+// TODO add rule Sandwitch2: forall ymin .... exists adv powerful enough (poor enough?) that ...
+
 
 // Splitting a swap gives the same as a single swap.
 // @groundtruth: True
@@ -105,12 +116,19 @@ rule Swap_reversibility {
             (t0[a] == old(old(t0[a])) && t1[a] == old(old(t1[a]))))
 }
 
+// TODO rewrite without out1 (exists x_inv...)
+
+
 // No round trip of swaps is profitable.
 // @groundtruth: True
 rule No_money_pump {
     forall a : address . forall x : real . forall y : real .
     << a : AMM.swap0(x, 0) >> << a : AMM.swap1(y, 0) >>
+        (
         !(t0[a] > old(old(t0[a])) && t1[a] >= old(old(t1[a])))
+        &&
+        !(t0[a] >= old(old(t0[a])) && t1[a] > old(old(t1[a]))) // if it does not manage to solve it, split the rule in two
+        )
 }
 
 // Arbitrage, with an explicit strategy: if the AMM price of T0 is above the external price
@@ -125,3 +143,8 @@ rule Arbitrage {
      && (t0[a] >= r1 / p - r0 ->
         << a : AMM.swap0((r1 / p - r0) / 2, 0) >> (p * t0[a] + t1[a] > old(p * t0[a] + t1[a]))))
 }
+
+// TODO Arbitrage with no explicit strategy (Exists x ...)
+
+
+// TODO move properties outside .sol files
