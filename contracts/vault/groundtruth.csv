@@ -1,0 +1,7 @@
+contract,property,expected,note
+vault.sol,Two_steps_drainability,true,valid (k=1)
+vault.sol,Two_steps_drainability_non_inflation,true,
+vault_v2.sol,Two_steps_drainability,false,
+vault_v2.sol,Two_steps_drainability_non_inflation,true,
+vault_v3.sol,Two_steps_drainability,true,
+vault_v3.sol,Two_steps_drainability_non_inflation,false,

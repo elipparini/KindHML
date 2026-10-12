@@ -40,7 +40,10 @@ def main():
     ap.add_argument("--strategy", default="portfolio", choices=V.STRATEGIES)
     ap.add_argument("--no_invgen", action="store_true", help="no generated invariants")
     ap.add_argument("--no_user_invariants", action="store_true",
-                    help="ignore the invariants declared in the files")
+                    help="ignore the invariants declared in the files (as candidates for"
+                         " the proofs; they are still verified)")
+    ap.add_argument("--no_lemmas", action="store_true",
+                    help="do not load the lemmas files of the benchmark families")
     ap.add_argument("--print_invariants", action="store_true",
                     help="print the invariants proved for each file")
     ap.add_argument("--invariants_timeout", type=float, default=None,
@@ -49,7 +52,7 @@ def main():
     args = ap.parse_args()
     expand = () if args.expand == "none" else tuple(args.expand.split(","))
     paths = args.paths or [os.path.join(ROOT, "contracts", "regression"),
-                           *sorted(glob.glob(os.path.join(ROOT, "contracts", "*")))]
+                           *sorted(glob.glob(os.path.join(ROOT, "contracts", "*", "")))]
     seen, files = set(), []
     for f in files_of(paths):
         if f not in seen:
@@ -67,7 +70,7 @@ def main():
     tally = {}
     for f in files:
         try:
-            program, _ = V.load(f)
+            program, _ = V.load(f, lemmas=not args.no_lemmas)
         except KindHMLError as e:
             print(f"{V.stem(f)}: error: {e}")
             continue
@@ -83,7 +86,7 @@ def main():
                                       user_invariants=not args.no_user_invariants)
             print(f"{V.stem(f):>18}   {V.invariant_summary(invs)} [{time.time()-start:.1f}s]",
                   flush=True)
-        for rule in program.rules:
+        for rule in V.tasks(program):
             if only and rule.name not in only:
                 continue
             start = time.time()

@@ -45,15 +45,20 @@ Options:
   and runs Kind 2 on the transition system, in rounds with doubling budgets; `kind2` only
   runs Kind 2 on the transition system. See `DESIGN.md`, Sect. 6.
 - `--no_invgen`: do not generate candidate invariants (only those of the file are used).
-- `--no_user_invariants`: ignore the invariants declared in the file.
+- `--no_user_invariants`: do not use the declared invariants (of the file, or of the spec and
+  lemmas of a benchmark family) as candidates for the proofs; they are still verified.
+- `--no_lemmas`: do not load the lemmas file of a benchmark family.
 - `--print_invariants`: print the invariants proved (declared and generated).
 - `--invariants_timeout`: time limit of the invariant phase, which runs once before the
   rules (default: 3 times `timeout`).
 
 Each rule's Lustre file is saved in `out_lus/<contract>_<Rule>_<n>_<timeout>.lus`, and its
 verdict in `out_results/<contract>_<Rule>_<n>_<timeout>.out`. The verdict is compared with the
-ground truth of the rule: a comment `// @groundtruth: True|False` right before it, or else the
-suffix `_true`/`_false` of its name.
+ground truth of the rule. For a contract of a benchmark family (a directory with `spec.hml`,
+see `contracts/README.md`), the rules and the ground truth come from the files of the family.
+Otherwise, the rules follow the contracts in the same file, and the ground truth of a rule is
+a comment `// @groundtruth: True|False` right before it, or else the suffix `_true`/`_false` of
+its name.
 
 Each Kind 2 run, with its solvers, is placed in a `systemd-run --user` scope, which limits
 their memory to the smaller of 3 GB and half of the available memory (or

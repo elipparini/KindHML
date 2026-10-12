@@ -14,6 +14,11 @@ class KindHMLVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by KindHMLParser#spec.
+    def visitSpec(self, ctx:KindHMLParser.SpecContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by KindHMLParser#pragma.
     def visitPragma(self, ctx:KindHMLParser.PragmaContext):
         return self.visitChildren(ctx)

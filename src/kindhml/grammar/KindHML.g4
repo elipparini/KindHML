@@ -1,4 +1,5 @@
-// Grammar of KindHML input files: one or more contracts followed by rules.
+// Grammar of KindHML input files: one or more contracts followed by rules (`program`), or
+// only rules (`spec`: the shared properties of a benchmark family, see contracts/README.md).
 // Contract expressions and rule formulas share the rule `expr`; the type checker
 // restricts which constructs may occur in each context. Reserved names such as
 // `msg.sender`, `balance`, `this`, `lastReverted`, `old(e)`, `is_EOA(e)` are
@@ -7,6 +8,8 @@
 grammar KindHML;
 
 program : pragma* contract+ rule_* EOF ;
+
+spec : rule_* EOF ;
 
 // `pragma balance real;` makes balances, values and amounts real (default: int). The key is
 // an identifier (`balance` must remain one); the builder checks it.

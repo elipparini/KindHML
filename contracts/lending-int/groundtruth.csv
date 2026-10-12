@@ -1,0 +1,11 @@
+contract,property,expected,note
+lending_int.sol,Nonnegative,true,
+lending_int.sol,Totals,true,
+lending_int.sol,Health_non_interference,true,
+lending_int.sol,Liquidation_defence,false,
+lending_int.sol,Liquidation_attack,false,
+lending_int.sol,Exchange_rate_monotone,false,
+lending_int.sol,Net_worth_preserved,false,
+lending_int.sol,Deposit_reversibility,false,
+lending_int.sol,Borrow_safe,true,
+lending_int.sol,Liquidation_only_unhealthy,true,

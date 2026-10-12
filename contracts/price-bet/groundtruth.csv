@@ -1,0 +1,13 @@
+contract,property,expected,note
+price-bet.sol,Winnability,true,
+price-bet.sol,Liquidity,true,
+price-bet.sol,Frontrunning,true,
+price-bet_v2.sol,Winnability,false,
+price-bet_v2.sol,Liquidity,false,
+price-bet_v2.sol,Frontrunning,true,
+price-bet_v3.sol,Winnability,false,
+price-bet_v3.sol,Liquidity,true,
+price-bet_v3.sol,Frontrunning,false,
+price-bet_v4.sol,Winnability,true,
+price-bet_v4.sol,Liquidity,false,
+price-bet_v4.sol,Frontrunning,false,

@@ -17,9 +17,11 @@ from typing import Optional, Tuple, Union
 class Pos:
     line: int
     col: int
+    source: str = ""                # the file, when the program comes from several files
 
     def __str__(self) -> str:
-        return f"line {self.line}, column {self.col}"
+        where = f"line {self.line}, column {self.col}"
+        return f"{self.source}, {where}" if self.source else where
 
 
 NOPOS = Pos(0, 0)
@@ -439,12 +441,14 @@ class Contract:
 class Rule:
     """A rule, or an invariant: a rule without modalities, which the tool proves inductive
     and then assumes when checking other rules. Both are required in the reachable states
-    where all contracts are constructed."""
+    where all contracts are constructed. A lemma is an invariant that only helps the proofs
+    (from the lemmas file of a benchmark family): it is not a verification task."""
     name: str
     formula: Expr
     groundtruth: Optional[bool] = None
     pos: Pos = _pos()
     invariant: bool = False
+    lemma: bool = False
 
 
 @dataclass(frozen=True)

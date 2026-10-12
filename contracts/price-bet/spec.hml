@@ -1,0 +1,38 @@
+rule Winnability {
+    (rate > 100 && player_has_joined)
+    -> 
+    exists a : address .
+    exists f : method .
+    exists args : calldataargs .    
+    exists msgvalue : int .    
+    << a : Bet . f(args) $ msgvalue >>
+        balance[a] == old(balance[a] + balance)		
+}
+
+rule Liquidity {
+    player_has_joined
+    ->
+    exists a1 : address .
+    exists a2 : address .
+    exists f1 : method .
+    exists f2 : method .
+    exists args1 : calldataargs .
+    exists args2 : calldataargs .
+    << a1 : Bet . f1(args1) $ 0 >>		
+        << a2 : Bet . f2(args2) $ 0 >>		
+            (balance == 0)
+}
+
+rule Frontrunning {
+    (player_has_joined)
+    ->
+    (
+    forall a : address .
+    exists b : address .
+    exists f : method .
+    exists args : calldataargs .
+    << b : Bet . f(args) $ 0 >>		
+        << a : Bet . win() $ 0 >>
+            lastReverted
+    )
+}

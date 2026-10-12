@@ -1,0 +1,83 @@
+// The reserves are positive in every state after the construction (rules and invariants are
+// checked only in such states).
+invariant Nonnegative {
+    (forall u : address . t0[u] >= 0 && t1[u] >= 0) && r0 > 0 && r1 > 0
+}
+
+// Slippage protection: a swap that succeeds pays at least ymin.
+rule Slippage {
+    forall a : address . forall x : real . forall ymin : real .
+    << a : AMM.swap0(x, ymin) >> (lastReverted || t1[a] >= old(t1[a]) + ymin)
+}
+
+// Sandwich attack, with an explicit strategy: adv front-runs with all its tokens T0.
+rule Sandwich {
+    forall a : address . forall adv : address . forall x : real .
+    (is_EOA(a) && is_EOA(adv) && a != adv && x > 0 && t0[a] >= x && t0[adv] > 0) ->
+    << adv : AMM.swap0(t0[adv], 0) >> << a : AMM.swap0(x, 0) >>
+    << adv : AMM.swap1(t1[adv] - old(old(t1[adv])), 0) >>
+        (t0[adv] > old(old(old(t0[adv]))) && t1[adv] == old(old(old(t1[adv]))))
+}
+
+// Sandwich attack against a slippage bound: if the victim accepts less than what its swap
+// would pay now (ymin < x * r1 / (r0 + x)), any other user with tokens T0 can front-run it
+// with some amount z (small enough for the victim's swap to succeed) and gain.
+rule Sandwich_slippage {
+    forall a : address . forall adv : address . forall x : real . forall ymin : real .
+    (is_EOA(a) && is_EOA(adv) && a != adv && x > 0 && t0[a] >= x && t0[adv] > 0
+     && ymin * (r0 + x) < x * r1) ->
+    exists z : real .
+    << adv : AMM.swap0(z, 0) >> << a : AMM.swap0(x, ymin) >>
+        (!lastReverted
+         && << adv : AMM.swap1(t1[adv] - old(old(t1[adv])), 0) >>
+            (t0[adv] > old(old(old(t0[adv]))) && t1[adv] == old(old(old(t1[adv])))))
+}
+
+// Splitting a swap gives the same as a single swap.
+rule Swap_additivity {
+    forall a : address . forall x1 : real . forall x2 : real .
+    exists v12 : real . exists v3 : real .
+    exists q1 : bool . exists q2 : bool . exists q3 : bool .
+    (<< a : AMM.swap0(x1, 0) >> (q1 == lastReverted &&
+        << a : AMM.swap0(x2, 0) >> (q2 == lastReverted && v12 == t1[a])))
+    && (<< a : AMM.swap0(x1 + x2, 0) >> (q3 == lastReverted && v3 == t1[a]))
+    && (q1 || q2 || (!q3 && v12 == v3))
+}
+
+// A swap can be undone by an opposite swap.
+rule Swap_reversibility {
+    forall a : address . forall x : real . exists y : real .
+    << a : AMM.swap0(x, 0) >>
+        (lastReverted ||
+         << a : AMM.swap1(y, 0) >>
+            (t0[a] == old(old(t0[a])) && t1[a] == old(old(t1[a]))))
+}
+
+// No round trip of swaps is profitable.
+rule No_money_pump {
+    forall a : address . forall x : real . forall y : real .
+    << a : AMM.swap0(x, 0) >> << a : AMM.swap1(y, 0) >>
+        (!(t0[a] > old(old(t0[a])) && t1[a] >= old(old(t1[a])))
+         && !(t0[a] >= old(old(t0[a])) && t1[a] > old(old(t1[a]))))
+}
+
+// Arbitrage, with an explicit strategy: if the AMM price of T0 is above the external price
+// p, selling x < r1 / p - r0 tokens T0 increases the wealth at price p; a sells all its
+// tokens T0 if they are fewer, half of the bound otherwise.
+rule Arbitrage {
+    forall a : address . forall p : real .
+    (is_EOA(a) && p > 0 && r0 > 0 && t0[a] > 0 && r1 > p * r0) ->
+    ((t0[a] < r1 / p - r0 ->
+        << a : AMM.swap0(t0[a], 0) >> (p * t0[a] + t1[a] > old(p * t0[a] + t1[a])))
+     && (t0[a] >= r1 / p - r0 ->
+        << a : AMM.swap0((r1 / p - r0) / 2, 0) >> (p * t0[a] + t1[a] > old(p * t0[a] + t1[a]))))
+}
+
+// Arbitrage: if the AMM price of T0 is above the external price p, some swap increases the
+// wealth at price p.
+rule Arbitrage_exists {
+    forall a : address . forall p : real .
+    (is_EOA(a) && p > 0 && r0 > 0 && t0[a] > 0 && r1 > p * r0) ->
+    exists x : real .
+    << a : AMM.swap0(x, 0) >> (p * t0[a] + t1[a] > old(p * t0[a] + t1[a]))
+}

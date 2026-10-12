@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from fractions import Fraction
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from antlr4 import CommonTokenStream, InputStream, Token
 from antlr4.error.ErrorListener import ErrorListener
@@ -25,14 +25,18 @@ QTYPES = {
 
 
 class _RaisingErrorListener(ErrorListener):
+    def __init__(self, source: str = ""):
+        self.source = source
+
     def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
-        raise KindHMLError(f"syntax error: {msg}", S.Pos(line, column + 1))
+        raise KindHMLError(f"syntax error: {msg}", S.Pos(line, column + 1, self.source))
 
 
 def _pos(ctx) -> S.Pos:
-    """Position of a parse-tree node or of a token."""
+    """Position of a parse-tree node or of a token (with the source name of its input
+    stream, see `_parser`)."""
     tok = ctx if isinstance(ctx, Token) else ctx.start
-    return S.Pos(tok.line, tok.column + 1)
+    return S.Pos(tok.line, tok.column + 1, tok.getInputStream().name)
 
 
 class _Builder(KindHMLVisitor):
@@ -284,28 +288,38 @@ class _Builder(KindHMLVisitor):
                        args, value, blocks, body, pos)
 
 
-def parse(text: str) -> S.Program:
-    """Parse a KindHML source text into a raw AST. Raises KindHMLError."""
-    lexer = KindHMLLexer(InputStream(text))
+def _parser(text: str, source: str = ""):
+    """The token stream and the parser of `text`; `source` (a file name, possibly empty)
+    goes in the positions."""
+    stream = InputStream(text)
+    stream.name = source
+    lexer = KindHMLLexer(stream)
     lexer.removeErrorListeners()
-    lexer.addErrorListener(_RaisingErrorListener())
+    lexer.addErrorListener(_RaisingErrorListener(source))
     tokens = CommonTokenStream(lexer)
     parser = KindHMLParser(tokens)
     parser.removeErrorListeners()
-    parser.addErrorListener(_RaisingErrorListener())
-    tree = parser.program()
-    return _Builder(tokens).visit(tree)
+    parser.addErrorListener(_RaisingErrorListener(source))
+    return tokens, parser
+
+
+def parse(text: str, source: str = "") -> S.Program:
+    """Parse a KindHML source text into a raw AST. Raises KindHMLError."""
+    tokens, parser = _parser(text, source)
+    return _Builder(tokens).visit(parser.program())
+
+
+def parse_spec(text: str, source: str = "") -> Tuple[S.Rule, ...]:
+    """Parse a text of rules only (a spec file, see `verify.load`) into raw rules. Raises
+    KindHMLError."""
+    tokens, parser = _parser(text, source)
+    builder = _Builder(tokens)
+    return tuple(builder.visit(r) for r in parser.spec().rule_())
 
 
 def parse_expr(text: str) -> S.Expr:
     """Parse a single expression (raw AST), e.g. a generated invariant. Raises KindHMLError."""
-    lexer = KindHMLLexer(InputStream(text))
-    lexer.removeErrorListeners()
-    lexer.addErrorListener(_RaisingErrorListener())
-    tokens = CommonTokenStream(lexer)
-    parser = KindHMLParser(tokens)
-    parser.removeErrorListeners()
-    parser.addErrorListener(_RaisingErrorListener())
+    tokens, parser = _parser(text)
     tree = parser.expr()
     if tokens.LA(1) != Token.EOF:
         raise KindHMLError(f"unexpected text after the expression in '{text}'")

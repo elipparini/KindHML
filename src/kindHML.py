@@ -35,7 +35,10 @@ def main() -> int:
     ap.add_argument("--no_invgen", action="store_true",
                     help="do not generate candidate invariants (only those of the file)")
     ap.add_argument("--no_user_invariants", action="store_true",
-                    help="ignore the invariants declared in the file")
+                    help="ignore the invariants declared in the files (as candidates for"
+                         " the proofs; they are still verified)")
+    ap.add_argument("--no_lemmas", action="store_true",
+                    help="do not load the lemmas file of the benchmark family")
     ap.add_argument("--print_invariants", action="store_true",
                     help="print the invariants proved (declared and generated)")
     ap.add_argument("--invariants_timeout", type=float, default=None,
@@ -57,7 +60,7 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        program, warnings = V.load(args.contract)
+        program, warnings = V.load(args.contract, lemmas=not args.no_lemmas)
         rules = V.select_rules(program, args.property)
     except KindHMLError as e:
         print(f"{args.contract}: error: {e}", file=sys.stderr)

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import csv
 import os
 import time
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, replace
+from typing import Dict, List, Optional, Tuple
 
 from . import kind2
 from . import lustre as L
 from . import pretty
-from .builder import parse
+from .builder import parse, parse_spec
 from .encode_formula import FormulaEncoder
 from .encode_trans import Encoder
 from .errors import KindHMLError
@@ -23,11 +24,75 @@ from .typecheck import check
 from . import syntax as S
 
 
-def load(path: str):
-    """Parse and type-check a file. Returns the resolved program and the warnings."""
+# The files of a benchmark family (a directory of contracts with shared rules; see
+# contracts/README.md).
+SPEC = "spec.hml"
+LEMMAS_FILE = "lemmas.hml"
+GROUNDTRUTH = "groundtruth.csv"
+EXPECTED = {"true": True, "false": False, "unknown": None}
+
+
+def load(path: str, lemmas: bool = True):
+    """Parse and type-check a contract file. Returns the resolved program and the warnings.
+
+    A file outside a family holds its rules, with the ground truth in `@groundtruth`
+    comments. In a family, the contract file holds no rules: they are those of spec.hml,
+    then those of <stem>.hml (if present), which replace the rules of the same name; with
+    `lemmas`, the invariants of lemmas.hml (if present) follow. The ground truth of the
+    rules comes from groundtruth.csv."""
     with open(path) as f:
-        text = f.read()
-    return check(parse(text))
+        program = parse(f.read())
+    folder = os.path.dirname(path)
+    if os.path.exists(os.path.join(folder, SPEC)):
+        if program.rules:
+            raise KindHMLError(f"{path}: a contract of a family has no rules (they are in"
+                               f" {SPEC})")
+        program = replace(program, rules=family_rules(path, lemmas))
+    return check(program)
+
+
+def family_rules(path: str, lemmas: bool = True) -> Tuple[S.Rule, ...]:
+    """The raw rules of the contract `path` of a family (see `load`)."""
+    folder = os.path.dirname(path)
+    rules = {r.name: r for r in _spec(os.path.join(folder, SPEC))}
+    override = os.path.join(folder, stem(path) + ".hml")
+    if os.path.exists(override):
+        rules.update((r.name, r) for r in _spec(override))
+    expected = groundtruth(folder).get(os.path.basename(path), {})
+    out = [replace(r, groundtruth=expected.get(r.name)) for r in rules.values()]
+    lemma_file = os.path.join(folder, LEMMAS_FILE)
+    if lemmas and os.path.exists(lemma_file):
+        for r in _spec(lemma_file):
+            if not r.invariant:
+                raise KindHMLError(f"{r.name} is not an invariant (a lemma is)", r.pos)
+            out.append(replace(r, groundtruth=None, lemma=True))
+    return tuple(out)
+
+
+def _spec(path: str) -> Tuple[S.Rule, ...]:
+    with open(path) as f:
+        return parse_spec(f.read(), path)
+
+
+def groundtruth(folder: str) -> Dict[str, Dict[str, Optional[bool]]]:
+    """The ground truth of a family: contract file -> rule -> expected verdict (None:
+    unknown), from groundtruth.csv (columns contract, property, expected, note)."""
+    out: Dict[str, Dict[str, Optional[bool]]] = {}
+    path = os.path.join(folder, GROUNDTRUTH)
+    if not os.path.exists(path):
+        return out
+    with open(path, newline="") as f:
+        for n, row in enumerate(csv.DictReader(f), start=2):
+            if row["expected"] not in EXPECTED:
+                raise KindHMLError(f"{path}, line {n}: expected must be one of"
+                                   f" {', '.join(EXPECTED)}")
+            out.setdefault(row["contract"], {})[row["property"]] = EXPECTED[row["expected"]]
+    return out
+
+
+def tasks(program: S.Program) -> List[S.Rule]:
+    """The rules to verify: all of them but the lemmas."""
+    return [r for r in program.rules if not r.lemma]
 
 
 DEFAULT_MODE = "inline"
@@ -528,7 +593,7 @@ def invariant_report(context: dict) -> List[str]:
 
 def select_rules(program: S.Program, name: str) -> List[S.Rule]:
     if name == "ALL":
-        return list(program.rules)
+        return tasks(program)
     rule = program.rule(name)
     if rule is None:
         raise KindHMLError(f"no rule named '{name}' (rules: "

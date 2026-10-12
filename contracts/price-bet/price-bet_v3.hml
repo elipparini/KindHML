@@ -1,0 +1,13 @@
+rule Frontrunning {
+    (player_won)
+    ->
+    (
+    forall a : address .
+    exists b : address .
+    exists f : method .
+    exists args : calldataargs .
+    << b : Bet . f(args) $ 0 >>		
+        << a : Bet . win() $ 0 >>
+            lastReverted
+    )
+}

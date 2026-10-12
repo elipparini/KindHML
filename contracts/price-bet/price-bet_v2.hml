@@ -1,0 +1,10 @@
+rule Winnability {
+    (rate > 100 && player_has_joined && block.number > deadline)
+    -> 
+    exists a : address .
+    exists f : method .
+    exists args : calldataargs .    
+    exists msgvalue : int .    
+    << a : Bet . f(args) $ msgvalue >>
+        balance[a] == old(balance[a] + balance)		
+}
