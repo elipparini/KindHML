@@ -57,6 +57,21 @@ rule Liquidation_attack_exists {
         old(old(old(w0[a] + w1[a] * p1 + c0[a] + c1[a] * p1 - debt[a])))
 }
 
+// Liquidation attack (Thm 6.2), without a given strategy: some sequence of three calls of
+// a (a call that reverts leaves the state unchanged) increases its net worth.
+rule Liquidation_attack_any {
+    forall a : address . forall b : address .
+    (is_EOA(a) && is_EOA(b) && a != b && a != oracle && w0[a] > 0
+     && debt[b] > 0 && c1[b] > 0 && c0[b] == 0
+     && (c0[b] + c1[b] * p1) * 0.8 >= debt[b]) ->
+    exists f1 : method . exists args1 : calldataargs .
+    exists f2 : method . exists args2 : calldataargs .
+    exists f3 : method . exists args3 : calldataargs .
+    << a : Lending.f1(args1) >> << a : Lending.f2(args2) >> << a : Lending.f3(args3) >>
+        w0[a] + w1[a] * p1 + c0[a] + c1[a] * p1 - debt[a] >
+        old(old(old(w0[a] + w1[a] * p1 + c0[a] + c1[a] * p1 - debt[a])))
+}
+
 // Deposits, redeems, borrows and repays do not change the net worth of anyone.
 rule Net_worth_preserved {
     forall a : address . forall b : address . forall f : method . forall args : calldataargs .

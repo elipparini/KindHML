@@ -5,6 +5,7 @@ lending.sol,Exchange_rate,true,
 lending.sol,Health_non_interference,true,
 lending.sol,Liquidation_defence,true,
 lending.sol,Liquidation_attack,false,only the oracle sets the price.
+lending.sol,Liquidation_attack_any,false,"every user can be healthy, and then no call of a increases its net worth."
 lending.sol,Exchange_rate_monotone,true,
 lending.sol,Net_worth_preserved,true,
 lending.sol,Deposit_reversibility,true,
@@ -16,6 +17,7 @@ lending_v2.sol,Exchange_rate,true,
 lending_v2.sol,Health_non_interference,false,anyone can lower the price of the collateral.
 lending_v2.sol,Liquidation_defence,true,
 lending_v2.sol,Liquidation_attack,true,anyone can set the price.
+lending_v2.sol,Liquidation_attack_any,true,anyone can set the price.
 lending_v2.sol,Exchange_rate_monotone,true,
 lending_v2.sol,Net_worth_preserved,true,
 lending_v2.sol,Deposit_reversibility,true,
@@ -27,6 +29,7 @@ lending_v3.sol,Exchange_rate,true,
 lending_v3.sol,Health_non_interference,true,
 lending_v3.sol,Liquidation_defence,true,
 lending_v3.sol,Liquidation_attack,false,only the oracle sets the price.
+lending_v3.sol,Liquidation_attack_any,false,"every user can be healthy, and then no call of a increases its net worth."
 lending_v3.sol,Exchange_rate_monotone,true,
 lending_v3.sol,Net_worth_preserved,true,
 lending_v3.sol,Deposit_reversibility,true,
@@ -38,6 +41,7 @@ lending_v4.sol,Exchange_rate,true,
 lending_v4.sol,Health_non_interference,true,
 lending_v4.sol,Liquidation_defence,true,
 lending_v4.sol,Liquidation_attack,true,"the price updates of the attacker revert, but the liquidation of the healthy borrower succeeds, with a gain of 0.1 * v."
+lending_v4.sol,Liquidation_attack_any,true,liquidate does not check the health of the borrower.
 lending_v4.sol,Exchange_rate_monotone,true,
 lending_v4.sol,Net_worth_preserved,true,
 lending_v4.sol,Deposit_reversibility,true,

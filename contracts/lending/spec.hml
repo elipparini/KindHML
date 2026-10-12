@@ -54,6 +54,21 @@ rule Liquidation_attack {
         old(old(old(w0[a] + w1[a] * p1 + c0[a] * xr0 + c1[a] * p1 - sdebt[a] * idx)))
 }
 
+// Liquidation attack (Thm 6.2), without a given strategy: some sequence of three calls of
+// a (a call that reverts leaves the state unchanged) increases its net worth.
+rule Liquidation_attack_any {
+    forall a : address . forall b : address .
+    (is_EOA(a) && is_EOA(b) && a != b && a != oracle && w0[a] > 0
+     && sdebt[b] > 0 && c1[b] > 0 && c0[b] == 0
+     && (c0[b] * xr0 + c1[b] * p1) * 0.8 >= sdebt[b] * idx) ->
+    exists f1 : method . exists args1 : calldataargs .
+    exists f2 : method . exists args2 : calldataargs .
+    exists f3 : method . exists args3 : calldataargs .
+    << a : Lending.f1(args1) >> << a : Lending.f2(args2) >> << a : Lending.f3(args3) >>
+        w0[a] + w1[a] * p1 + c0[a] * xr0 + c1[a] * p1 - sdebt[a] * idx >
+        old(old(old(w0[a] + w1[a] * p1 + c0[a] * xr0 + c1[a] * p1 - sdebt[a] * idx)))
+}
+
 // The exchange rate never decreases (Lemma 3.4).
 rule Exchange_rate_monotone {
     forall a : address . forall f : method . forall args : calldataargs .
