@@ -2,7 +2,9 @@ contract,property,expected,note
 lending_simple.sol,Nonnegative,true,
 lending_simple.sol,Health_non_interference,true,
 lending_simple.sol,Liquidation_defence,true,
+lending_simple.sol,Liquidation_defence_exists,true,repay the whole debt.
 lending_simple.sol,Liquidation_attack,false,only the oracle sets the price.
+lending_simple.sol,Liquidation_attack_exists,false,"only the oracle sets the price, and b stays healthy."
 lending_simple.sol,Net_worth_preserved,true,
 lending_simple.sol,Deposit_reversibility,true,
 lending_simple.sol,Borrow_safe,true,
@@ -10,7 +12,9 @@ lending_simple.sol,Liquidation_only_unhealthy,true,
 lending_simple_v2.sol,Nonnegative,true,
 lending_simple_v2.sol,Health_non_interference,false,anyone can lower the price of the collateral.
 lending_simple_v2.sol,Liquidation_defence,true,
+lending_simple_v2.sol,Liquidation_defence_exists,true,repay the whole debt.
 lending_simple_v2.sol,Liquidation_attack,true,anyone can set the price.
+lending_simple_v2.sol,Liquidation_attack_exists,true,anyone can set the price.
 lending_simple_v2.sol,Net_worth_preserved,true,
 lending_simple_v2.sol,Deposit_reversibility,true,
 lending_simple_v2.sol,Borrow_safe,true,
@@ -18,7 +22,9 @@ lending_simple_v2.sol,Liquidation_only_unhealthy,true,
 lending_simple_v3.sol,Nonnegative,true,
 lending_simple_v3.sol,Health_non_interference,true,
 lending_simple_v3.sol,Liquidation_defence,true,
+lending_simple_v3.sol,Liquidation_defence_exists,true,repay the whole debt.
 lending_simple_v3.sol,Liquidation_attack,false,only the oracle sets the price.
+lending_simple_v3.sol,Liquidation_attack_exists,false,"only the oracle sets the price, and b stays healthy."
 lending_simple_v3.sol,Net_worth_preserved,true,
 lending_simple_v3.sol,Deposit_reversibility,true,
 lending_simple_v3.sol,Borrow_safe,false,
@@ -26,7 +32,9 @@ lending_simple_v3.sol,Liquidation_only_unhealthy,true,
 lending_simple_v4.sol,Nonnegative,true,
 lending_simple_v4.sol,Health_non_interference,true,
 lending_simple_v4.sol,Liquidation_defence,true,
+lending_simple_v4.sol,Liquidation_defence_exists,true,repay the whole debt.
 lending_simple_v4.sol,Liquidation_attack,true,"the price updates of the attacker revert, but the liquidation of the healthy borrower succeeds, with a gain of 0.1 * debt[b] / 4."
+lending_simple_v4.sol,Liquidation_attack_exists,true,"the price updates revert, but the liquidation of the healthy borrower succeeds, with a gain of 0.1 * v."
 lending_simple_v4.sol,Net_worth_preserved,true,
 lending_simple_v4.sol,Deposit_reversibility,true,
 lending_simple_v4.sol,Borrow_safe,true,

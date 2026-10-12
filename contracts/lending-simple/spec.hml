@@ -20,6 +20,16 @@ rule Liquidation_defence {
         forall b : address . forall v : real . << b : Lending.liquidate(a, v) >> lastReverted
 }
 
+// Defence against liquidation (Thm 5.1): an unhealthy user who holds enough T0 can act so
+// that every liquidation of it fails.
+rule Liquidation_defence_exists {
+    forall a : address .
+    (is_EOA(a) && (c0[a] + c1[a] * p1) * 0.8 < debt[a] && w0[a] >= debt[a]) ->
+    exists f : method . exists args : calldataargs .
+    << a : Lending.f(args) >>
+        forall b : address . forall v : real . << b : Lending.liquidate(a, v) >> lastReverted
+}
+
 // Liquidation attack (Thm 6.2), with an explicit strategy: set the price to
 // debt[b] / (2 * c1[b]) (b becomes unhealthy), liquidate debt[b] / 4, restore the price.
 rule Liquidation_attack {
@@ -28,6 +38,20 @@ rule Liquidation_attack {
      && debt[b] > 0 && c1[b] > 0 && c0[b] == 0
      && (c0[b] + c1[b] * p1) * 0.8 >= debt[b]) ->
     << a : Lending.setPrice(debt[b] / (2 * c1[b])) >> << a : Lending.liquidate(b, debt[b] / 4) >>
+    << a : Lending.setPrice(old(old(p1))) >>
+        w0[a] + w1[a] * p1 + c0[a] + c1[a] * p1 - debt[a] >
+        old(old(old(w0[a] + w1[a] * p1 + c0[a] + c1[a] * p1 - debt[a])))
+}
+
+// Liquidation attack (Thm 6.2): whoever can move the price can profitably liquidate a
+// healthy borrower whose collateral is in T1 (lower the price, liquidate, restore the price).
+rule Liquidation_attack_exists {
+    forall a : address . forall b : address .
+    (is_EOA(a) && is_EOA(b) && a != b && a != oracle && w0[a] > 0
+     && debt[b] > 0 && c1[b] > 0 && c0[b] == 0
+     && (c0[b] + c1[b] * p1) * 0.8 >= debt[b]) ->
+    exists p : real . exists v : real .
+    << a : Lending.setPrice(p) >> << a : Lending.liquidate(b, v) >>
     << a : Lending.setPrice(old(old(p1))) >>
         w0[a] + w1[a] * p1 + c0[a] + c1[a] * p1 - debt[a] >
         old(old(old(w0[a] + w1[a] * p1 + c0[a] + c1[a] * p1 - debt[a])))
