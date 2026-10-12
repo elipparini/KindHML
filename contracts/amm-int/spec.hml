@@ -88,7 +88,7 @@ rule No_money_pump {
          && !(t0[a] >= old(old(t0[a])) && t1[a] > old(old(t1[a]))))
 }
 
-// Arbitrage, with an explicit strategy (as in amm.sol; amounts rounded down).
+// Arbitrage, with an explicit strategy (as in amm_real.sol; amounts rounded down).
 rule Arbitrage {
     forall a : address . forall p : int .
     (is_EOA(a) && p > 0 && r0 > 0 && t0[a] > 0 && r1 > p * r0) ->

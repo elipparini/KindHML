@@ -49,7 +49,7 @@ def test_only_relevant_invariants_are_assumed():
 def test_premises_direct_then_transitive():
     """In the AMM, the swaps share fields with Nonnegative only; Shares is connected to them
     through `supply`, which occurs in Nonnegative."""
-    program, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    program, _ = V.load(os.path.join(ROOT, "contracts", "amm-real", "amm_real.sol"))
     c = Checks(program, 2, "inline", ("address", "method"))
     invariants = c.axioms + ["Nonnegative", "Shares"]
     assert c.premises(program.rule("Swap_reversibility"), invariants) == \
@@ -102,7 +102,7 @@ def test_sum_of_a_mapping():
 
 def test_invariant_templates():
     """The generated candidates include the invariants written by hand for the AMM."""
-    program, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    program, _ = V.load(os.path.join(ROOT, "contracts", "amm-real", "amm_real.sol"))
     texts = invgen.templates(program)
     for t in ("AMM.r0 >= 0", "(AMM.r0 > 0) == (AMM.r1 > 0)", "sum(AMM.minted) == AMM.supply",
               "forall _u : address . !is_EOA(_u) -> AMM.minted[_u] == 0",
@@ -122,7 +122,7 @@ def test_invariant_definitions():
 
 def test_generated_candidates_filtered_by_reachable_states():
     """r0 <= 1 is false in reachable states of the pool (deposits of any size)."""
-    program, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    program, _ = V.load(os.path.join(ROOT, "contracts", "amm-real", "amm_real.sol"))
     alive, n, keys = invgen.generate(program, Fuzzer(System.make(program, 2), seed="test"), 1.0)
     texts = {pretty.expr(r.formula) for r in alive}
     assert "(sum(minted) == supply)" in texts and "(r0 <= 1.0)" not in texts
@@ -165,9 +165,9 @@ def test_fuzzer_candidates_and_witnesses():
     found = f.candidates(program.rule("Swap_takes_everything"), 5)
     assert found and all(all(st.constructed.values()) for _, st in found)
     assert not has_witness(program.rule("Swap_reversibility").formula)
-    amm, _ = V.load(os.path.join(ROOT, "contracts", "amm", "amm.sol"))
+    amm, _ = V.load(os.path.join(ROOT, "contracts", "amm-real", "amm_real.sol"))
     assert has_witness(amm.rule("Swap_additivity").formula)        # exists v12, v3
-    assert has_witness(amm.rule("Arbitrage").formula)              # exists x
+    assert has_witness(amm.rule("Arbitrage_exists").formula)       # exists x
     assert not has_witness(amm.rule("Slippage").formula)
 
 

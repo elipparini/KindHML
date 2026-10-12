@@ -8,11 +8,11 @@ with the ground truth in `// @groundtruth: True|False` comments.
 ## Layout of a family
 
 ```
-amm/
-  amm.sol            base contract (no rules)
-  amm_v2.sol ...     variants; the first comment describes the mutation
+amm-real/
+  amm_real.sol       base contract (no rules)
+  amm_real_v2.sol .. variants; the first comment describes the mutation
   spec.hml           the properties shared by all the contracts (rules and invariants)
-  amm_v2.hml         optional: rules for amm_v2.sol only
+  amm_real_v2.hml    optional: rules for amm_real_v2.sol only
   lemmas.hml         optional: helper invariants (not tasks)
   groundtruth.csv    the expected verdict of each task
 ```
@@ -29,7 +29,7 @@ leaves them out, and `--no_user_invariants` leaves out all declared invariants a
 
 `groundtruth.csv` has one row per task, with the columns:
 
-- `contract`: the contract file, e.g. `amm_v2.sol`;
+- `contract`: the contract file, e.g. `amm_real_v2.sol`;
 - `property`: the name of the rule or invariant;
 - `expected`: `true`, `false` or `unknown`;
 - `note`: optional, usually why the property fails or holds in this contract.
@@ -44,7 +44,7 @@ tasks of the family.
 
 | family | contracts | notes |
 |---|---|---|
-| `amm`, `amm-simple` | constant-product AMM, with and without liquidity tokens | real amounts |
+| `amm-real`, `amm-simple` | constant-product AMM, with and without liquidity tokens | real amounts |
 | `amm-int`, `amm-simple-int` | the same, with integer amounts | divisions round down |
 | `lending`, `lending-simple` | lending protocol | real amounts |
 | `lending-int` | `lending` with integer amounts | fixed point |
