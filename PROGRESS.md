@@ -283,6 +283,25 @@ invariants only (`--no_user_invariants`, 60 s per rule, `runs/invgen_rules3.log`
   unknown are in the OPEN list of `tests/test_regressions.py`; the invariant phase takes
   0-13 s per file.
 
+## Noted (2026-10-12, not planned yet): a portfolio of encodings for long budgets
+
+Method quantifiers are expanded only while their nested copies are at most a bound
+(`--expand method:N`, default 32; DESIGN.md, Sect. 2). Neither choice is better on every
+rule (30 s per rule, 2 participants): with expansion, price-bet `Liquidity` (9.8 s) and
+lending-simple `Liquidation_defence_exists` (3.7 s) are proved, and are not without it;
+without expansion, two-donatees `P3c_true` is proved (10.3 s), and is not with it, and
+lending-simple `Health_non_interference` takes 1.0 s instead of 3.0 s. With a long budget
+(hours or days), the tool could try both encodings of the method quantifiers, in rounds
+or in parallel, and possibly the other choices of the encoding (`--mode`, the expansion
+of addresses).
+
+Also observed: lending-simple `Liquidation_attack_any` (three free calls of the
+attacker) is out of reach for now. In `inline` mode its encoding takes about 2 minutes
+(24 MB) whatever the bound, because the state after a call of an unknown method, a case
+split over all the methods, is substituted into the next modality. In `exists` mode the
+encoding is small (178 KB without expansion), but Kind 2 exceeds 2 GB of memory within
+30 s, also with the outer call expanded.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).

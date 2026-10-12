@@ -15,7 +15,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from kindhml import verify as V                     # noqa: E402
-from kindhml.encode_formula import MODES           # noqa: E402
+from kindhml.encode_formula import METHOD_COPIES, MODES, parse_expand   # noqa: E402
 from kindhml.errors import KindHMLError             # noqa: E402
 from kindhml.kind2 import SOLVERS, format_counterexample   # noqa: E402
 
@@ -54,7 +54,9 @@ def main() -> int:
     ap.add_argument("--expand", default=",".join(V.DEFAULT_EXPAND),
                     help="finite types whose quantifiers are expanded, comma-separated "
                          f"(address, method; 'none' for none; default: "
-                         f"{','.join(V.DEFAULT_EXPAND)})")
+                         f"{','.join(V.DEFAULT_EXPAND)}); method:N expands the method "
+                         "quantifiers while their nested copies are at most N (default "
+                         f"{METHOD_COPIES})")
     ap.add_argument("--out_lus", default="out_lus", help="directory for the Lustre files")
     ap.add_argument("--out_results", default="out_results", help="directory for the verdicts")
     args = ap.parse_args()
@@ -69,6 +71,11 @@ def main() -> int:
         print(f"{args.contract}: warning: {w}", file=sys.stderr)
 
     expand = () if args.expand == "none" else tuple(x for x in args.expand.split(",") if x)
+    try:
+        parse_expand(expand)
+    except ValueError as e:
+        print(f"{args.contract}: error: --expand: {e}", file=sys.stderr)
+        return 2
     name = V.stem(args.contract)
     timeout = int(args.timeout) if args.timeout == int(args.timeout) else args.timeout
     os.makedirs(args.out_lus, exist_ok=True)

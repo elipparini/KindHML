@@ -33,6 +33,23 @@ from .lustre_subst import Inliner, eq, free_vars, ite
 from .model import NULL
 
 MODES = ("levels", "exists", "inline", "subst")
+METHOD_COPIES = 32      # default bound on the copies of the expanded method quantifiers
+
+
+def parse_expand(expand) -> Tuple[set, int]:
+    """The types of `expand` (e.g. `address`, `method:100`) and the bound on the copies of
+    the method quantifiers."""
+    types, copies = set(), METHOD_COPIES
+    for x in expand:
+        name, _, bound = x.partition(":")
+        if bound and name != "method":
+            raise ValueError(f"only method takes a bound: {x}")
+        if bound:
+            if not bound.isdigit():
+                raise ValueError(f"the bound of method must be a natural number: {x}")
+            copies = int(bound)
+        types.add(name)
+    return types, copies
 
 
 @dataclass(frozen=True)
@@ -44,15 +61,17 @@ class Node:
 class FormulaEncoder:
     def __init__(self, enc: Encoder, mode: str = "exists", expand: Tuple[str, ...] = ()):
         """`expand` lists the finite types (`address`, `method`) whose quantifiers are
-        expanded into finite conjunctions/disjunctions (A1)."""
+        expanded into finite conjunctions/disjunctions (A1). `method:N` bounds the copies
+        of the method quantifiers (`method` alone: METHOD_COPIES, see `quant`)."""
         if mode not in MODES:
             raise ValueError(f"unknown mode {mode}")
         self.enc = enc
         self.system = enc.system
         self.mode = mode
-        self.expand = set(expand)
+        self.expand, self.method_copies = parse_expand(expand)
         self.inliner = Inliner({f.name: f for f in enc.helpers()})
         self._fresh = 0
+        self._copies = 1          # copies made by the expanded method quantifiers around
 
     def fresh(self, base: str) -> str:
         self._fresh += 1
@@ -106,9 +125,15 @@ class FormulaEncoder:
                 decls.append((name, base_type(v.type)))
                 guards += self.domain(L.Var(name), v.type, address_quantifier=False)
             body = self.phi(e.body, node, {**env, e.var: comps})
-        elif e.type.name in self.expand:
+        elif e.type.name in self.expand and self._expands(e.type):
             values = self.finite_domain(e.type)
-            parts = [self.phi(e.body, node, {**env, e.var: v}) for v in values]
+            outer = self._copies
+            if e.type == S.METHOD:
+                self._copies = outer * len(values)
+            try:
+                parts = [self.phi(e.body, node, {**env, e.var: v}) for v in values]
+            finally:
+                self._copies = outer
             return L.conj(parts) if e.kind == "forall" else L.disj(parts)
         else:
             name = self.fresh(f"q_{e.var}")
@@ -116,6 +141,16 @@ class FormulaEncoder:
             guards = self.domain(L.Var(name), e.type, address_quantifier=True)
             body = self.phi(e.body, node, {**env, e.var: L.Var(name)})
         return self.quantify(e.kind, decls, guards, body)
+
+    def _expands(self, t: S.Type) -> bool:
+        """Expanding nested method quantifiers multiplies the copies of their bodies (each
+        with the transitions of its modalities): 1000 for three calls of 10 methods, which
+        neither the encoder nor Kind 2 managed. A method quantifier is expanded only if the
+        product of the domains of the expanded method quantifiers around it, and of its own,
+        is at most `method_copies`; so the outer ones are expanded first."""
+        if t != S.METHOD:
+            return True
+        return self._copies * len(self.finite_domain(t)) <= self.method_copies
 
     def finite_domain(self, t: S.Type) -> List[L.LExpr]:
         """Addresses: all but null. Methods: all procedures but the constructors, which cannot

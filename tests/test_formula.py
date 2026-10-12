@@ -16,7 +16,7 @@ import time
 import pytest
 
 from kindhml import lustre as L
-from kindhml.encode_formula import FormulaEncoder
+from kindhml.encode_formula import METHOD_COPIES, FormulaEncoder, parse_expand
 from kindhml.encode_trans import Encoder
 from kindhml.lustre_eval import Evaluator
 from kindhml.model import System
@@ -87,3 +87,33 @@ class _TooSlow(Exception):
 
 def _too_slow(signum, frame):
     raise _TooSlow()
+
+
+VAULT = os.path.join(ROOT, "contracts", "vault", "vault.sol")
+
+
+def test_parse_expand():
+    assert parse_expand(("address", "method")) == ({"address", "method"}, METHOD_COPIES)
+    assert parse_expand(("method:9",)) == ({"method"}, 9)
+    for bad in (("address:3",), ("method:x",)):
+        with pytest.raises(ValueError):
+            parse_expand(bad)
+
+
+@pytest.mark.parametrize("bound,symbolic", [(9, set()), (3, {"f2"}), (1, {"f1", "f2"})])
+def test_method_copies_bound_the_expansion(bound, symbolic):
+    """Two_steps_drainability nests f1 and f2 over the 3 methods of the vault: 9 copies.
+    With the bound 3 only f1 (the outer one) is expanded; the others stay quantified, as
+    fresh variables q_f1_N, q_f2_N."""
+    program, _ = V.load(VAULT)
+    enc = Encoder(System.make(program, 2))
+    prop = FormulaEncoder(enc, "inline", ("address", f"method:{bound}")).rule(
+        program.rule("Two_steps_drainability"))
+    text = L.render(prop)
+    assert {f for f in ("f1", "f2") if f"q_{f}_" in text} == symbolic
+
+
+def test_partial_expansion_matches_reference():
+    """The encoding with f1 expanded and f2 quantified agrees with the reference."""
+    test_formula_matches_reference(VAULT, "Two_steps_drainability", "inline",
+                                   ("address", "method:3"))

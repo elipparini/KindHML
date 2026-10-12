@@ -102,6 +102,16 @@ conjunctions/disjunctions (A1; `--expand`). This matters: with symbolic senders,
 conditions of the transaction guard on the sender (`is_EOA(sender)`) occur under the inner
 quantifiers, and the solvers fail to find witnesses of outer existentials (e.g. regression
 `additivity` P1: unknown after 30 s without expansion, valid in 0.2 s with it).
+Nested method quantifiers multiply the copies, each with the transitions of its
+modalities: three free calls of the 10 methods of lending-simple give 1000 copies, whose
+encoding did not finish in 5 minutes. So a method quantifier is expanded only if the
+product of the numbers of methods of the expanded method quantifiers around it, and of
+its own, is at most a bound (`--expand method:N`, default 32: every benchmark rule so far
+has at most 11 copies; two free calls of lending-simple, 100 copies, took 22 s to encode
+instead of 3 s). The outer quantifiers are expanded first; the others stay quantified.
+Neither choice is better on every rule (30 s per rule): with expansion, price-bet
+`Liquidity` and lending-simple `Liquidation_defence_exists` are proved and are not without
+it; without expansion, two-donatees `P3c_true` is proved and is not with it.
 Quantifiers over records break Kind 2's BMC and k-induction, so an `args` variable is expanded
 into one scalar per element of `ParamVars`, as in the paper; unused scalars are dropped.
 

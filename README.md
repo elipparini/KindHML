@@ -40,6 +40,9 @@ Options:
 - `--mode inline|levels|exists|subst`: encoding of modalities (default `inline`, see
   `DESIGN.md`).
 - `--expand address,method|none`: expand quantifiers over these finite types (default both).
+  `method:N` expands the method quantifiers only while the copies of the formula they make
+  (the product of the numbers of methods of the nested expanded ones) are at most `N`
+  (default 32); the outer quantifiers are expanded first, the others stay quantified.
 - `--strategy portfolio|kind2`: `portfolio` (default) proves the file's invariants, checks
   each rule on an arbitrary state satisfying them, searches for the state that refutes it,
   and runs Kind 2 on the transition system, in rounds with doubling budgets; `kind2` only
