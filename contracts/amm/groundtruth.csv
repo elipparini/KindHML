@@ -3,49 +3,59 @@ amm.sol,Nonnegative,true,
 amm.sol,Shares,true,
 amm.sol,Slippage,true,
 amm.sol,Sandwich,true,
+amm.sol,Sandwich_slippage,true,
 amm.sol,Swap_additivity,true,
 amm.sol,Swap_reversibility,true,
 amm.sol,Deposit_reversibility,true,
 amm.sol,LP_exit,true,
 amm.sol,No_money_pump,true,
 amm.sol,Arbitrage,true,
+amm.sol,Arbitrage_exists,true,
 amm_v2.sol,Nonnegative,true,
 amm_v2.sol,Shares,true,
 amm_v2.sol,Slippage,false,
 amm_v2.sol,Sandwich,true,
+amm_v2.sol,Sandwich_slippage,true,
 amm_v2.sol,Swap_additivity,true,
 amm_v2.sol,Swap_reversibility,true,
 amm_v2.sol,Deposit_reversibility,true,
 amm_v2.sol,LP_exit,true,
 amm_v2.sol,No_money_pump,true,
 amm_v2.sol,Arbitrage,true,
+amm_v2.sol,Arbitrage_exists,true,
 amm_v3.sol,Nonnegative,false,a swap of more than the reserve r0 makes r1 negative.
 amm_v3.sol,Shares,true,
 amm_v3.sol,Slippage,true,
-amm_v3.sol,Sandwich,false,"if a sells x >= 2 * r0, b's back-run reverts (the reserve r1 is not positive)."
+amm_v3.sol,Sandwich,false,"if adv holds at least r0 tokens T0, its front-run makes r1 nonpositive, and the back-run reverts."
+amm_v3.sol,Sandwich_slippage,false,"if x >= 2 * r0, every front-run that lets the victim's swap succeed leaves r1 nonpositive after it, and the back-run reverts."
 amm_v3.sol,Swap_additivity,false,
 amm_v3.sol,Swap_reversibility,false,
 amm_v3.sol,Deposit_reversibility,true,
 amm_v3.sol,LP_exit,true,
 amm_v3.sol,No_money_pump,false,
 amm_v3.sol,Arbitrage,true,
+amm_v3.sol,Arbitrage_exists,true,
 amm_v4.sol,Nonnegative,true,
 amm_v4.sol,Shares,true,
 amm_v4.sol,Slippage,true,
-amm_v4.sol,Sandwich,false,"for a small x, the fees of the two swaps of b exceed what b can gain."
+amm_v4.sol,Sandwich,false,"for a small x, the fees of the two swaps of adv exceed what adv can gain."
+amm_v4.sol,Sandwich_slippage,false,"for a small x, the fees of the two swaps of adv exceed what adv can gain, for every z."
 amm_v4.sol,Swap_additivity,false,"with the fee, two swaps give less than one."
-amm_v4.sol,Swap_reversibility,false,
+amm_v4.sol,Swap_reversibility,false,"with the fee, getting back the tokens T1 returns fewer tokens T0."
 amm_v4.sol,Deposit_reversibility,true,
 amm_v4.sol,LP_exit,true,
 amm_v4.sol,No_money_pump,true,
-amm_v4.sol,Arbitrage,false,a price gap smaller than the fee cannot be exploited.
+amm_v4.sol,Arbitrage,false,the fee makes the strategy unprofitable when the price gap is small.
+amm_v4.sol,Arbitrage_exists,false,"if 0.997 * r1 / r0 <= p, no swap is profitable."
 amm_v5.sol,Nonnegative,true,
 amm_v5.sol,Shares,true,
 amm_v5.sol,Slippage,true,
 amm_v5.sol,Sandwich,true,
+amm_v5.sol,Sandwich_slippage,true,
 amm_v5.sol,Swap_additivity,true,
 amm_v5.sol,Swap_reversibility,true,
-amm_v5.sol,Deposit_reversibility,false,"not the first deposit, which mints the whole supply."
+amm_v5.sol,Deposit_reversibility,false,"after the first deposit, which mints the whole supply, no redemption returns all the tokens."
 amm_v5.sol,LP_exit,false,not the only liquidity provider.
 amm_v5.sol,No_money_pump,true,
 amm_v5.sol,Arbitrage,true,
+amm_v5.sol,Arbitrage_exists,true,

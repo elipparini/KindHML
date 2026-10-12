@@ -2,10 +2,12 @@ contract,property,expected,note
 amm_int.sol,Nonnegative,true,
 amm_int.sol,Shares,true,
 amm_int.sol,Slippage,true,
-amm_int.sol,Sandwich,false,"for a small x, rounding leaves b nothing to gain."
+amm_int.sol,Sandwich,false,"for a small x, rounding leaves adv nothing to gain."
+amm_int.sol,Sandwich_slippage,false,"rounding (e.g. r0 = r1 = 1, x = 1, ymin = 0: every front-run pays adv nothing, so its back-run reverts)."
 amm_int.sol,Swap_additivity,false,rounding.
-amm_int.sol,Swap_reversibility,false,rounding.
+amm_int.sol,Swap_reversibility,false,"rounding (e.g. r0 = r1 = 1, x = 1: the swap pays nothing)."
 amm_int.sol,Deposit_reversibility,false,rounding.
 amm_int.sol,LP_exit,true,
 amm_int.sol,No_money_pump,true,
-amm_int.sol,Arbitrage,false,"rounding (e.g. r0 = 1, r1 = 3, p = 1: no swap gains)."
+amm_int.sol,Arbitrage,false,"rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the swap gains nothing)."
+amm_int.sol,Arbitrage_exists,false,"rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the only possible swap gains nothing)."
