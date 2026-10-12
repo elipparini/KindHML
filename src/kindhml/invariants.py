@@ -21,6 +21,7 @@ system: each is one Kind 2 run on free values (a node without `pre`), i.e. one S
 from __future__ import annotations
 
 from fractions import Fraction
+from itertools import product
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import lustre as L
@@ -29,8 +30,8 @@ from .concrete import python_value, state_from_values
 from .encode_formula import FormulaEncoder
 from .encode_trans import ST, TX, Encoder, constructed_var, default_value, field_var
 from .lustre_subst import eq
-from .model import System
-from .reference import FormulaEvaluator, Interpreter, Tx
+from .model import NULL, System
+from .reference import FormulaEvaluator, Interpreter, Tx, default
 
 StateFormula = Callable[[L.LExpr], L.LExpr]
 
@@ -106,7 +107,10 @@ class Checks:
         """The candidates false after the call of `p` given by a counterexample of its
         conjunction step: its free state s satisfies all the candidates (the premise), and
         the reference interpreter runs the call, with the arguments of the counterexample
-        (inputs after `hoist`), for every sender (the sender is expanded, not an input)."""
+        (inputs after `hoist`), for every sender (the sender is expanded, not an input). An
+        address argument that is not an input (expanded, A1) takes every address in turn;
+        any other argument missing from the counterexample takes the default of its type.
+        Every choice is sound: a candidate false after a concrete call from s is refuted."""
         values: Dict[str, object] = {}
         for block in counterexample or []:
             for stream in block.get("streams", []):
@@ -119,12 +123,20 @@ class Checks:
         for name, v in values.items():
             if name.startswith("q___") and "_" in name[4:]:
                 inputs[name[4:].rsplit("_", 1)[0]] = python_value(v)
-        args = {x.name: inputs.get(f"arg_{x.name}", 0) for x in p.params}
+        choices = []
+        for x in p.params:
+            if f"arg_{x.name}" in inputs:
+                choices.append([inputs[f"arg_{x.name}"]])
+            elif x.type == S.ADDRESS:
+                choices.append([a for a in system.addresses if a != NULL])
+            else:
+                choices.append([default(x.type, system)])
         tx = dict(value=inputs.get("value", 0), blocks=inputs.get("blocks", 0))
         interp = Interpreter(system)
         ev = FormulaEvaluator(system, range(-1, 4))
         out = set()
-        for sender in system.addresses:
+        for sender, values in product(system.addresses, product(*choices)):
+            args = {x.name: v for x, v in zip(p.params, values)}
             post = interp.step(st, Tx(sender, c.name, (c.name, p.name), args, **tx))
             if not all(post.constructed.values()):
                 continue

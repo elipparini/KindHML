@@ -183,6 +183,22 @@ def test_state_values_of_a_counterexample():
     assert constant("A_u1") == L.Var("A_u1") and constant(4) == L.Int(4)
 
 
+def test_refuted_after_an_expanded_address_argument(tmp_path):
+    """An address argument is expanded (A1), so it is not an input of the counterexample:
+    the call is run with every address (a default 0 was not an address)."""
+    path = tmp_path / "c.sol"
+    path.write_text("contract C { mapping (address => int) m;"
+                    " function set(address b) { m[b] = 1 } }\n"
+                    "invariant Zero { forall u : address . m[u] == 0 }\n")
+    program, _ = V.load(str(path))
+    c = Checks(program, 2, "inline", ("address", "method"))
+    contract = program.contracts[0]
+    proc = contract.proc("set")
+    cex = [{"name": "main", "streams": [
+        {"name": "s.constructed_C", "instantValues": [[0, True]]}]}]
+    assert c.refuted_after(cex, ["Zero"], contract, proc) == {"Zero"}
+
+
 @pytest.mark.kind2
 @pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
 def test_portfolio_on_the_swap_pool():
