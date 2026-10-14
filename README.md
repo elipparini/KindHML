@@ -126,6 +126,16 @@ A file may contain several contracts, which can call each other (no cycles):
 bash run_experiments.sh              # the benchmarks of the paper
 ```
 
+Without files, `tests/run_all.py` runs every task (a rule of a contract file) of
+`contracts/regression` and of the benchmark families. The tasks can be restricted with
+`--families bank,vault`, `--versions 1,3` (`<name>_vN.sol` is version N, `<name>.sol` version
+1), `--rules Liquidity,...` and `--tasks FILE.csv` (columns `file` and `rule`, as in the
+`results.csv` of a run, or `contract` and `property`, as in a `groundtruth.csv`); the
+restrictions combine. `--list` prints the selected tasks without running them.
+`tests/run_all.py --out DIR` saves the run in `DIR`: `results.csv` (one row per task),
+`run.log` (the output, with the invariants proved for each file) and `info.txt` (the command,
+the date, the git commit and the versions of Kind 2, Z3 and cvc5).
+
 `tools/gen_parser.sh` regenerates the parser from `src/kindhml/grammar/KindHML.g4`.
 
 
