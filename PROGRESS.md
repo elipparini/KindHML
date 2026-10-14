@@ -326,6 +326,57 @@ the rules left to Kind 2 (slower unrolling) and in rules with nested address qua
 Not tested: rules whose counterexample needs 3 or more users (where n = 2 could miss a
 violation), and the harder benchmarks (vault, price-bet, AMM, lending).
 
+## Done (2026-10-14): parameterized mode (prototype, with the user)
+
+Theory and design in DESIGN.md, Sect. 7. Option `--parameterized` (`kindHML.py`,
+`run_all.py`); without it, the tool behaves as before (the 46 regression rules below: same
+verdicts and methods, 69.7 s against 70.6 s). Code: `cutoff.py` (fragment and count),
+`Checks.cutoff`, `Checks.sum_axioms`, ghost sums (`System.ghost_sums`, `encode_trans.py`),
+`verify.effective_users`. Tests: `tests/test_cutoff.py` (the count on small formulas, the
+cutoffs of bank and additivity, ghost sums against the reference interpreter on every
+contract file, the guard of the sum axioms; with Kind 2, `tests/contracts/parameterized/
+registry.sol`).
+
+Experiments (10 s per rule, one job at a time, Kind 2 memory capped at 1 GB; data in
+`runs/parameterized_*` and `runs/normal_*_n100*`). Total time and correct verdicts:
+
+| | n = 2 | n = 3 | n = 4 | n = 100 |
+|---|---|---|---|---|
+| regressions (46 rules), normal | 70.6 s, 46 | 76.3 s, 46 | 77.6 s, 46 | 457 s, 23 |
+| regressions, parameterized | 62.1 s, 45 | 63.5 s, 43 | 64.3 s, 43 | 70.7 s, 43 |
+| bank (4 rules), normal | 12.4 s, 3 | | 13.6 s, 3 | not finished (*) |
+| bank, parameterized | 12.0 s, 3 | | 12.1 s, 3 | 12.1 s, 3 |
+
+(*) The invariant phase does not finish in 42 s, the first two rules time out, and the
+encoding of `No_frontrun_deposit` (two nested address quantifiers) did not finish in 6 min
+with 1.5 GB.
+
+- Cutoffs of the regressions: 1 (additivity, args, liquidity4, division, division2), 2
+  (mapping1, owner, states, bank), 3 (mapping2, two-donatees, signature_error, bank_v3).
+  Outside the fragment: additivity P1_true and P2_false, division P1_true and P2_false,
+  division2 P2_false (an address quantifier after `exists` over numbers); they are checked
+  with n users.
+- The unknown verdicts are expected: args P0_false and owner P5_false (`exists a : address`,
+  so a counterexample with c users does not extend; for args also with n = 2, since c = 1),
+  owner P2_true (proved by Kind 2 only, for c users; the invariants method would need
+  `is_EOA(owner)`).
+- bank: the three rules proved with 2 users are proved for every n >= 2. `Liquidity` is
+  unknown, as with 2 users; with the declared invariant `sum(funds) <= balance[Bank]`, it is
+  proved for every n >= 2 in about 4 s, thanks to the sum axioms (without them: a
+  counterexample to induction with `funds[u2] = 3 > balance[Bank] = 1`).
+- registry (rules using `sum(registered) == count`): proved for every n >= 2 in 4.9 s for
+  n = 2, 3, 4 and 100; with 100 users the normal mode times out on all rules (147 s).
+  `At_most_two` (true only for n <= 2) is unknown in parameterized mode, for every n.
+
+Not done yet:
+- the larger benchmarks have larger cutoffs: vault 10 (its Houdini steps 5), lending 7
+  (steps 5, one rule outside), price-bet 5, AMM 4. The cutoff of a file is the largest over
+  its rules; Houdini could use the cutoff of the steps, and each rule its own;
+- counterexamples are searched for with c users only (a BMC of depth d needs up to
+  d(1 + p) + w users);
+- with c = n, ghost sums are weaker than exact sums: first trying exact sums with n users
+  would keep the proofs for exactly n users.
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).

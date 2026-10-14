@@ -184,6 +184,10 @@ def main():
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--timeout", type=float, default=10)
     ap.add_argument("--participants", type=int, default=2)
+    ap.add_argument("--parameterized", action="store_true",
+                    help="check with the cutoff of the checks on free values, if it is at"
+                         " most --participants; proofs then hold for every number of users"
+                         " from the cutoff on (DESIGN.md, Sect. 7)")
     ap.add_argument("--mode", default=V.DEFAULT_MODE)
     ap.add_argument("--solver", default="auto")
     ap.add_argument("--expand", default=",".join(V.DEFAULT_EXPAND))
@@ -246,7 +250,8 @@ def main():
             invs = V.prove_invariants(program, args.participants, limit, context,
                                       mode=args.mode, expand=expand,
                                       invgen=not args.no_invgen,
-                                      user_invariants=not args.no_user_invariants)
+                                      user_invariants=not args.no_user_invariants,
+                                      parameterized=args.parameterized)
             say(f"{V.stem(f):>18}   {V.invariant_summary(invs)} [{time.time()-start:.1f}s]")
         for rule in rules:
             start = time.time()
@@ -255,7 +260,8 @@ def main():
                                mode=args.mode, expand=expand, solver=args.solver,
                                strategy=args.strategy, context=context,
                                invgen=not args.no_invgen,
-                               user_invariants=not args.no_user_invariants)
+                               user_invariants=not args.no_user_invariants,
+                               parameterized=args.parameterized)
                 gt, desc = out.groundtruth_check(), out.describe()
                 status, method = out.status, out.method
             except KindHMLError as e:

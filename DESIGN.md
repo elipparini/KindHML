@@ -140,7 +140,8 @@ cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the
 
 ## 3. Assumptions of the paper (A1–A7) and how they are enforced
 
-* A1 (finite addresses/methods): `n_participants` user addresses from the command line.
+* A1 (finite addresses/methods): `n_participants` user addresses from the command line
+  (with `--parameterized`, possibly fewer; Sect. 7).
 * A2 (maps indexed by addresses): type checker.
 * A3 (guarded divisions in formulas): type checker (warning or error), def-guards in contracts.
 * A4 (acyclic calls): desugaring rejects cycles.
@@ -186,6 +187,8 @@ Deviations, still recorded as `\CL` notes in the paper where relevant:
    required only in reachable states where all contracts are constructed.
 7. **Reals** (extension, not in the paper). See Sect. 5.
 8. **Invariants and checks on free states** (extension, not in the paper). See Sect. 6.
+9. **Parameterized mode** (extension, not in the paper): checks with the cutoff on the
+   number of users, and sums as state variables. See Sect. 7.
 
 ## 6. Invariants and the portfolio strategy (`invariants.py`, `verify.verify`)
 
@@ -346,3 +349,157 @@ experiment.
   arithmetic works with k-induction; cvc5's IC3 fails on it, as on nonlinear integers.
 * **Counterexamples.** In JSON, Kind 2 writes a real as `{"num": n, "den": d}`; the
   formatter prints `n/d`.
+
+## 7. Parameterized mode: cutoffs on the number of users (`cutoff.py`, `--parameterized`)
+
+A verdict obtained with n users says nothing, in general, about other numbers of users.
+This section shows that no cutoff exists for the problem as a whole (Prop. 7.1), and that
+each check on free values of Sect. 6 has a cutoff, computed syntactically, when it lies in a
+fragment (Thm. 7.3). Sums over the addresses are outside the fragment; they are replaced by
+state variables, which keeps the checks sound (Lemma 7.4). Counterexamples found with few
+users extend to more users under a syntactic condition (Lemma 7.5). The parameterized mode
+uses these results (Sect. 7.5).
+
+**Setting.** For n ≥ 1, S_n is the system with the addresses A_n = F ∪ U_n, where
+F = {null, C_1, ..., C_m} (null and the contracts) and U_n = {u1, ..., un}. Addresses are
+compared only with `==` and `!=` (type checker), and neither contracts nor rules can name a
+user. The only constructs that range over all addresses are the quantifiers of formulas and
+`sum(m)`.
+
+### 7.1 No cutoff for the reachable states
+
+**Proposition 7.1.** No computable function c(P, φ) has the following property: for every
+contract P and rule φ, if φ holds in the reachable states of S_n for every n ≤ c(P, φ), then
+φ holds in the reachable states of S_n for every n.
+
+*Proof.* Let M be a deterministic two-counter machine. The contract P_M has integer fields
+pc, r1, r2, steps, T, count, a boolean field halted and a map registered. Its procedure
+`step()` runs one instruction of M unless halted, increments steps, and sets halted and
+T := steps when M halts; `register()` requires `!registered[msg.sender]`, sets it, and
+increments count. Let φ = `!(halted && count >= T)`. In the reachable states of S_n, count
+takes exactly the values 0, ..., n; so φ fails in S_n iff M halts, after T steps, and T ≤ n. If c were computable,
+M would halt iff T ≤ c(P_M, φ), which is decidable by running M for c(P_M, φ) steps. This
+contradicts the undecidability of the halting problem for two-counter machines. ∎
+
+The obstacle is an integer field that counts users; the formula has no quantifier. The
+file `tests/contracts/parameterized/registry.sol` shows it on a small scale: `count <= 2` is
+proved with 2 users (from the invariant `sum(registered) == count`), and refuted with 3.
+
+### 7.2 Checks as first-order formulas
+
+A check of Sect. 6 (a step of Houdini, or a rule on a free state) is a verification
+condition χ = P ⇒ Q: P the premises, Q a rule or the candidates after a call. We read χ in
+many-sorted first-order logic with a sort Addr, whose constants are null and the contracts;
+a map is a function symbol from Addr to numbers or booleans, a field is a constant, and the
+free state and the transaction are free symbols. χ is *valid with n users* if it holds in
+every structure whose Addr part is A_n. The Lustre program of the check with n users
+expresses exactly this; in particular the expansion of address quantifiers over A_n is
+exact. This is an assumption on the encoder, like the correctness of the whole encoding.
+
+χ is in the *fragment* if
+* (F1) no map has address values;
+* (F2) `sum` does not occur;
+* (F3) in ¬χ, no address existential lies in the scope of a universal quantifier, unless the
+  latter ranges over a finite domain independent of n (methods, booleans).
+
+Let k(χ) be the number of address fields, plus the number of address existentials of ¬χ,
+where an existential under a universal over a finite domain D counts |D| times, and the
+existentials of the two sides of a disjunction of ¬χ count only for the larger side (their
+witnesses can be shared). `Scanner.skolems` computes it in one pass over the formulas.
+
+**Lemma 7.2 (substructure).** Let χ be in the fragment and k = k(χ). If χ is not valid with
+n users, then it is not valid with n' users, for every n' with max(1, k) ≤ n' ≤ n.
+
+*Proof.* Let M be a structure with n users in which ¬χ holds. By (F3), Skolemization turns
+¬χ into a universal sentence ∀ȳ ψ, with ψ quantifier-free, at most k address constants (the
+address fields and the Skolem constants of the address existentials), and Skolem functions
+with values in the other sorts. Let D consist of F, the values of these constants (at most
+k users), and further users of M up to n' users in total. By (F1), every function symbol
+with values in Addr is a constant, whose value is in D. So the restriction M' of M to D
+(the other sorts unchanged) is a substructure of M, and M' ⊨ ∀ȳ ψ, since universal
+sentences hold in substructures. M' keeps null and the contracts, and `is_EOA` holds exactly
+outside F; so M' is a structure with n' users in which ¬χ holds. ∎
+
+**Theorem 7.3 (cutoff).** Let χ be in the fragment, and c ≥ max(1, k(χ)). If χ is valid
+with c users, then it is valid with every n ≥ c users.
+
+*Proof.* Lemma 7.2 with n' = c, by contraposition. ∎
+
+Validity with c users does not imply validity with fewer users. The parameterized mode only
+makes claims for n ≥ c.
+
+### 7.3 Sums as state variables
+
+**Lemma 7.4.** Let χ# be χ in which each `sum(m)` is a state variable σ_m (`ghost_sums`):
+free in the free state; σ_m := σ_m − m[k] + v at each assignment `m[k] = v` (a transfer
+keeps σ_balance); 0 for an unconstructed contract; the sum of the initial balances in the
+initial states. For each map m whose entries are all nonnegative by the premises
+(`forall u. m[u] >= 0` and `m[null] >= 0`, or the balance lemma), the premises of χ# also
+contain m[a] ≤ σ_m and m[a] + m[b] ≤ σ_m for all a ≠ b (`Checks.sum_axioms`, with the guard
+on construction of the candidates). If χ# is valid with n users, then χ is valid with n
+users.
+
+*Proof.* An instance of χ with n users is an instance of χ# with σ_m := Σ_a m[a]. The
+updates keep σ_m equal to the sum of the entries, at every level of a call (by induction on
+the levels; a revert restores both). The added premises hold when the entries are
+nonnegative, which the premises of the instance give. ∎
+
+χ# satisfies (F2), and the added premises are universal, so they do not change k. They
+matter: with the declared invariant `sum(funds) <= balance[Bank]`, bank `Liquidity` is
+proved for every n ≥ 2; without them, nothing relates σ_funds to the entries, and the
+counterexample to induction has `funds[u2] = 3 > balance[Bank] = 1`.
+
+### 7.4 Counterexamples
+
+**Lemma 7.5 (idle users).** Suppose that a trace of S_c reaches a state where all contracts
+are constructed and φ is false, and that no address variable of φ is universal in ¬φ
+(address quantifiers, and the address parameters of `args` variables and of `h()`;
+`Scanner.dual`). Then φ is false in a reachable state of S_n for every n ≥ c.
+
+*Proof.* Consider the trace of S_n with the same transactions, in which u_{c+1}, ..., u_n
+have initial balance 0 and send nothing. Each transaction reads and writes map entries only
+at addresses of A_c, so each state of the new trace extends the corresponding state of the
+old one with default values at the new users, and every sum is unchanged. Put ¬φ in negation
+normal form: its address quantifiers are existential. By induction on ¬φ, a subformula true
+in a state of S_c is true in its extension (for a modality, the transition from the
+extension is the extension of the transition). ∎
+
+### 7.5 The parameterized mode
+
+With `--parameterized` (strategy portfolio), for n users asked for:
+* the cutoff c of a file is the largest max(1, k(χ#)) of its checks (`Checks.cutoff`): the
+  step of each procedure, and each rule on a free state, with all the templates of the
+  invariant generator and the declared invariants as candidates. Houdini and the choice
+  of premises only remove candidates, which does not increase k: premises add their
+  counts, and the candidates after a call count for the largest one;
+* if the steps are in the fragment and c ≤ n, every task of a rule in the fragment uses c
+  users and ghost sums; a rule outside the fragment, or c > n, is checked as without the
+  option. The verdict says which;
+* `inductive` and `invariants` verdicts hold for every n' ≥ c (Thm. 7.3 and Lemma 7.4 for
+  every step of the final set of Houdini, which is then inductive with n' users, and for the
+  check of the rule);
+* a proof by Kind 2 on the transition system holds for c users only (its invariants, IC3
+  and k-induction are about c users), and is ignored if c < n;
+* a counterexample holds for every n' ≥ c if Lemma 7.5 applies; otherwise it holds for c
+  users only, and the outcome is unknown if c < n.
+
+For the step of procedure f, k(χ#) is the number of address fields, plus 1 for the sender,
+plus the address parameters of f, plus the largest number of address universals of a
+candidate (1 for the templates of Sect. 6), plus the address existentials of the declared
+invariants (as premises). For a rule, it is the number of address fields, plus the address
+universals of the rule, plus the latter term. On bank, c = 2 (the steps, and
+`No_frontrun_deposit`, which has two address universals).
+
+*Limits.* (1) Counterexamples are searched for with c users; one that needs more users is
+not found (registry `At_most_two` is unknown for every n). A BMC of depth d would need up
+to d(1 + p) + w users (p address parameters, w witnesses). (2) Rules such as additivity
+P1_true, `forall c1 c2 . exists c3 v12 v3 . forall addr ...`, are outside (F3). (3) With
+c = n, ghost sums are weaker than exact sums with n users, so a proof for exactly n users
+can be lost (registry `At_most_two` with n = 2).
+
+*Results* (10 s per rule; PROGRESS.md, 2026-10-14). On the 46 rules of seven regression
+files, the time is 62–71 s for n = 2, 3, 4 and 100 (normal mode: 71–78 s for n = 2, 3, 4,
+and 457 s with 23 rules decided for n = 100); 43 verdicts are correct for n ≥ 3, and three
+are unknown as expected (two counterexamples outside Lemma 7.5, one proof by Kind 2). On
+bank, the three rules proved with 2 users are proved for every n ≥ 2 in 15–16 s, for any n
+asked for; the normal mode with 100 users does not finish.

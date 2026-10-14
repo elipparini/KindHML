@@ -44,6 +44,10 @@ def main() -> int:
     ap.add_argument("--invariants_timeout", type=float, default=None,
                     help="time limit of the invariant phase, before the rules (default: 3 x"
                          " timeout; 0: no limit)")
+    ap.add_argument("--parameterized", action="store_true",
+                    help="check with the cutoff of the checks on free values, if it is at"
+                         " most n_participants; proofs then hold for every number of users"
+                         " from the cutoff on (DESIGN.md, Sect. 7)")
     ap.add_argument("--only_lus", action="store_true", help="only generate the Lustre files")
     ap.add_argument("--cex", action="store_true", help="print counterexamples")
     ap.add_argument("--solver", choices=("auto",) + SOLVERS, default="auto",
@@ -87,22 +91,30 @@ def main() -> int:
         invs = V.prove_invariants(program, args.n_of_participants, limit or None,
                                   context, mode=args.mode, expand=expand,
                                   invgen=not args.no_invgen,
-                                  user_invariants=not args.no_user_invariants)
+                                  user_invariants=not args.no_user_invariants,
+                                  parameterized=args.parameterized)
         print(f"{name} - {V.invariant_summary(invs)} [{time.time() - start:.1f}s]", flush=True)
     code = 0
     for rule in rules:
         tag = f"{name}_{rule.name}_{args.n_of_participants}_{timeout}"
         lus_path = os.path.join(args.out_lus, tag + ".lus")
         if args.only_lus:
+            users, ghost = args.n_of_participants, False
+            if args.parameterized:
+                users, ghost, _ = V.effective_users(context, program, users, args.mode, expand,
+                                                    not args.no_invgen,
+                                                    not args.no_user_invariants, rule)
             with open(lus_path, "w") as f:
-                f.write(V.lustre_for(program, rule, args.n_of_participants, args.mode, expand))
+                f.write(V.lustre_for(program, rule, users, args.mode, expand,
+                                     ghost_sums=ghost))
             print(f"{name} - {rule.name}: {lus_path}")
             continue
         outcome = V.verify(program, rule, args.n_of_participants, args.timeout or None,
                            mode=args.mode, expand=expand, lus_path=lus_path,
                            solver=args.solver, cex=args.cex, strategy=args.strategy,
                            context=context, invgen=not args.no_invgen,
-                           user_invariants=not args.no_user_invariants)
+                           user_invariants=not args.no_user_invariants,
+                           parameterized=args.parameterized)
         line = f"{name} - {outcome.describe()}"
         print(line, flush=True)
         if args.cex and outcome.status == "invalid" and outcome.result.counterexample:

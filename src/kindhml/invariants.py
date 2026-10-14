@@ -27,8 +27,10 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from . import lustre as L
 from . import syntax as S
 from .concrete import python_value, state_from_values
+from .cutoff import Cutoff, OutOfFragment, Scanner, check_program, nonnegative_maps
 from .encode_formula import FormulaEncoder
-from .encode_trans import ST, TX, Encoder, constructed_var, default_value, field_var
+from .encode_trans import (BALANCE, ST, TX, Encoder, constructed_var, default_value, field_var,
+                           ghost_var, key_field, zero)
 from .lustre_subst import eq
 from .model import NULL, System
 from .reference import FormulaEvaluator, Interpreter, Tx, default
@@ -37,9 +39,10 @@ StateFormula = Callable[[L.LExpr], L.LExpr]
 
 
 class Checks:
-    def __init__(self, program: S.Program, n_users: int, mode: str, expand: Sequence[str]):
+    def __init__(self, program: S.Program, n_users: int, mode: str, expand: Sequence[str],
+                 ghost_sums: bool = False):
         self.program = program
-        self.enc = Encoder(System.make(program, n_users))
+        self.enc = Encoder(System.make(program, n_users, ghost_sums))
         self.fenc = FormulaEncoder(self.enc, mode, tuple(expand))
         lemmas = [(n, (lambda st, e=e: self.fenc.inliner.run(e, {"s": st})))
                   for n, e in self.enc.lemmas()]
@@ -59,8 +62,72 @@ class Checks:
         system = self.enc.system
         return L.conj([L.op("=>", L.neg(L.proj(st, constructed_var(c.name))),
                             L.conj([eq(L.proj(st, field_var(c.name, f.name)),
-                                       default_value(f.type, system)) for f in c.fields]))
+                                       default_value(f.type, system)) for f in c.fields]
+                                   + [eq(L.proj(st, ghost_var(k)), zero(t))
+                                      for k, t in self.enc.ghosts.items()
+                                      if k != BALANCE and k[0] == c.name]))
                        for c in system.contracts if c.fields])
+
+    def sum_axioms(self, names: List[str], st: L.LExpr) -> L.LExpr:
+        """Parameterized mode, where sum(m) is a free state variable σ in a free state: for
+        each map m whose entries are all nonnegative by the premises `names`, each entry,
+        and each sum of two entries at distinct addresses, is at most σ (when all contracts
+        are constructed, as the candidates; for balance, always). These hold in every state
+        that satisfies `names` and where σ is the sum, so assuming them is sound; they are
+        universal over the addresses, so they do not change the cutoff (DESIGN.md, Sect. 7)."""
+        if not self.enc.ghosts:
+            return L.TRUE
+        formulas = [self.program.rule(n).formula for n in names if n not in self.axioms]
+        nonneg = nonnegative_maps(formulas)
+        constructed = L.conj([L.proj(st, constructed_var(c.name))
+                              for c in self.enc.system.contracts])
+        addrs = self.enc.system.addresses
+        out = []
+        for key in self.enc.ghosts:
+            if key == BALANCE:
+                if "_lemma_balances_nonnegative" not in names:
+                    continue
+                m, guard = L.proj(st, BALANCE), L.TRUE
+            elif key in nonneg:
+                m, guard = L.proj(st, field_var(*key)), constructed
+            else:
+                continue
+            sigma = L.proj(st, ghost_var(key))
+            entry = [L.proj(m, key_field(a)) for a in addrs]
+            bounds = [L.op("<=", x, sigma) for x in entry]
+            bounds += [L.op("<=", L.op("+", x, y), sigma)
+                       for i, x in enumerate(entry) for y in entry[i + 1:]]
+            out.append(L.op("=>", guard, L.conj(bounds)))
+        return L.conj(out)
+
+    def cutoff(self, rules: List[S.Rule]) -> Cutoff:
+        """The cutoffs of the checks (`cutoff.py`) with all the candidates as premises: the
+        step of each procedure, and each rule on a free state. Fewer premises or candidates
+        do not increase them: premises add their counts, and the candidates after a call
+        the largest one."""
+        system = self.enc.system
+        scan = Scanner(system)
+        names = [n for n in self.candidates if n not in self.axioms]
+        cands = [self.program.rule(n).formula for n in names]
+        try:
+            fields = check_program(system)
+            premise = fields + sum(scan.skolems(f, positive=False) for f in cands)
+            checks: Dict[str, int] = {}
+            conj: S.Expr = S.BoolLit(True)
+            for f in cands:
+                conj = S.BinOp("&&", conj, f)
+            for c, p in system.methods:
+                after = self._after(c, p, self._guard(conj))
+                checks[f"step of {c.name}.{p.name}"] = premise + scan.skolems(after, True)
+        except OutOfFragment as e:
+            return Cutoff(None, str(e))
+        outside: Dict[str, str] = {}
+        for r in rules:
+            try:
+                checks[f"rule {r.name}"] = premise + scan.skolems(r.formula, True)
+            except OutOfFragment as e:
+                outside[r.name] = str(e)
+        return Cutoff(max([1] + list(checks.values())), "", checks, outside)
 
     def _program(self) -> L.Program:
         """Types and functions of the encoding, without the main node."""
@@ -92,7 +159,8 @@ class Checks:
         for n in names:
             conj = S.BinOp("&&", conj, self.program.rule(n).formula)
         s = L.Var("s")
-        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s)])
+        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s),
+                          self.sum_axioms(self.axioms + names, s)])
         out = []
         for c, p in self.enc.system.methods:
             after = self.fenc.state_formula(self._after(c, p, self._guard(conj)), s)
@@ -167,7 +235,8 @@ class Checks:
         when the conjunction of `step_conj_checks` is not decided, or its counterexample does
         not identify a candidate."""
         prog, s = self._program(), L.Var("s")
-        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s)])
+        premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s),
+                          self.sum_axioms(self.axioms + names, s)])
         props, about = [], {}
         for c, p in self.enc.system.methods:
             if only is not None and (c.name, p.name) != (only[0].name, only[1].name):
@@ -224,7 +293,8 @@ class Checks:
         proved in 1 s as one property, and its 2 cases are unknown after 20 s in one run
         (0.6 s each in separate runs)."""
         prog, s = self._program(), L.Var("s")
-        prop = L.op("=>", self._conj(invariants, s), self._property(rule, s))
+        prop = L.op("=>", L.conj([self._conj(invariants, s), self.sum_axioms(invariants, s)]),
+                    self._property(rule, s))
         parts = cases(prop) if split else [prop]
         names = [rule.name] if len(parts) == 1 else [f"{rule.name}__{i}"
                                                       for i in range(len(parts))]

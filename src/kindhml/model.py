@@ -53,16 +53,17 @@ class System:
     program: S.Program               # resolved
     n_users: int
     uses_block_num: bool
+    ghost_sums: bool = False         # sum(m) is a state variable (parameterized mode)
 
     @staticmethod
-    def make(program: S.Program, n_users: int) -> "System":
+    def make(program: S.Program, n_users: int, ghost_sums: bool = False) -> "System":
         if n_users < 1:
             raise KindHMLError("the number of participants must be at least 1")
         users = {f"u{i}" for i in range(1, n_users + 1)}
         for c in program.contracts:
             if c.name in users or c.name == NULL:
                 raise KindHMLError(f"contract name '{c.name}' clashes with an address name", c.pos)
-        return System(program, n_users, _uses_block_num(program))
+        return System(program, n_users, _uses_block_num(program), ghost_sums)
 
     @property
     def contracts(self) -> Tuple[S.Contract, ...]:

@@ -7,7 +7,9 @@ Lustre representation (see DESIGN.md, Sect. 2):
 * maps `address => τ` (and `balance`) are records with one field `k_a` per address a;
 * the level i of a procedure body is the local variable `l<i>` (level 0 is the input `s`);
 * `Trans_f` is the function `trans_<C>_<f>`, `Trans_C` is `trans_<C>`, `Trans` is `trans`.
-  Kind 2 inlines these functions, which yields the functions χ_v of the paper.
+  Kind 2 inlines these functions, which yields the functions χ_v of the paper;
+* with `System.ghost_sums` (parameterized mode, DESIGN.md, Sect. 7), `sum(m)` is a state
+  variable `sum_<m>`, updated with the entries of m, instead of the sum of the entries.
 """
 
 from __future__ import annotations
@@ -58,6 +60,34 @@ def constructed_var(contract: str) -> str:
 
 def param_var(contract: str, proc: str, name: str) -> str:
     return f"{contract}_{proc}_{name}"
+
+
+def map_key(e: S.Expr):
+    """The map of `sum(e)`: BALANCE, or (contract, field)."""
+    return BALANCE if isinstance(e, S.Balance) else (e.contract, e.name)
+
+
+def ghost_var(key) -> str:
+    """The state variable holding the sum of the map `key` (parameterized mode)."""
+    return f"sum_{BALANCE}" if key == BALANCE else f"sum_{field_var(*key)}"
+
+
+def summed_maps(program: S.Program) -> List:
+    """The maps m such that sum(m) occurs in the program (contracts and rules), in order."""
+    out: List = []
+
+    def visit(x):
+        if isinstance(x, S.SumMap) and map_key(x.map) not in out:
+            out.append(map_key(x.map))
+        if isinstance(x, tuple):
+            for y in x:
+                visit(y)
+        elif hasattr(x, "__dataclass_fields__"):
+            for n in x.__dataclass_fields__:
+                visit(getattr(x, n))
+    visit(program.contracts)
+    visit(program.rules)
+    return out
 
 
 def base_type(t: S.Type) -> str:
@@ -130,6 +160,12 @@ class Encoder:
     def __init__(self, system: System):
         self.system = system
         self.amount = system.program.balance_type      # of balances, values and amounts
+        # parameterized mode: the maps whose sum is a state variable, with its number type
+        self.ghosts: Dict[object, S.Type] = {}
+        if system.ghost_sums:
+            for key in summed_maps(system.program):
+                t = self.amount if key == BALANCE else system.field_type(*key).value
+                self.ghosts[key] = S.INT if t == S.UINT else t
 
     # ------------------------------------------------------------ variables
 
@@ -141,6 +177,7 @@ class Encoder:
                    for c in self.system.contracts for f in c.fields]
         if self.system.uses_block_num:
             fields.append((BLOCK, "int"))
+        fields += [(ghost_var(k), base_type(t)) for k, t in self.ghosts.items()]
         return fields
 
     def tx_fields(self) -> List[Tuple[str, str]]:
@@ -200,6 +237,12 @@ class Encoder:
         if isinstance(e, S.IsEOA):
             return L.call("is_eoa", rec(e.arg))
         if isinstance(e, S.SumMap):
+            if map_key(e.map) in self.ghosts:
+                return L.proj(s, ghost_var(map_key(e.map)))
+            if self.system.ghost_sums:
+                # the sum over the n users would make the cutoff unsound (DESIGN.md, Sect. 7)
+                raise KindHMLError("sum(...) of a map without its state variable (the formula"
+                                   " is not in the program of the encoder)", e.pos)
             m = (L.proj(s, BALANCE) if isinstance(e.map, S.Balance)
                  else L.proj(s, field_var(e.map.contract, e.map.name)))
             terms = [L.proj(m, key_field(a)) for a in self.system.addresses]
@@ -273,7 +316,12 @@ class Encoder:
                 (key_field(a), L.ite(addr_is(a, key), value,
                                      L.Proj(old, key_field(a))))
                 for a in self.system.addresses])
-            return self.update(s, {name: new})
+            changes = {name: new}
+            if (stmt.contract, stmt.name) in self.ghosts:
+                # sum(m') = sum(m) - m[key] + value
+                g = ghost_var((stmt.contract, stmt.name))
+                changes[g] = L.op("+", L.op("-", L.Proj(s, g), self.get(vt, old, key)), value)
+            return self.update(s, changes)
         if isinstance(stmt, S.Send):
             return self.send(stmt, s, t)
         if isinstance(stmt, S.SetConstructed):
@@ -284,7 +332,7 @@ class Encoder:
 
     def send(self, stmt: S.Send, s: L.LExpr, t: L.LExpr) -> L.LExpr:
         """ITE(send_enabled^i(e0,e1,e2), revert^{i+1} = false ∧ send^i(e0,e1,e2),
-        revert^{i+1} = true)."""
+        revert^{i+1} = true). A transfer keeps sum(balance) (e0 != e1)."""
         src, dst, amount = (self.expr(x, s, t) for x in (stmt.src, stmt.dst, stmt.amount))
         bal = L.Proj(s, BALANCE)
         enabled = L.conj([L.op(">=", self.get(self.amount, bal, src), amount),
@@ -404,6 +452,13 @@ class Encoder:
                 values[field_var(c.name, f.name)] = default_value(f.type, self.system)
         if self.system.uses_block_num:
             values[BLOCK] = L.Var("iblock")
+        for key, t in self.ghosts.items():
+            # the sums of the initial maps: the balances are given, the fields are 0
+            terms = ([L.Proj(L.Var("ib"), key_field(a)) for a in self.system.addresses]
+                     if key == BALANCE else [zero(t)])
+            values[ghost_var(key)] = terms[0]
+            for x in terms[1:]:
+                values[ghost_var(key)] = L.op("+", values[ghost_var(key)], x)
         return L.Function("init", self.init_inputs(), [("r", ST)],
                           equations=[("r", L.record(ST, [(n, values[n])
                                                          for n, _ in self.state_fields()]))],

@@ -16,9 +16,11 @@ from .encode_formula import FormulaEncoder
 from .encode_trans import Encoder
 from .errors import KindHMLError
 from .concrete import describe_tx, state_literal
+from .cutoff import Cutoff, Scanner
 from .fuzz import Fuzzer
 from .invariants import Checks, describe_state, state_values
-from .invgen import generate as generate_invariants, minimize as minimize_invariants
+from .invgen import (candidates as invariant_templates, generate as generate_invariants,
+                     minimize as minimize_invariants)
 from .model import System
 from .typecheck import check
 from . import syntax as S
@@ -104,13 +106,15 @@ LEMMAS = os.environ.get("KINDHML_LEMMAS", "1") != "0"
 
 
 def lustre_for(program: S.Program, rule: S.Rule, n_users: int, mode: str = DEFAULT_MODE,
-               expand=DEFAULT_EXPAND, lemmas: bool = LEMMAS) -> str:
+               expand=DEFAULT_EXPAND, lemmas: bool = LEMMAS, ghost_sums: bool = False) -> str:
     """The Lustre program checking `rule`: the transition system (Init, Trans) and the
     property (∧_C constructed_C) → Φ(φ). With `lemmas`, also quantifier-free invariants of
     every system (balances are nonnegative), which Kind 2 proves first and then uses to
     strengthen the induction for the rule (its invariant generator does not work on
-    quantified properties)."""
-    enc = Encoder(System.make(program, n_users))
+    quantified properties). With `ghost_sums`, sum(m) is a state variable."""
+    if rule not in program.rules:
+        program = replace(program, rules=program.rules + (rule,))   # for its sums
+    enc = Encoder(System.make(program, n_users, ghost_sums))
     prog, main = enc.program()
     if lemmas:
         main.properties += enc.lemmas()
@@ -128,6 +132,7 @@ class Outcome:
     cti: str = ""                    # a free state refuting the rule, possibly unreachable
     memory_killed: bool = False
     trace: str = ""                  # method fuzz: the transactions reaching the counterexample
+    scope: str = ""                  # parameterized mode: the numbers of users of the verdict
 
     @property
     def status(self) -> str:
@@ -149,7 +154,9 @@ class Outcome:
         what = self.result.describe() if self.result else "; ".join(self.errors) or "no result"
         how = "/".join(x for x in (self.method, self.solver) if x)
         how = f" [{how}]" if how else ""
-        line = f"{self.rule.name}: {what}{how} (ground truth: {self.groundtruth_check()})"
+        scope = f" ({self.scope})" if self.scope else ""
+        line = (f"{self.rule.name}: {what}{how}{scope} (ground truth:"
+                f" {self.groundtruth_check()})")
         if self.trace:
             line += f"\n    counterexample reached by: {self.trace}"
         if self.cti and self.status not in ("valid", "invalid"):
@@ -172,7 +179,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
            extra_args: Optional[List[str]] = None, solver: str = "auto",
            cex: bool = False, strategy: str = "portfolio",
            context: Optional[dict] = None, invgen: bool = True,
-           user_invariants: bool = True) -> Outcome:
+           user_invariants: bool = True, parameterized: bool = False) -> Outcome:
     """Check one rule within `timeout` seconds (None or 0: no limit, the search goes on until
     there is a verdict). With `cex`, an invalid rule comes with a counterexample (slower).
 
@@ -189,20 +196,57 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
       4. "fuzz": random testing, confirmed exactly (`fuzz.py`);
       5. "kind2": `kind2_search`, with BMC and k-induction only after the memory limit
          killed a solver.
-    An invariant proved inductive (task 1) is valid ("inductive")."""
-    lustre = lustre_for(program, rule, n_users, mode, expand)
+    An invariant proved inductive (task 1) is valid ("inductive").
+
+    With `parameterized` (strategy "portfolio"; DESIGN.md, Sect. 7), if the checks have a
+    cutoff c <= n_users, every task uses c users and sums are state variables
+    (`effective_users`). A proof of tasks 1-2 then holds for every number of users n >= c,
+    and so does a counterexample if the rule has no address variable universal in its
+    negation (`Scanner.dual`; the other users stay idle); otherwise the counterexample says
+    nothing about n_users > c, and the outcome is unknown. A proof of task 5 holds only for
+    c users, and is ignored if c < n_users."""
+    if context is None:
+        context = {}
+    users, ghost, cut = (effective_users(context, program, n_users, mode, expand, invgen,
+                                         user_invariants, rule)
+                         if parameterized and strategy == "portfolio" else (n_users, False, None))
+    reduced = users < n_users
+    lustre = lustre_for(program, rule, users, mode, expand, ghost_sums=ghost)
     if lus_path:
         with open(lus_path, "w") as f:
             f.write(lustre)
     deadline = time.time() + timeout if timeout else None
     if strategy == "kind2":
         return kind2_search(rule, lustre, timeout or None, extra_args, solver, cex)
-    if context is None:
-        context = {}
-    invs = _entry(context, program, n_users, mode, expand, invgen, user_invariants)
+    dual = ghost and Scanner(System.make(program, users)).dual(rule.formula)
+
+    def scoped(o: Outcome) -> Outcome:
+        """The outcome with the numbers of users for which it holds (parameterized mode)."""
+        if cut is None:
+            return o
+        if not ghost:
+            why = (f"cutoff {cut.value} > {n_users}" if cut.of_rule(rule.name) is not None
+                   else f"no cutoff: {cut.outside.get(rule.name) or cut.reason}")
+            o.scope = f"with {users} users; {why}"
+            return o
+        if o.status == "valid":
+            o.scope = (f"for every n >= {users} users" if o.method in ("inductive", "invariants")
+                       else f"for {users} users")
+        elif o.status == "invalid" and not dual:
+            o.scope = f"counterexample with {users} users, for every n >= {users}"
+        elif o.status == "invalid" and reduced:
+            o = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), o.errors, o.solver,
+                        o.method, o.cti, trace=o.trace,
+                        scope=f"a counterexample with {users} users does not extend to"
+                              f" {n_users} users")
+        else:
+            o.scope = f"with {users} users"
+        return o
+
+    invs = _entry(context, program, users, mode, expand, invgen, user_invariants, ghost)
     nonlinear = is_nonlinear(program)
     start, budget = time.time(), FIRST_BUDGET
-    proof_open, target, engines = True, None, extra_args
+    proof_open, target, engines, kind2_open = True, None, extra_args, True
     premises: List[List[str]] = []
     attempts: Optional[List[tuple]] = None
     last = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), [])
@@ -212,15 +256,17 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
             # searched for by "reach" in the same round
             if task == "invariants" and invs.proved is not None:
                 if rule.invariant and rule.name in invs.proved:
-                    return _valid(rule, "inductive", time.time() - start)
+                    return scoped(_valid(rule, "inductive", time.time() - start))
                 continue
             if task == "proof" and (invs.proved is None or not proof_open):
                 continue
             if task == "reach" and not target:
                 continue
+            if task == "kind2" and not kind2_open:
+                continue
             left = None if deadline is None else deadline - time.time()
             if left is not None and left <= 0:
-                return last
+                return scoped(last)
             b = budget if left is None else min(budget, left)
             if task == "kind2":
                 # With a time limit and linear arithmetic, Kind 2 gets all the time left: it
@@ -233,7 +279,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
             if task == "invariants":
                 invs.attempt(b)
                 if invs.proved is not None and rule.invariant and rule.name in invs.proved:
-                    return _valid(rule, "inductive", time.time() - start)
+                    return scoped(_valid(rule, "inductive", time.time() - start))
             elif task == "proof":
                 # forms to try: for each premise, from the smallest, the rule as one property
                 # and split into cases; a counterexample under the last premise (the
@@ -252,7 +298,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     lus, names = invs.checks.rule_check(rule, premises[i], split)
                     status, refuted, s = _free_run(lus, names, b)
                     if status == "valid":
-                        return _valid(rule, "invariants", time.time() - start, s)
+                        return scoped(_valid(rule, "invariants", time.time() - start, s))
                     if status == "invalid":
                         attempts = [a for a in attempts if a[0] != i]
                         if i == len(premises) - 1:
@@ -277,20 +323,24 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     if status == "invalid":
                         res = kind2.PropertyResult(rule.name, "invalid", len(txs), "fuzz",
                                                    time.time() - start)
-                        return Outcome(rule, res, [], s, "fuzz",
-                                       trace="; ".join(describe_tx(tx) for tx in txs))
+                        return scoped(Outcome(rule, res, [], s, "fuzz",
+                                              trace="; ".join(describe_tx(tx) for tx in txs)))
             elif task == "reach":
                 lus = invs.checks.reach_check(target)
                 out = kind2.run(lus, b, solver="z3", extra_args=["--enable", "BMC"], cex=cex)
                 res = next((p for p in out.properties if p.name == "unreachable"), None)
                 if res and res.status == "invalid":
                     res.name, res.time = rule.name, time.time() - start
-                    return Outcome(rule, res, out.errors, "z3", "reach", last.cti)
+                    return scoped(Outcome(rule, res, out.errors, "z3", "reach", last.cti))
             else:
                 o = kind2_search(rule, lustre, b, engines, solver, cex)
+                if o.status == "valid" and reduced:
+                    # a proof for `users` users only (Kind 2's invariants name the users)
+                    kind2_open = False
+                    continue
                 if o.status in ("valid", "invalid"):
                     o.method = "kind2"
-                    return o
+                    return scoped(o)
                 if o.memory_killed and engines is None:
                     engines = LIGHT_ENGINES
                 o.method, o.cti = "kind2", last.cti
@@ -299,25 +349,55 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
 
 
 def _entry(context: dict, program: S.Program, n_users: int, mode: str, expand,
-           invgen: bool, user_invariants: bool) -> "_Invariants":
+           invgen: bool, user_invariants: bool, ghost_sums: bool = False) -> "_Invariants":
     """The invariants of `program` in `context` (created on first use)."""
-    key = (id(program), n_users, mode, tuple(expand), invgen, user_invariants)
+    key = (id(program), n_users, mode, tuple(expand), invgen, user_invariants, ghost_sums)
     if key not in context:
         context[key] = _Invariants.make(program, n_users, mode, expand, invgen,
-                                        user_invariants)
+                                        user_invariants, ghost_sums)
     return context[key]
+
+
+def effective_users(context: dict, program: S.Program, n_users: int, mode: str, expand,
+                    invgen: bool, user_invariants: bool,
+                    rule: Optional[S.Rule] = None) -> Tuple[int, bool, Cutoff]:
+    """Parameterized mode: the number of users of the checks, whether sums are state
+    variables, and the cutoff c of the checks on free values (`Checks.cutoff`, with all the
+    templates of `invgen` and the invariants of the file as candidates: those that survive
+    give smaller cutoffs). If c <= n_users: c users, with sums as state variables; otherwise
+    (or without a cutoff, for the file or for `rule`): n_users, as without parameterized
+    mode."""
+    key = ("cutoff", id(program), invgen, user_invariants)
+    if key not in context:
+        rules = [r for r in program.rules if user_invariants or not r.invariant]
+        templates = invariant_templates(program) if invgen else []
+        extended = S.Program(program.contracts, tuple(rules) + tuple(templates),
+                             program.balance_type)
+        context[key] = Checks(extended, 1, mode, expand, ghost_sums=True).cutoff(tasks(program))
+    cut = context[key]
+    c = cut.value if rule is None else cut.of_rule(rule.name)
+    if c is None or n_users < c:
+        return n_users, False, cut
+    return c, True, cut
 
 
 def prove_invariants(program: S.Program, n_users: int, timeout: Optional[float],
                      context: dict, mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND,
-                     invgen: bool = True, user_invariants: bool = True) -> "_Invariants":
+                     invgen: bool = True, user_invariants: bool = True,
+                     parameterized: bool = False) -> "_Invariants":
     """The invariant phase of a file, before its rules, with its own time limit (None: no
     limit): candidates (declared and generated) and Houdini, in passes with doubling
     budgets, until the inductive subset is found. The rules of the file then use it through
     `context`; if the phase does not finish, `verify` goes on with it in its rounds. Without
     a separate phase, Houdini shared the time of each rule with the other tasks, and on the
-    lending protocol it did not finish within the 11 rules of 60 s."""
-    invs = _entry(context, program, n_users, mode, expand, invgen, user_invariants)
+    lending protocol it did not finish within the 11 rules of 60 s. With `parameterized`,
+    with the number of users of `effective_users`."""
+    cut, ghost = None, False
+    if parameterized:
+        n_users, ghost, cut = effective_users(context, program, n_users, mode, expand, invgen,
+                                              user_invariants)
+    invs = _entry(context, program, n_users, mode, expand, invgen, user_invariants, ghost)
+    invs.cutoff = cut
     deadline = time.time() + timeout if timeout else None
     b = FIRST_BUDGET
     while invs.proved is None:
@@ -449,6 +529,7 @@ class _Invariants:
         self.generated = generated or set()     # names of the generated candidates
         self.keys: Dict[str, tuple] = {}        # their template keys (invgen.minimize)
         self.fuzzer = Fuzzer(checks.enc.system)
+        self.cutoff: Optional[Cutoff] = None       # parameterized mode (`effective_users`)
         self.candidates = [n for n in checks.candidates if n not in checks.axioms]
         self.proved: Optional[List[str]] = None if self.candidates else list(checks.axioms)
         self.dropped: Dict[str, str] = {}
@@ -460,7 +541,7 @@ class _Invariants:
 
     @staticmethod
     def make(program: S.Program, n_users: int, mode: str, expand, invgen: bool = True,
-             user_invariants: bool = True) -> "_Invariants":
+             user_invariants: bool = True, ghost_sums: bool = False) -> "_Invariants":
         """The candidates: the invariants of the file (if `user_invariants`) and, with
         `invgen`, the generated ones that hold in the reachable states of the fuzzer."""
         rules = [r for r in program.rules if user_invariants or not r.invariant]
@@ -471,7 +552,8 @@ class _Invariants:
                 program, Fuzzer(System.make(program, n_users)), INVGEN_SECONDS)
         extended = S.Program(program.contracts, tuple(rules) + tuple(generated),
                              program.balance_type)
-        invs = _Invariants(Checks(extended, n_users, mode, expand), {r.name for r in generated})
+        invs = _Invariants(Checks(extended, n_users, mode, expand, ghost_sums),
+                           {r.name for r in generated})
         invs.keys = {r.name: keys[r.name] for r in generated}
         return invs
 
@@ -564,14 +646,18 @@ class _Invariants:
 
 
 def invariant_summary(invs: "_Invariants") -> str:
-    """One line: how many candidates (declared, generated) were proved, and dropped."""
+    """One line: how many candidates (declared, generated) were proved, and dropped; in
+    parameterized mode, also the cutoff and the number of users of the checks."""
+    users = ""
+    if invs.cutoff is not None:
+        users = f"; {invs.cutoff.describe()}, checks with {invs.checks.enc.system.n_users} users"
     if invs.proved is None:
         return (f"invariants: not proved within the time ({len(invs.candidates)} candidates"
-                f" left, {len(invs.dropped)} dropped)")
+                f" left, {len(invs.dropped)} dropped){users}")
     proved = [n for n in invs.proved if n not in invs.checks.axioms]
     gen = sum(1 for n in proved if n in invs.generated)
     return (f"invariants: {len(proved)} proved ({len(proved) - gen} declared, {gen}"
-            f" generated), {len(invs.dropped)} dropped")
+            f" generated), {len(invs.dropped)} dropped{users}")
 
 
 def invariant_report(context: dict) -> List[str]:
@@ -579,6 +665,8 @@ def invariant_report(context: dict) -> List[str]:
     number of candidates dropped."""
     lines = []
     for invs in context.values():
+        if not isinstance(invs, _Invariants):
+            continue                        # a cutoff (`effective_users`)
         if invs.proved is None:
             lines.append("invariants: not proved within the time")
             continue

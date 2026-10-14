@@ -54,6 +54,9 @@ Options:
 - `--print_invariants`: print the invariants proved (declared and generated).
 - `--invariants_timeout`: time limit of the invariant phase, which runs once before the
   rules (default: 3 times `timeout`).
+- `--parameterized`: if the checks on free values have a cutoff c <= `n_participants`, run
+  every check with c users, and report for which numbers of users each verdict holds (a
+  proof by invariants: every n >= c). See `DESIGN.md`, Sect. 7.
 
 Each rule's Lustre file is saved in `out_lus/<contract>_<Rule>_<n>_<timeout>.lus`, and its
 verdict in `out_results/<contract>_<Rule>_<n>_<timeout>.out`. The verdict is compared with the

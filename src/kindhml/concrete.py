@@ -8,7 +8,7 @@ from typing import Dict
 from . import lustre as L
 from . import syntax as S
 from .encode_trans import (BALANCE, BLOCK, BLOCKS, REVERT, Encoder, addr_const, constructed_var,
-                           field_var, key_field, map_type, param_var, proc_const)
+                           field_var, ghost_var, key_field, map_type, param_var, proc_const)
 from .model import System
 from .reference import State, Tx, initial_state
 
@@ -32,6 +32,9 @@ def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
         for f in c.fields:
             values[field_var(c.name, f.name)] = value_literal(st.fields[(c.name, f.name)],
                                                               f.type, system)
+    for key, t in enc.ghosts.items():           # parameterized mode: the exact sums
+        m = st.balance if key == BALANCE else st.fields[key]
+        values[ghost_var(key)] = value_literal(sum(m.values()), t, system)
     return L.record("St", [(n, values[n]) for n, _ in enc.state_fields()])
 
 
