@@ -242,7 +242,8 @@ generates them from templates over the fields of the contracts: signs (`f >= 0`,
 (`(f > 0) == (g > 0)`, `f > 0 -> g > 0`), holders (`∀u. !is_EOA(u) -> m[u] == 0`,
 `m[null] == 0`; address quantifiers exclude null, so `m[null]` needs its own templates, or
 `sum(m) == f` does not bound the entries of a free state), totals (`sum(m) == f`,
-`sum(m) <= f`, `∀u. m[u] <= f`), definitions (`G -> f == e` and `G && d != 0 -> f * d == e'`
+`sum(m) <= f`, `∀u. m[u] <= f`), reserves (`sum(m) == balance[C]`, `sum(m) <= balance[C]`
+for each contract C: what the users can claim is held by C), definitions (`G -> f == e` and `G && d != 0 -> f * d == e'`
 for the assignments `f = e` and `f = e' / d` under the conditions G of the enclosing ifs),
 and `a != null` for address fields. `sum(m)` is a new built-in (also for users): the sum of
 m over all addresses, finite (A1). The candidates are written as source text and
@@ -445,8 +446,8 @@ the levels; a revert restores both). The added premises hold when the entries ar
 nonnegative, which the premises of the instance give. ∎
 
 χ# satisfies (F2), and the added premises are universal, so they do not change k. They
-matter: with the declared invariant `sum(funds) <= balance[Bank]`, bank `Liquidity` is
-proved for every n ≥ 2; without them, nothing relates σ_funds to the entries, and the
+matter: with the invariant `sum(funds) <= balance[Bank]` (declared, or generated as a
+reserve, Sect. 6), bank `Liquidity` is proved for every n ≥ 2; without them, nothing relates σ_funds to the entries, and the
 counterexample to induction has `funds[u2] = 3 > balance[Bank] = 1`.
 
 ### 7.4 Counterexamples
@@ -534,6 +535,15 @@ so C is inductive in S_n; it holds in the initial states (no contract is constru
 it holds in every reachable state. The check of φ is valid with n users for the same
 reasons; so every reachable state, which satisfies C', satisfies φ. ∎
 
+A proof on the transition system with N users (Kind 2) transfers to fewer users only.
+
+**Corollary 7.8.** Suppose that need(¬φ) = 0, and that φ holds in the reachable states of
+S_N where all contracts are constructed. Then the same holds in S_m for every m with
+1 ≤ m ≤ N.
+
+*Proof.* A reachable state of S_m where all contracts are constructed and φ is false gives
+one in S_N, by Lemma 7.5 with c = m and n = N. ∎
+
 With `--parameterized` (strategy portfolio), for n users asked for:
 * `Checks.cutoff` bounds the counts from above, with all the templates of the invariant
   generator and the declared invariants as candidates: Houdini and the choice of premises
@@ -558,8 +568,17 @@ With `--parameterized` (strategy portfolio), for n users asked for:
   get CONFIRM_SECONDS (10 s) each, also after the time limit of the rule. Otherwise the
   counterexample holds for m users only; if m < n, the other searches go on, and the
   outcome is unknown if none decides;
-* a proof by Kind 2 on the transition system holds for N users only (its invariants, IC3
-  and k-induction are about N users), and is ignored if N < n.
+* a proof by Kind 2 on the transition system with m users holds for m users (its
+  invariants, IC3 and k-induction are about m users), and for every n' ≤ m if
+  need(¬φ) = 0 (Cor. 7.8). Kind 2 starts with N users; after a proof with m < n users, it
+  goes on with m + 1 users, up to n. Meanwhile the outcome is unknown, "true up to m users"
+  (ground truth `OK-up to m users`), like "true up to k steps" for BMC; if need(¬φ) > 0,
+  "true for N to m users". The scope gives what the run with m + 1 users reached ("true up
+  to k steps", or "no verdict"). A proof with n users gives the verdict valid; a
+  counterexample with m + 1 users is handled as above (it extends to n if Lemma 7.5 or
+  7.6 applies). After the first proof, the other searches for counterexamples stop: one
+  with m' ≤ m users that extends to every n' ≥ m' would extend to m. The check of the rule
+  on a free state goes on while it is open (it may prove φ for every n' ≥ max(c_H, u)).
 
 For the step of procedure f, k(χ#) is the number of address fields, plus 1 for the sender,
 plus the address parameters of f, plus the largest number of address universals of a

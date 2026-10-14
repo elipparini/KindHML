@@ -446,6 +446,61 @@ Results (100 users asked for; data in `runs/local-20261014-1532-idle2` and
   are unknown: their proofs with 2 users come from Kind 2 on the transition system, which do
   not transfer, and the checks on free states lack invariants.
 
+## Done (2026-10-14): reserve templates; Kind 2 with more users (with the user)
+
+- **Reserve templates** (`invgen.py`; DESIGN.md, Sect. 6): `sum(m) == balance[C]` and
+  `sum(m) <= balance[C]` for each numeric map m and contract C. On bank (parameterized, 5
+  users asked for, 60 s per rule), Houdini proves `sum(funds) <= balance[Bank]` and the
+  four rules are proved for every n >= 2 in 5.5 s in total (`Liquidity` was unknown).
+- **Proofs by Kind 2 with fewer users** (DESIGN.md, Sect. 7.5, Cor. 7.8). A proof by Kind 2
+  with m users holds for every n <= m if need(¬φ) = 0 (contrapositive of Lemma 7.5);
+  otherwise for m only. It was ignored when m = N < n; now the outcome is unknown, "true up
+  to m users" (ground truth `OK-up to m users`), and Kind 2 goes on with m + 1 users, up to
+  n. The other searches for counterexamples stop after the first such proof (none they
+  find would extend to n). Results (parameterized mode):
+  - bank `Liquidity`, 5 users asked for, 60 s, before the reserve templates: "unknown, true
+    up to 2 users" in 36 s (before: "unknown" after 64 s; Kind 2 had proved it with 2 users
+    in 21 s). With `--no_invgen`, 4 users, 150 s: true up to 2 users; with 3 users, Kind 2
+    reaches 5 steps;
+  - registry `At_most_two` (`count <= 2`), 3 or 5 users asked for: invalid, "counterexample
+    with 3 users, for every n >= 3; true up to 2 users", in 25-27 s (before: unknown). Test:
+    `tests/test_cutoff.py::test_kind2_with_more_users`.
+
+- **Status (2026-10-14, interrupted; committed with the open issue below).** `tests/test_cutoff.py`: 74 passed.
+  Full suite (`-m "not slow"`, 22 min): 8 failed. Rerun one by one, against HEAD (70d8b1d):
+  - `test_trans_kind2[lending*]` (4): the Kind 2 memory limit (1016 MB) killed a process;
+    the test uses neither `verify` nor `invgen`, so unrelated to this change (not rerun);
+  - `test_regression[calls-Pay_zero_reverts]`: passes on rerun (on both trees);
+  - `test_regression[swap_pool-Inv]`, `[swap_pool-Swap_reversibility]`: fail on HEAD too
+    (unknown within the budget); with this change, "true up to 3 / 2 steps";
+  - `test_invariants.py::test_portfolio_on_the_swap_pool`: status "error" with this change,
+    "unknown" on HEAD (expected "valid" in both). **To investigate first**: possibly the
+    reserve templates (more candidates on swap_pool), or an error of Kind 2.
+  Next: investigate the error above; rerun the regressions in parameterized mode (100 users)
+  and the use cases (AMM, lending: time of the invariant phase with the new templates).
+
+## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
+
+- **Invariant generation from the literature.** The generator is a fixed list of templates
+  (Sect. 6). To study (references from memory, to check): template-based generation with
+  Farkas' lemma (Colón, Sankaranarayanan, Sipma, CAV 2003); learning from examples and
+  counterexamples (ICE, Garg et al., CAV 2014); dynamic detection (Daikon), and its uses
+  for smart contracts (InvCon, Trace2Inv, SmartInv); for parameterized systems, invariants
+  computed on a small instance and generalized to quantified ones (invisible invariants,
+  Pnueli, Ruah, Zuck, TACAS 2001; I4, Ma et al., SOSP 2019; IC3PO, Goel and Sakallah,
+  2021; DistAI, Yao et al., OSDI 2021). The last group fits the parameterized mode: Kind 2's
+  invariants with N users (`--print_invs`) could be generalized over the users and proved
+  for every n by Houdini with a cutoff.
+- **A smarter choice of the numbers of users for Kind 2.** Kind 2 now tries N, N + 1, ...,
+  n in turn. If need(¬φ) = 0, the numbers of users for which φ holds form an initial
+  segment {1, ..., T} (Cor. 7.8 and Lemma 7.5): one proof with m users gives every n <= m,
+  and one counterexample with m users every n >= m. So T can be bracketed by jumps (e.g.
+  N, N + 1, N + 2, then n directly, or doubling) and then found by bisection, or several
+  numbers of users can be tried by parallel jobs. Kind 2's cost grows with the number of
+  users (the encoding grows linearly or faster, Sect. "3 and 4 participants"), which a
+  strategy must weigh. If need(¬φ) > 0, there is no such monotonicity, and each number of
+  users needs its own run.
+
 ## Planned (later, agreed 2026-10-14): k-induction with a cutoff depending on k
 
 Goal: proofs on the transition system that hold for every n ≥ c, which Kind 2's proofs

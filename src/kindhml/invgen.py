@@ -12,6 +12,8 @@ of the contracts (f, g numeric fields, m mappings to numbers, c constants of the
 * holders:      forall u. !is_EOA(u) -> m[u] == 0         (only users hold m);
                 m[null] == 0;  m[null] >= 0              (quantifiers exclude null)
 * totals:       sum(m) == f;  sum(m) <= f;  forall u. m[u] <= f
+* reserves:     sum(m) == balance[C];  sum(m) <= balance[C], for a contract C (the funds
+                that the users can claim are held by C)
 * definitions:  G -> f == e, for an assignment f = e under the conditions G of the
                 enclosing ifs, with e over fields and constants; G && d != 0 -> f * d == e',
                 for f = e' / d
@@ -171,6 +173,9 @@ def _templates(program: S.Program) -> List[Tuple[str, tuple]]:
         for f in nums:
             out += [(f"sum({m}) == {f}", ("sum_eq", m, f)), (f"sum({m}) <= {f}", ("sum_le", m, f)),
                     (f"forall _u : address . {m}[_u] <= {f}", ("entry_le", m, f))]
+        for c in program.contracts:
+            b = f"balance[{c.name}]"
+            out += [(f"sum({m}) == {b}", ("sum_eq", m, b)), (f"sum({m}) <= {b}", ("sum_le", m, b))]
     for a in addrs:
         out.append((f"{a} != null", ("addr", a)))
     out += [(t, ("def", t)) for t in _definitions(program)]

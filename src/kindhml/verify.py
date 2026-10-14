@@ -135,6 +135,8 @@ class Outcome:
     memory_killed: bool = False
     trace: str = ""                  # method fuzz: the transactions reaching the counterexample
     scope: str = ""                  # parameterized mode: the numbers of users of the verdict
+    true_for: str = ""               # parameterized mode, unknown outcome: the numbers of
+                                     # users of a proof by Kind 2 ("up to 2 users")
 
     @property
     def status(self) -> str:
@@ -148,12 +150,16 @@ class Outcome:
             return "OK" if gt else "NOT OK"
         if self.status == "invalid":
             return "NOT OK" if gt else "OK"
+        if self.true_for and gt:
+            return f"OK-{self.true_for}"
         if self.result and self.result.true_up_to is not None and gt:
             return f"OK-up to {self.result.true_up_to}"
         return "unknown"
 
     def describe(self) -> str:
         what = self.result.describe() if self.result else "; ".join(self.errors) or "no result"
+        if self.true_for:
+            what += f", true {self.true_for}"
         how = "/".join(x for x in (self.method, self.solver) if x)
         how = f" [{how}]" if how else ""
         scope = f" ({self.scope})" if self.scope else ""
@@ -212,15 +218,18 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
     counterexample holds for every n >= its number of users if the rule has no address
     variable universal in its negation (`Scanner.dual`; the other users stay idle);
     otherwise it says nothing about more users, and the outcome is unknown. A proof of task
-    5 holds only for N users, and is ignored if N < n_users. A counterexample of a rule
-    with such a variable holds for every n >= its number of users if its final state has
-    enough idle users (Lemma 7.6, `Scanner.idle_needed`, `idle_users`)."""
+    5 holds for its number of users m, and for every n <= m if the rule has no such
+    variable (Cor. 7.8). If m < n_users, Kind 2 goes on with m + 1 users, up to n_users,
+    and the outcome is unknown, true for the numbers of users proved, until a verdict for
+    n_users; the other searches for counterexamples stop, since none found would extend to
+    n_users, and the check stops when only Kind 2 is left and it stops. A counterexample of
+    a rule with such a variable holds for every n >= its number of users if its final state
+    has enough idle users (Lemma 7.6, `Scanner.idle_needed`, `idle_users`)."""
     if context is None:
         context = {}
     users, ghost, cut = (effective_users(context, program, n_users, mode, expand, invgen,
                                          user_invariants, rule)
                          if parameterized and strategy == "portfolio" else (n_users, False, None))
-    reduced = users < n_users
     lustre = lustre_for(program, rule, users, mode, expand, ghost_sums=ghost)
     if lus_path:
         with open(lus_path, "w") as f:
@@ -286,6 +295,14 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     f" needed)")
         return None
 
+    def proved_for(m: int) -> str:
+        """The numbers of users for which the proofs by Kind 2 with users, ..., m users hold:
+        every n <= m if the rule has no address variable universal in its negation (Cor.
+        7.8)."""
+        if not dual:
+            return f"up to {_n(m)}"
+        return f"for {_n(m)}" if m == users else f"for {users} to {_n(m)}"
+
     notes: List[str] = []           # counterexamples that do not extend
 
     def scoped(o: Outcome, low: int, checked: Optional[int] = None,
@@ -304,7 +321,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
             return o
         if o.status == "valid":
             o.scope = (f"for every n >= {_n(low)}" if o.method in ("inductive", "invariants")
-                       else f"for {_n(low)}")
+                       else proved_for(low))
             if checked is not None and checked != low:
                 o.scope += f"; rule checked with {_n(checked)}"
         elif o.status == "invalid" and (why := extends(final, participants, low)) is not None:
@@ -315,7 +332,9 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
             o = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), o.errors, o.solver,
                         o.method, o.cti, trace=o.trace, scope=notes[-1])
         else:
-            o.scope = "; ".join([f"with {_n(low)}"] + notes[-1:])
+            # an outcome true for fewer users (Kind 2): what the run with more users gave
+            head = ([k2_note] if k2_note else []) if o.true_for else [f"with {_n(low)}"]
+            o.scope = "; ".join(head + notes[-1:])
         return o
 
     # Houdini once per file: with the cutoffs of its steps in parameterized mode
@@ -324,6 +343,9 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
     nonlinear = is_nonlinear(program)
     start, budget = time.time(), FIRST_BUDGET
     proof_open, target, engines, kind2_open = True, None, extra_args, True
+    searching = True                    # false after a proof by Kind 2 with users < n_users
+    k2_users, k2_lustre = users, lustre     # Kind 2: one more user after each such proof
+    k2_note = ""                        # the last run of Kind 2 after such a proof, if undecided
     target_users = users                # the users of the counterexample to induction
     premises: List[List[str]] = []
     attempts: Optional[List[tuple]] = None
@@ -332,13 +354,17 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
         for task in ("invariants", "proof", "reach", "fuzz", "kind2"):
             # the conditions are evaluated in turn: a counterexample found by "proof" is
             # searched for by "reach" in the same round
+            if not (searching or kind2_open) and invs.proved is not None and not proof_open:
+                return scoped(last, users)          # no task can decide for n_users
             if task == "invariants" and invs.proved is not None:
                 if rule.invariant and rule.name in invs.proved:
                     return scoped(_valid(rule, "inductive", time.time() - start), invs.users)
                 continue
             if task == "proof" and (invs.proved is None or not proof_open):
                 continue
-            if task == "reach" and not target:
+            if task == "reach" and not (target and searching):
+                continue
+            if task == "fuzz" and not searching:
                 continue
             if task == "kind2" and not kind2_open:
                 continue
@@ -436,10 +462,19 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                         return o
                     target, last = None, o              # it does not extend: go on
             else:
-                o = kind2_search(rule, lustre, b, engines, solver, cex)
-                if o.status == "valid" and reduced:
-                    # a proof for `users` users only (Kind 2's invariants name the users)
-                    kind2_open = False
+                o = kind2_search(rule, k2_lustre, b, engines, solver, cex)
+                if o.status == "valid" and k2_users < n_users:
+                    # a proof for k2_users users, not for n_users (Kind 2's invariants name
+                    # the users): Kind 2 goes on with one more user. No counterexample with
+                    # at most k2_users users extends to n_users (it would extend to
+                    # k2_users), so the other searches stop
+                    searching, k2_note = False, ""
+                    last = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"),
+                                   o.errors, o.solver, "kind2", last.cti,
+                                   true_for=proved_for(k2_users))
+                    k2_users += 1
+                    k2_lustre = lustre_for(program, rule, k2_users, mode, expand,
+                                           ghost_sums=ghost)
                     continue
                 if o.status in ("valid", "invalid"):
                     o.method = "kind2"
@@ -447,19 +482,27 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     if o.status == "invalid" and dual:
                         # without the lemmas, which BMC cannot prove: Kind 2 then stops at
                         # the counterexample instead of the time limit
-                        bare = lustre_for(program, rule, users, mode, expand, lemmas=False,
-                                          ghost_sums=ghost)
+                        bare = lustre_for(program, rule, k2_users, mode, expand,
+                                          lemmas=False, ghost_sums=ghost)
                         final, named = _final_state(o, bare, b, deadline,
-                                                    System.make(program, users))
+                                                    System.make(program, k2_users))
                     cti = o.cti or last.cti
-                    o = scoped(o, users, final=final, participants=named)
+                    o = scoped(o, k2_users, final=final, participants=named)
+                    if o.status == "invalid" and last.true_for:
+                        o.scope += f"; true {last.true_for}"   # the proofs with fewer users
                     if o.status in ("valid", "invalid"):
                         return o
                     # it does not extend, and BMC would find it again: go on without Kind 2
-                    o.cti, last, kind2_open = cti, o, False
+                    o.cti, o.true_for, last, kind2_open = cti, last.true_for, o, False
                     continue
                 if o.memory_killed and engines is None:
                     engines = LIGHT_ENGINES
+                if last.true_for:
+                    # the proofs with fewer users are kept; this run is in the scope
+                    up_to = o.result.true_up_to if o.result else None
+                    k2_note = (f"with {_n(k2_users)}: " + ("no verdict" if up_to is None
+                               else f"true up to {up_to} steps"))
+                    continue
                 o.method, o.cti = "kind2", last.cti
                 last = o
         budget *= 2

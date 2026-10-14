@@ -223,12 +223,29 @@ def test_parameterized_registry():
     for name in ("Flags", "Count_nonnegative", "Registered_bounded"):
         assert out[name].status == "valid", out[name].describe()
         assert out[name].scope.startswith("for every n >= 2 users"), out[name].scope
-    assert out["At_most_two"].status == "unknown"
+    assert out["At_most_two"].status != "valid"
     rule = program.rule("At_most_two")
     for n, status in ((2, "valid"), (3, "invalid")):
         context = {}
         V.prove_invariants(program, n, 30, context)
         assert V.verify(program, rule, n, 20, context=context).status == status
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_kind2_with_more_users():
+    """With 3 users asked for, Kind 2 proves At_most_two with 2 users (the cutoff), not a
+    proof for 3 users; it goes on with 3 users and refutes it. The rule has no address
+    quantifier, so the proof holds for every n <= 2 (Cor. 7.8) and the counterexample for
+    every n >= 3 (Lemma 7.5)."""
+    program, _ = V.load(REGISTRY)
+    context: dict = {}
+    V.prove_invariants(program, 3, 30, context, parameterized=True)
+    out = V.verify(program, program.rule("At_most_two"), 3, 120, context=context,
+                   parameterized=True)
+    assert out.status == "invalid", out.describe()
+    assert out.scope == ("counterexample with 3 users, for every n >= 3; true up to 2 users"), \
+        out.scope
 
 
 @pytest.mark.kind2
