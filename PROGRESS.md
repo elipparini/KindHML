@@ -302,6 +302,30 @@ split over all the methods, is substituted into the next modality. In `exists` m
 encoding is small (178 KB without expansion), but Kind 2 exceeds 2 GB of memory within
 30 s, also with the outer call expanded.
 
+## Noted (2026-10-14): 3 and 4 participants
+
+A short test (about 10 minutes, one job at a time, Kind 2 memory capped at 1 GB, 10 s per
+rule, portfolio strategy). Data in `runs/participants_*`.
+
+- **Regressions** (additivity, args, liquidity4, mapping1, mapping2, owner, states;
+  46 rules): all verdicts are correct for n = 2, 3 and 4, and every rule is decided by the
+  same method (24 by invariants, 20 by reach, 1 by fuzz, 1 by Kind 2). Total time
+  70.6 s, 76.3 s and 77.6 s. Only liquidity4 `P12_true` slows down noticeably
+  (0.7 s for n = 2, 3.7 s for n = 3 and 4). The invariant phase takes the same time.
+- **bank** (4 rules): the three rules proved by invariants stay proved (No_frontrun_deposit
+  1.0 s for n = 2, 1.8 s for n = 4). `Liquidity` is unknown in both cases; within 10 s
+  Kind 2 reaches depth 1 for n = 2 and no depth for n = 4.
+- **Encoding size** (`--only_lus`): it grows linearly in n when the rule has one address
+  quantifier (bank `Liquidity`: 10.4, 12.3, 14.3 KB; liquidity4 `P12_true`: 4.6, 5.1,
+  5.7 KB), and faster with nested ones (bank `No_frontrun_deposit`: 13.8, 21.1, 30.9 KB),
+  as expected from the expansion of address quantifiers over all addresses.
+
+Conclusion: on these rules, more participants do not change the verdicts and cost little
+when the rule is decided by invariants or by a short counterexample; the cost appears in
+the rules left to Kind 2 (slower unrolling) and in rules with nested address quantifiers.
+Not tested: rules whose counterexample needs 3 or more users (where n = 2 could miss a
+violation), and the harder benchmarks (vault, price-bet, AMM, lending).
+
 ## Decisions taken after M1 (with the user)
 
 1. **Domain of `address` quantifiers:** all addresses except `null` (users and contracts).
