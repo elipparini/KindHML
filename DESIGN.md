@@ -451,7 +451,7 @@ counterexample to induction has `funds[u2] = 3 > balance[Bank] = 1`.
 
 ### 7.4 Counterexamples
 
-**Lemma 7.5 (idle users).** Suppose that a trace of S_c reaches a state where all contracts
+**Lemma 7.5 (added users).** Suppose that a trace of S_c reaches a state where all contracts
 are constructed and φ is false, and that no address variable of φ is universal in ¬φ
 (address quantifiers, and the address parameters of `args` variables and of `h()`;
 `Scanner.dual`). Then φ is false in a reachable state of S_n for every n ≥ c.
@@ -464,12 +464,67 @@ normal form: its address quantifiers are existential. By induction on ¬φ, a su
 in a state of S_c is true in its extension (for a modality, the transition from the
 extension is the extension of the transition). ∎
 
+For a rule such as `exists a : address . ...` (price-bet `Winnability`), the new users
+must also fail, and Lemma 7.5 does not apply. They fail if the trace leaves enough users
+in the same situation. In a state s, a user u is *idle for* a balance b if every map entry
+at u has its default value, `balance[u] = b`, and no address field of s holds u. For a
+formula χ in negation normal form, need(χ) is the largest number, over the branches of χ,
+of the address variables bound on the branch up to and including the last universal one
+(0 if there is none); the address parameters of `args` variables and of `h()` count as
+address variables. `Scanner.idle_needed(φ)` computes need(¬φ), which is 0 in the case of
+Lemma 7.5.
+
+**Lemma 7.6 (idle users).** Suppose that a trace of S_m reaches a state s where all
+contracts are constructed and φ is false, and that s has at least need(¬φ) users idle for
+the same balance b, with b = 0 if `sum(balance)` occurs in the contracts or in φ. Then φ is
+false in a reachable state of S_n for every n ≥ m.
+
+*Proof.* As in Lemma 7.5, the trace of S_n in which u_{m+1}, ..., u_n have initial balance
+b and send nothing reaches a state s⁺ that extends s, and every new user is idle for b in
+it; the sums are unchanged (the new entries are 0, and b = 0 if `sum(balance)` matters).
+Two facts are used.
+
+(a) Symmetry. Let π be a permutation of the users. The transition function commutes with
+π (contracts and rules name no user, and compare addresses only with `==` and `!=`), so a
+formula holds in a sequence of states (a state and its ancestors, which `old` reads) under
+an assignment ν iff it holds in their images under π ∘ ν. If π exchanges two users that are
+idle for b in every state of the sequence, and fixes the values of ν, then it maps each
+state to itself; so the formula holds under ν iff it holds under π ∘ ν.
+
+(b) Untouched users. A transaction whose sender and arguments are terms over the values of
+ν, the constants and the fields reads and writes map entries and balances only at such
+addresses, and assigns to the address fields only such addresses. So a user that is idle
+and not a value of ν remains idle in the next state; so do the new users.
+
+Let J be the users of s idle for b. By induction on a formula ψ in negation normal form (a
+modality is self-dual, since the transition function is deterministic; ¬Φ(φ) has such a
+form): if ψ holds, under an assignment ν into A_m, in a sequence of states of S_m that
+starts at s and follows transactions over the values of ν, and at least need(ψ) users of J
+are not values of ν, then ψ holds in the extended sequence under ν. Atoms take the same
+values in both (their terms denote addresses of A_m; the sums are equal). The connectives,
+the quantifiers over numbers, methods and booleans, and the modalities (by (b)) follow by
+induction. For ∃x. ψ', the witness in A_m serves: it removes at most one user of J, and
+need(∃x. ψ') = need(ψ') + 1 when need(ψ') > 0. For ∀x. ψ', a value in A_m is handled by
+induction; for a new user a, take a user a' of J that is not a value of ν (there is one,
+since need(∀x. ψ') ≥ 1): by (a), with π exchanging a and a', ψ' holds in the extended
+sequence under ν[x ↦ a] iff it holds under ν[x ↦ a'], which follows by induction. Applied to
+¬Φ(φ) at s, with ν empty, this gives ¬Φ(φ) at s⁺. ∎
+
+BMC and the fuzzer give arbitrary initial balances to the users, so the idle users of a
+counterexample often have different balances (price-bet_v4 `Liquidity`: 0, 47482 and
+22317). The users outside the trace (neither a sender, nor a called address, nor an
+argument of its transactions; the address fields, which start at null, only receive such
+users) are neither read nor written by its transactions, unless the contracts use
+`sum(balance)`. Setting their initial balances to 0 therefore gives a trace of S_m whose
+final state is the old one with their balances 0. The tool checks exactly that φ is false
+there (`concrete_check`), and then applies Lemma 7.6 with b = 0.
+
 ### 7.5 The parameterized mode
 
 Each check uses its own number of users, the least one for which Thm. 7.3 applies to it.
 Checks with different numbers of users combine as follows.
 
-**Proposition 7.6.** Let C be the final set of Houdini, and suppose that the step of each
+**Proposition 7.7.** Let C be the final set of Houdini, and suppose that the step of each
 procedure f for C is valid with k_f ≥ max(1, k(χ#_f)) users. Let the check of a rule φ on a
 free state, with premises C' ⊆ C, be valid with u ≥ max(1, k(χ#_φ)) users. Then φ holds in
 the reachable states of S_n for every n ≥ max(c_H, u), where c_H = max_f k_f.
@@ -492,11 +547,17 @@ With `--parameterized` (strategy portfolio), for n users asked for:
   largest of the cutoffs of the final steps (`_Invariants.users`);
 * the check of the rule uses the cutoff of its premises (`Checks.rule_count`), possibly
   fewer users than Houdini; a proof (`inductive` or `invariants`) holds for every
-  n' ≥ max(c_H, u) (Prop. 7.6), and the verdict gives both numbers;
+  n' ≥ max(c_H, u) (Prop. 7.7), and the verdict gives both numbers;
 * the searches for counterexamples are sound with any number of users; the search for the
   counterexample to induction uses the users of the check that produced it, fuzzing and
-  Kind 2 use N users. A counterexample with m users holds for every n' ≥ m if Lemma 7.5
-  applies; otherwise for m users only, and the outcome is unknown if m < n;
+  Kind 2 use N users. A counterexample with m users holds for every n' ≥ m if Lemma 7.5 or
+  Lemma 7.6 applies (`idle_users` counts the idle users of its final state: the fuzzer's
+  state, the counterexample of the search, requested with its values, or that of a run of
+  BMC after Kind 2, without the lemmas, so that Kind 2 stops at the counterexample), after
+  setting to 0 the balances of the users outside the trace if needed. These confirmations
+  get CONFIRM_SECONDS (10 s) each, also after the time limit of the rule. Otherwise the
+  counterexample holds for m users only; if m < n, the other searches go on, and the
+  outcome is unknown if none decides;
 * a proof by Kind 2 on the transition system holds for N users only (its invariants, IC3
   and k-induction are about N users), and is ignored if N < n.
 

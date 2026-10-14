@@ -38,6 +38,19 @@ def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
     return L.record("St", [(n, values[n]) for n, _ in enc.state_fields()])
 
 
+def state_paths(st: State, system: System) -> Dict[str, object]:
+    """The values of a state by path (`s.f`, `s.f.k_a`), as in a Kind 2 counterexample."""
+    out: Dict[str, object] = {f"s.{BALANCE}.{key_field(a)}": v for a, v in st.balance.items()}
+    for c in system.contracts:
+        for f in c.fields:
+            v, name = st.fields[(c.name, f.name)], field_var(c.name, f.name)
+            if isinstance(f.type, S.MapType):
+                out.update({f"s.{name}.{key_field(a)}": x for a, x in v.items()})
+            else:
+                out[f"s.{name}"] = v
+    return out
+
+
 def tx_literal(tx: Tx, system: System, enc: Encoder, default) -> L.LExpr:
     """The transaction as a Tx record; `default(type)` gives the parameters of the other
     procedures (Trans does not depend on them)."""

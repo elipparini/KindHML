@@ -392,7 +392,7 @@ with 10 users, 0.2 MB with 2), so its rules took 320-350 s despite the 60 s budg
 Kind 2 run reported "Error opening input file" (vault.sol); it did not happen again on the
 same program; the disk was 99 % full.
 
-**One number of users per check** (DESIGN.md, Sect. 7.5, Prop. 7.6): each step of Houdini
+**One number of users per check** (DESIGN.md, Sect. 7.5, Prop. 7.7): each step of Houdini
 uses the cutoff of its step for the current candidates; the check of a rule the cutoff of
 its premises; the search for a counterexample to induction the users of that check;
 fuzzing and Kind 2 N = max(c_H, c_R). An `args` variable counts only the address
@@ -411,20 +411,40 @@ counted by task and number of users (scratchpad script):
   with 10), and still does not extend; `non_inflation` still takes 224-236 s (encoding with
   8 users). No new verdict on vault.
 
-## Planned (next, agreed 2026-10-14): extend more counterexamples by symmetry
+## Done (2026-10-14): extending counterexamples by symmetry (idle users)
 
-Lemma 7.5 extends a counterexample with m users to every n ≥ m only if no address variable
-of φ is universal in ¬φ. For rules with `exists a : address` (price-bet Winnability,
-Liquidity, Frontrunning; vault Two_steps_drainability), the new users must also fail.
-Idea: users that did nothing in the trace are interchangeable with the new ones. If the
-trace leaves at least w idle users with the same state as the new ones (w the number of
-address variables universal in ¬φ), every assignment of these variables to new users can
-be mapped, injectively, to idle users of the trace by a permutation of the users, which
-preserves the truth of ¬φ. To work out: the exact notion of idle (no transaction, not the
-value of a field or parameter, default entries, the same initial balance as the new users,
-which BMC and fuzzing may choose differently), the nesting of the universals (all of them,
-or only the outermost), and how the searches can leave enough idle users (m ≥ users of the
-trace + w).
+DESIGN.md, Sect. 7.4, Lemma 7.6 (and Prop. 7.7, renumbered from 7.6). A user is idle in a
+state if all its map entries have the default value and no address field holds it. A
+counterexample with m users extends to every n ≥ m if its final state has at least
+need(¬φ) users idle for the same balance (b = 0 if `sum(balance)` matters):
+need is the largest number, over the branches of ¬φ, of the address variables up to the
+last universal one (`Scanner.idle_needed`; 0 gives Lemma 7.5). Proof by symmetry: users
+idle in every state of a branch can be exchanged, and the transactions over named users
+leave the others idle.
+
+Implementation (`verify.py`): the final state comes from the fuzzer, from the
+counterexample of the reach search (now requested with its values: the counterexample to
+induction may leave out values, e.g. balances that the property does not read), or from a
+run of BMC after Kind 2 (on the program without lemmas: with them, Kind 2 waits for its
+time limit). BMC and the fuzzer give arbitrary initial balances to the users (price-bet_v4
+`Liquidity`: 0, 47482, 22317), so the users outside the trace get initial balance 0, and the
+rule is checked exactly at the new final state. These confirmations get 10 s each
+(`CONFIRM_SECONDS`), also after the time limit. A counterexample that does not extend no
+longer ends the search: the other tasks go on. Tests: `tests/test_cutoff.py` (the count, the
+idle users, the participants of a counterexample; with Kind 2,
+`tests/contracts/parameterized/capped_registry.sol`: a counterexample that extends, and one
+that must not, for a rule true with 3 users).
+
+Results (100 users asked for; data in `runs/local-20261014-1532-idle2` and
+`runs/parameterized_idle_reg_n100.*`):
+- regressions (10 s per rule): 45 of 46 correct (43 before); args P0_false and owner P5_false
+  are refuted for every n ≥ 1 and n ≥ 2. The only unknown is owner P2_true, proved by Kind 2
+  only;
+- price-bet and vault_v2 (60 s per rule, 12 min): all 7 false rules are refuted, for every
+  n ≥ 5 (n ≥ 4 for price-bet_v3 Frontrunning), as by the normal mode with 2 users (none
+  before, with one cutoff per file; 3 before the balances were set to 0). The 7 true rules
+  are unknown: their proofs with 2 users come from Kind 2 on the transition system, which do
+  not transfer, and the checks on free states lack invariants.
 
 ## Planned (later, agreed 2026-10-14): k-induction with a cutoff depending on k
 
@@ -442,7 +462,7 @@ larger number (Thm. 7.3).
   Step_k: T(s_0, t_0, s_1) ∧ ... ∧ T(s_{k-1}, t_{k-1}, s_k) ∧ φ(s_0) ∧ ... ∧ φ(s_{k-1}) ⇒ φ(s_k),
   with s_0 free. If both are valid with n users, φ holds in every reachable state of S_n.
   The proved invariants C may be added as premises at every state of Step_k (then the
-  claim is for n ≥ max(c_H, c_k), Prop. 7.6).
+  claim is for n ≥ max(c_H, c_k), Prop. 7.7).
 - **The cutoff.** In ¬Step_k, the address constants are the a_F address fields of s_0; for
   each transaction, its sender and the address parameters of the procedure it calls (the
   witness fixes the procedure, so p is the largest number of address parameters of a

@@ -436,6 +436,30 @@ def state_values(counterexample: list, var: str = "s") -> Dict[str, L.LExpr]:
     return out
 
 
+def final_values(counterexample: list, var: str = "s") -> Dict[str, object]:
+    """The values of the stream record `var` at the last step of a Kind 2 counterexample
+    (JSON) of the transition system, by path, as values of the reference interpreter."""
+    out: Dict[str, object] = {}
+    for block in counterexample or []:
+        for stream in block.get("streams", []):
+            name = stream["name"]
+            if not (name == var or name.startswith(var + ".")):
+                continue
+            values = dict((int(k), v) for k, v in stream.get("instantValues", []))
+            if values:
+                out[name] = python_value(values[max(values)])
+    return out
+
+
+def python_constant(c: L.LExpr):
+    """A constant of `state_values` as a value of the reference interpreter."""
+    if isinstance(c, (L.Int, L.Real, L.Bool)):
+        return c.value
+    if isinstance(c, L.Var):
+        return python_value(c.name)
+    raise ValueError(f"not a constant: {c!r}")
+
+
 def constant(v) -> L.LExpr:
     if isinstance(v, bool):
         return L.Bool(v)

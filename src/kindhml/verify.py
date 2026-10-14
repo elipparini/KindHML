@@ -6,6 +6,7 @@ import csv
 import os
 import time
 from dataclasses import dataclass, replace
+from fractions import Fraction
 from typing import Dict, List, Optional, Tuple
 
 from . import kind2
@@ -13,12 +14,13 @@ from . import lustre as L
 from . import pretty
 from .builder import parse, parse_spec
 from .encode_formula import FormulaEncoder
-from .encode_trans import Encoder
+from .encode_trans import BALANCE, Encoder, param_var, proc_const, summed_maps
 from .errors import KindHMLError
-from .concrete import describe_tx, state_literal
-from .cutoff import Cutoff, Scanner
+from .concrete import (describe_tx, python_value, state_from_values, state_literal,
+                       state_paths)
+from .cutoff import Cutoff, Scanner, idle_users
 from .fuzz import Fuzzer
-from .invariants import Checks, describe_state, state_values
+from .invariants import Checks, describe_state, final_values, python_constant, state_values
 from .invgen import (candidates as invariant_templates, generate as generate_invariants,
                      minimize as minimize_invariants)
 from .model import System
@@ -172,6 +174,9 @@ INVGEN_SECONDS = 2.0                # random testing that filters the generated 
 STUCK_AFTER = 16.0                  # Houdini drops generated candidates undecided after this
 LIGHT_ENGINES = ["--enable", "BMC", "--enable", "IND"]
 FREE_SOLVERS = ("z3", "cvc5")       # z3 first: nlsat for nonlinear real queries
+# parameterized mode: the budget of each step confirming that a counterexample found extends
+# to more users (its final state, its check with other balances), even after the time limit
+CONFIRM_SECONDS = 10.0
 
 
 def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[float],
@@ -207,7 +212,9 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
     counterexample holds for every n >= its number of users if the rule has no address
     variable universal in its negation (`Scanner.dual`; the other users stay idle);
     otherwise it says nothing about more users, and the outcome is unknown. A proof of task
-    5 holds only for N users, and is ignored if N < n_users."""
+    5 holds only for N users, and is ignored if N < n_users. A counterexample of a rule
+    with such a variable holds for every n >= its number of users if its final state has
+    enough idle users (Lemma 7.6, `Scanner.idle_needed`, `idle_users`)."""
     if context is None:
         context = {}
     users, ghost, cut = (effective_users(context, program, n_users, mode, expand, invgen,
@@ -221,11 +228,72 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
     deadline = time.time() + timeout if timeout else None
     if strategy == "kind2":
         return kind2_search(rule, lustre, timeout or None, extra_args, solver, cex)
-    dual = ghost and Scanner(System.make(program, users)).dual(rule.formula)
+    # parameterized mode: the idle users a counterexample needs to extend to more users
+    need = Scanner(System.make(program, users)).idle_needed(rule.formula) if ghost else 0
+    dual = need > 0
+    # the added users have the balance of the idle ones; 0 if a sum of the balances matters
+    balance_sum = BALANCE in summed_maps(S.Program(program.contracts, (rule,),
+                                                   program.balance_type))
 
-    def scoped(o: Outcome, low: int, checked: Optional[int] = None) -> Outcome:
+    # whether a transaction can read the balance of a user that takes no part in it
+    code_sums_balance = BALANCE in summed_maps(S.Program(program.contracts, (),
+                                                         program.balance_type))
+
+    def idle(final: Optional[Dict[str, object]], m: int) -> int:
+        """The largest number of idle users with the same balance in the final state of a
+        counterexample with m users (Lemma 7.6)."""
+        if final is None:
+            return 0
+        groups = idle_users(final, System.make(program, m))
+        return max((len(us) for b, us in groups.items() if b == 0 or not balance_sum),
+                   default=0)
+
+    def normalized(final: Optional[Dict[str, object]], participants: Optional[set],
+                   m: int) -> Optional[Dict[str, object]]:
+        """The final state of the same counterexample in which the users that take no part
+        in its transactions (not a sender, a called address or an argument; the address
+        fields only hold such users) have initial balance 0: no transaction reads or
+        changes their balances (unless the contracts sum the balances), so it is the final
+        state with their balances set to 0. None if the rule is not false there (exact
+        check), or nothing changes."""
+        if final is None or participants is None or code_sums_balance:
+            return None
+        system = System.make(program, m)
+        zero = 0 if program.balance_type != S.REAL else Fraction(0)
+        moved = {u for u in system.users if u not in participants
+                 and final.get(f"s.balance.k_{u}") != zero}
+        if not moved:
+            return None
+        out = dict(final)
+        out.update({f"s.balance.k_{u}": zero for u in moved})
+        checks = invs.checks_for(m)
+        lus = checks.concrete_check(rule, state_literal(state_from_values(out, system,
+                                                                          checks.enc),
+                                                        system, checks.enc))
+        return out if _free_run(lus, [rule.name], CONFIRM_SECONDS)[0] == "invalid" else None
+
+    def extends(final: Optional[Dict[str, object]], participants: Optional[set],
+                m: int) -> Optional[str]:
+        """Why a counterexample with m users holds for every n >= m (Lemmas 7.5 and 7.6),
+        or None."""
+        if not dual:
+            return ""
+        if idle(final, m) >= need:
+            return f" ({idle(final, m)} idle users, {need} needed)"
+        moved = normalized(final, participants, m)
+        if moved is not None and idle(moved, m) >= need:
+            return (f" ({idle(moved, m)} idle users, with initial balance 0, {need}"
+                    f" needed)")
+        return None
+
+    notes: List[str] = []           # counterexamples that do not extend
+
+    def scoped(o: Outcome, low: int, checked: Optional[int] = None,
+               final: Optional[Dict[str, object]] = None,
+               participants: Optional[set] = None) -> Outcome:
         """The outcome with the numbers of users for which it holds (parameterized mode):
-        a proof by tasks 1-2 for every n >= low, a counterexample with low users."""
+        a proof by tasks 1-2 for every n >= low; a counterexample with low users, whose
+        final state is `final` (by path) and whose transactions name `participants`."""
         if cut is None:
             return o
         if not ghost:
@@ -239,15 +307,15 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                        else f"for {_n(low)}")
             if checked is not None and checked != low:
                 o.scope += f"; rule checked with {_n(checked)}"
-        elif o.status == "invalid" and not dual:
-            o.scope = f"counterexample with {_n(low)}, for every n >= {low}"
+        elif o.status == "invalid" and (why := extends(final, participants, low)) is not None:
+            o.scope = f"counterexample with {_n(low)}, for every n >= {low}{why}"
         elif o.status == "invalid" and low < n_users:
+            notes.append(f"a counterexample with {_n(low)} does not extend to {_n(n_users)}:"
+                         f" {idle(final, low)} idle users, {need} needed")
             o = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), o.errors, o.solver,
-                        o.method, o.cti, trace=o.trace,
-                        scope=f"a counterexample with {_n(low)} does not extend to"
-                              f" {_n(n_users)}")
+                        o.method, o.cti, trace=o.trace, scope=notes[-1])
         else:
-            o.scope = f"with {_n(low)}"
+            o.scope = "; ".join([f"with {_n(low)}"] + notes[-1:])
         return o
 
     # Houdini once per file: with the cutoffs of its steps in parameterized mode
@@ -338,17 +406,35 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     if status == "invalid":
                         res = kind2.PropertyResult(rule.name, "invalid", len(txs), "fuzz",
                                                    time.time() - start)
-                        return scoped(Outcome(rule, res, [], s, "fuzz",
-                                              trace="; ".join(describe_tx(tx) for tx in txs)),
-                                      users)
+                        named = {x for tx in txs for x in [tx.sender, tx.contract]
+                                 + [v for v in tx.args.values() if isinstance(v, str)]}
+                        o = scoped(Outcome(rule, res, [], s, "fuzz",
+                                           trace="; ".join(describe_tx(tx) for tx in txs)),
+                                   users, final=state_paths(st, checks.enc.system),
+                                   participants=named)
+                        if o.status == "invalid":
+                            return o
+                        o.cti, last = last.cti, o       # it does not extend: go on
             elif task == "reach":
                 lus = invs.checks_for(target_users).reach_check(target)
-                out = kind2.run(lus, b, solver="z3", extra_args=["--enable", "BMC"], cex=cex)
+                # a rule that needs idle users needs the whole final state (the target may
+                # leave out values, e.g. balances that the property does not read)
+                out = kind2.run(lus, b, solver="z3", extra_args=["--enable", "BMC"],
+                                cex=cex or dual)
                 res = next((p for p in out.properties if p.name == "unreachable"), None)
                 if res and res.status == "invalid":
                     res.name, res.time = rule.name, time.time() - start
-                    return scoped(Outcome(rule, res, out.errors, "z3", "reach", last.cti),
-                                  target_users)
+                    final = (final_values(res.counterexample) if res.counterexample
+                             else {p: python_constant(v) for p, v in target.items()})
+                    o = scoped(Outcome(rule, res, out.errors, "z3", "reach", last.cti),
+                               target_users, final=final,
+                               participants=(_participants(res.counterexample,
+                                                           invs.checks_for(target_users)
+                                                           .enc.system)
+                                             if res.counterexample else None))
+                    if o.status == "invalid":
+                        return o
+                    target, last = None, o              # it does not extend: go on
             else:
                 o = kind2_search(rule, lustre, b, engines, solver, cex)
                 if o.status == "valid" and reduced:
@@ -357,12 +443,67 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     continue
                 if o.status in ("valid", "invalid"):
                     o.method = "kind2"
-                    return scoped(o, users)
+                    final, named = None, None
+                    if o.status == "invalid" and dual:
+                        # without the lemmas, which BMC cannot prove: Kind 2 then stops at
+                        # the counterexample instead of the time limit
+                        bare = lustre_for(program, rule, users, mode, expand, lemmas=False,
+                                          ghost_sums=ghost)
+                        final, named = _final_state(o, bare, b, deadline,
+                                                    System.make(program, users))
+                    cti = o.cti or last.cti
+                    o = scoped(o, users, final=final, participants=named)
+                    if o.status in ("valid", "invalid"):
+                        return o
+                    # it does not extend, and BMC would find it again: go on without Kind 2
+                    o.cti, last, kind2_open = cti, o, False
+                    continue
                 if o.memory_killed and engines is None:
                     engines = LIGHT_ENGINES
                 o.method, o.cti = "kind2", last.cti
                 last = o
         budget *= 2
+
+
+def _participants(counterexample: list, system: System) -> set:
+    """The users named by the transactions of a counterexample of the transition system:
+    at each step but the last (whose transaction is not taken), the sender, the called
+    address and the address arguments of the procedure called."""
+    t: Dict[str, Dict[int, object]] = {}
+    last = 0
+    for block in counterexample or []:
+        for stream in block.get("streams", []):
+            values = dict((int(k), v) for k, v in stream.get("instantValues", []))
+            last = max([last] + list(values))
+            if stream["name"].startswith("t."):
+                t[stream["name"][2:]] = values
+    procs = {proc_const(c.name, p.name): (c, p) for c, p in system.methods}
+    out = set()
+    for i in range(last):
+        named = [t.get("sender", {}).get(i), t.get("cx", {}).get(i)]
+        c, p = procs.get(t.get("fx", {}).get(i), (None, None))
+        if p is not None:
+            named += [t.get(param_var(c.name, p.name, x.name), {}).get(i)
+                      for x in p.params if x.type == S.ADDRESS]
+        out |= {python_value(v) for v in named if isinstance(v, str)}
+    return out
+
+
+def _final_state(o: Outcome, lustre: str, budget: float, deadline: Optional[float],
+                 system: System) -> Tuple[Optional[Dict[str, object]], Optional[set]]:
+    """The final state of the counterexample of a refuted rule (Kind 2 on the transition
+    system), by path, and the users its transactions name: from its counterexample if it
+    has one, else from a run of BMC with counterexamples (z3, with the budget, but at least
+    CONFIRM_SECONDS, also after the deadline); None if there is none."""
+    cex = o.result.counterexample if o.result else None
+    if not cex:
+        left = None if deadline is None else deadline - time.time()
+        out = kind2.run(lustre, max(budget if left is None else min(budget, left),
+                                    CONFIRM_SECONDS),
+                        solver="z3", extra_args=["--enable", "BMC"], cex=True)
+        res = next((p for p in out.properties if p.name == o.rule.name), None)
+        cex = res.counterexample if res and res.status == "invalid" else None
+    return (final_values(cex), _participants(cex, system)) if cex else (None, None)
 
 
 def _n(users: int) -> str:

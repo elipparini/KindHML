@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from . import syntax as S
+from .encode_trans import BALANCE, field_var, key_field
 from .model import System
 
 
@@ -172,33 +173,73 @@ class Scanner:
                        for p in (True, False))
         raise OutOfFragment(f"a quantifier inside {type(e).__name__}")
 
-    def dual(self, e: S.Expr, positive: bool = True) -> bool:
+    def dual(self, e: S.Expr) -> bool:
         """Whether some address variable of e is universal in ¬e. If not, ¬e is preserved
-        when users with default values are added (Lemma (idle users), DESIGN.md, Sect. 7)."""
+        when idle users are added (Lemma 7.5, DESIGN.md, Sect. 7)."""
+        return self.idle_needed(e) > 0
+
+    def idle_needed(self, e: S.Expr, positive: bool = True) -> int:
+        """The number of idle users that a counterexample of e needs to extend to more users
+        (Lemma 7.6): the largest number, along a branch of ¬e, of the address variables up
+        to the last one universal in ¬e (an existential before a universal may take an idle
+        user). 0 if no address variable is universal in ¬e (Lemma 7.5)."""
         if not _has_binder(e):
-            return False
-        if isinstance(e, S.Quant):
-            universal = (e.kind == "exists") == positive        # in ¬e
-            if universal and (e.type == S.ADDRESS
-                              or (e.type == S.ARGS and self._args(e)[1])):
-                return True
-            return self.dual(e.body, positive)
-        if isinstance(e, S.Modal):
-            if (isinstance(e.proc, S.QVar) and not e.args and positive
-                    and self.addr_params.get(e.contract, 0)):
-                return True
-            return self.dual(e.body, positive)
+            return 0
+        if isinstance(e, (S.Quant, S.Modal)):
+            if isinstance(e, S.Quant):
+                universal = (e.kind == "exists") == positive        # in ¬e
+                count = (1 if e.type == S.ADDRESS
+                         else self._args(e)[1] if e.type == S.ARGS else 0)
+                inner = self.idle_needed(e.body, positive)
+            else:
+                # h(): its parameters are existential in e (DESIGN.md, Sect. 4)
+                universal = positive
+                count = (self.addr_params.get(e.contract, 0)
+                         if isinstance(e.proc, S.QVar) and not e.args else 0)
+                inner = self.idle_needed(e.body, positive)
+            return inner + count if count and (universal or inner) else inner
         if isinstance(e, S.UnOp) and e.op == "!":
-            return self.dual(e.arg, not positive)
+            return self.idle_needed(e.arg, not positive)
         if isinstance(e, S.Old):
-            return self.dual(e.arg, positive)
+            return self.idle_needed(e.arg, positive)
         if isinstance(e, S.BinOp) and e.op == "->":
-            return self.dual(e.left, not positive) or self.dual(e.right, positive)
+            return max(self.idle_needed(e.left, not positive),
+                       self.idle_needed(e.right, positive))
         if isinstance(e, S.BinOp) and e.op in ("&&", "||"):
-            return self.dual(e.left, positive) or self.dual(e.right, positive)
+            return max(self.idle_needed(e.left, positive), self.idle_needed(e.right, positive))
         if isinstance(e, S.BinOp) and e.op in ("==", "!="):
-            return any(self.dual(x, p) for x in (e.left, e.right) for p in (True, False))
-        return True                                  # unexpected: assume the worst
+            return max(self.idle_needed(x, p) for x in (e.left, e.right) for p in (True, False))
+        return UNBOUNDED                             # unexpected: assume the worst
+
+
+UNBOUNDED = 10 ** 9
+
+
+def idle_users(state: Dict[str, object], system: System) -> Dict[object, List[str]]:
+    """The idle users of a state given by path (`s.f`, `s.f.k_a`, with the values of the
+    reference interpreter), grouped by balance: every map entry has its default value, and
+    no address field holds the user (Lemma 7.6). A user with a missing value is not idle."""
+    holders = []
+    maps = []
+    for c in system.contracts:
+        for f in c.fields:
+            name = field_var(c.name, f.name)
+            if f.type == S.ADDRESS:
+                if f"s.{name}" not in state:
+                    return {}
+                holders.append(state[f"s.{name}"])
+            elif isinstance(f.type, S.MapType):
+                maps.append((name, False if f.type.value == S.BOOL else 0))
+    out: Dict[object, List[str]] = {}
+    for u in system.users:
+        if u in holders:
+            continue
+        if all(state.get(f"s.{name}.{key_field(u)}", None) == d
+               and f"s.{name}.{key_field(u)}" in state for name, d in maps):
+            balance = state.get(f"s.{BALANCE}.{key_field(u)}")
+            if balance is not None:
+                out.setdefault(balance, []).append(u)
+    return out
 
 
 def check_program(system: System) -> int:

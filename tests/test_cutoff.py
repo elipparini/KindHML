@@ -10,7 +10,7 @@ from kindhml import syntax as S
 from kindhml import verify as V
 from kindhml.builder import parse, parse_expr
 from kindhml.concrete import state_literal
-from kindhml.cutoff import OutOfFragment, Scanner
+from kindhml.cutoff import OutOfFragment, Scanner, idle_users
 from kindhml.encode_trans import Encoder
 from kindhml.invariants import Checks
 from kindhml.lustre_eval import Evaluator
@@ -22,6 +22,7 @@ import test_trans as T
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "tests", "contracts", "parameterized", "registry.sol")
+CAPPED = os.path.join(ROOT, "tests", "contracts", "parameterized", "capped_registry.sol")
 
 try:
     kind2.find_kind2()
@@ -66,6 +67,49 @@ def test_skolem_constants(text, skolems, dual):
     scan = Scanner(System.make(program, 1))
     assert scan.skolems(formula(text), positive=True) == skolems
     assert scan.dual(formula(text)) == dual
+
+
+@pytest.mark.parametrize("text, needed", [
+    ("forall a : address . m[a] >= 0", 0),                      # Lemma 7.5
+    ("exists a : address . m[a] > 0", 1),
+    # ¬: forall a . exists b: the existential after the last universal needs no idle user
+    ("exists a : address . forall b : address . m[a] >= m[b]", 1),
+    # ¬: exists a . forall b: the witness of a may be an idle user
+    ("forall a : address . exists b : address . m[b] > m[a]", 2),
+    ("exists h : method . exists args : calldataargs . << null : C . h(args) >> x > 0", 1),
+])
+def test_idle_users_needed(text, needed):
+    program, _ = check(parse(SOURCE))
+    assert Scanner(System.make(program, 1)).idle_needed(formula(text)) == needed
+
+
+def test_idle_users():
+    """Idle: every map entry has its default value, and no address field holds the user;
+    grouped by balance."""
+    program, _ = check(parse(SOURCE))
+    system = System.make(program, 4)
+    state = {"s.C_owner": "u1", "s.C_x": 3}
+    for a in system.addresses:
+        state[f"s.C_m.k_{a}"] = 5 if a == "u2" else 0
+        state[f"s.balance.k_{a}"] = 7 if a == "u4" else 0
+    assert idle_users(state, system) == {0: ["u3"], 7: ["u4"]}
+    del state["s.C_m.k_u3"]                     # a missing value: not idle
+    assert idle_users(state, system) == {7: ["u4"]}
+
+
+def test_participants_of_a_counterexample():
+    """The users named by the transactions taken (all steps but the last): the sender, the
+    called address and the address arguments of the procedure called, not those of the
+    other procedures."""
+    program, _ = check(parse(SOURCE))
+    stream = lambda name, *vs: {"name": name, "instantValues": [[i, v] for i, v in enumerate(vs)]}
+    cex = [{"streams": [stream("t.sender", "A_u1", "A_u2", "A_u3"),
+                        stream("t.cx", "A_C", "A_C", "A_u4"),
+                        stream("t.fx", "P_C_constructor", "P_C_f", "P_C_f"),
+                        stream("t.C_constructor_o", "A_u5", "A_u6", "A_u6"),
+                        stream("t.C_f_a", "A_u7", "A_u8", "A_u9"),
+                        stream("s.C_x", 0, 0, 0)]}]
+    assert V._participants(cex, System.make(program, 9)) == {"u1", "u2", "C", "u5", "u8"}
 
 
 def test_address_existential_under_a_universal():
@@ -185,3 +229,26 @@ def test_parameterized_registry():
         context = {}
         V.prove_invariants(program, n, 30, context)
         assert V.verify(program, rule, n, 20, context=context).status == status
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_counterexamples_extend_with_idle_users():
+    """With 3 users asked for, the checks use at most 2. The counterexample of
+    Someone_registered leaves idle users and holds for every larger number of users
+    (Lemma 7.6); that of Someone_unregistered has none and is not extended (the rule holds
+    with 3 users). With 2 users asked for, Someone_unregistered is refuted."""
+    program, _ = V.load(CAPPED)
+    context: dict = {}
+    V.prove_invariants(program, 3, 30, context, parameterized=True)
+    out = {r.name: V.verify(program, r, 3, 20, context=context, parameterized=True)
+           for r in V.tasks(program)}
+    assert out["Someone_registered"].status == "invalid", out["Someone_registered"].describe()
+    assert "for every n >=" in out["Someone_registered"].scope
+    assert out["Someone_unregistered"].status != "invalid", \
+        out["Someone_unregistered"].describe()
+    context = {}
+    V.prove_invariants(program, 2, 30, context, parameterized=True)
+    rule = program.rule("Someone_unregistered")
+    assert V.verify(program, rule, 2, 20, context=context, parameterized=True).status == \
+        "invalid"
