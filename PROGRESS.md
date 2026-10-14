@@ -371,11 +371,103 @@ with 1.5 GB.
 Not done yet:
 - the larger benchmarks have larger cutoffs: vault 10 (its Houdini steps 5), lending 7
   (steps 5, one rule outside), price-bet 5, AMM 4. The cutoff of a file is the largest over
-  its rules; Houdini could use the cutoff of the steps, and each rule its own;
+  its rules; Houdini could use the cutoff of the steps, and each rule its own (done, see
+  "one number of users per check" below);
 - counterexamples are searched for with c users only (a BMC of depth d needs up to
   d(1 + p) + w users);
 - with c = n, ghost sums are weaker than exact sums: first trying exact sums with n users
   would keep the proofs for exactly n users.
+
+## Done (2026-10-14): parameterized mode on bank, vault, price-bet; one number of users per check
+
+**First batch** (one cutoff per file; 60 s per rule, 60 s per invariant phase, Kind 2 at
+1.2 GB, 100 users asked for; `runs/local-20261014-1313/parameterized_n100`, 33 min). All
+13 verdicts agree with the ground truth, but only bank is decided (13 of 16 rules; vault 0
+of 6, price-bet 0 of 12), against 32 of 34 in `results/v1_benchmarks.csv` (2 users,
+120 s, 2 October). Causes: the price-bet and vault rules quantify `exists` over addresses,
+so 6 counterexamples with 5 users and 1 with 10 do not extend (Lemma 7.5); their proofs in
+the normal mode came from Kind 2 on the transition system, which do not transfer; the
+vault cutoff 10 (one rule) made its encodings slow (`non_inflation`: 172 s and 13.8 MB
+with 10 users, 0.2 MB with 2), so its rules took 320-350 s despite the 60 s budget. One
+Kind 2 run reported "Error opening input file" (vault.sol); it did not happen again on the
+same program; the disk was 99 % full.
+
+**One number of users per check** (DESIGN.md, Sect. 7.5, Prop. 7.6): each step of Houdini
+uses the cutoff of its step for the current candidates; the check of a rule the cutoff of
+its premises; the search for a counterexample to induction the users of that check;
+fuzzing and Kind 2 N = max(c_H, c_R). An `args` variable counts only the address
+parameters of the procedures of the called contract other than the constructor (vault
+`non_inflation`: 8 instead of 10; lending: 6 instead of 7). Experiments, with Kind 2 calls
+counted by task and number of users (scratchpad script):
+- regressions (46 rules, 10 s per rule, 100 users asked for): verdicts unchanged (43
+  correct, the same 3 unknown), 86 s; of the free-state rule checks, 62 with 1 user, 5
+  with 2; reach 21 with 1 user; Houdini 7 with 2 and 5 with 3; the 4 + 1 + 1 calls with 100
+  users are the additivity rules outside the fragment;
+- bank and bank_v3: the same 7 decided rules, e.g. "for every n >= 2 users; rule checked
+  with 1 user";
+- vault and vault_v2 (60 s per rule): Houdini 8 calls with 4 users and 8 with 5;
+  `Two_steps_drainability` checked with 3 users (reach with 3, fuzzing and Kind 2 with 5),
+  `non_inflation` with 8. The vault_v2 counterexample is found with 5 users in 17 s (75 s
+  with 10), and still does not extend; `non_inflation` still takes 224-236 s (encoding with
+  8 users). No new verdict on vault.
+
+## Planned (next, agreed 2026-10-14): extend more counterexamples by symmetry
+
+Lemma 7.5 extends a counterexample with m users to every n ≥ m only if no address variable
+of φ is universal in ¬φ. For rules with `exists a : address` (price-bet Winnability,
+Liquidity, Frontrunning; vault Two_steps_drainability), the new users must also fail.
+Idea: users that did nothing in the trace are interchangeable with the new ones. If the
+trace leaves at least w idle users with the same state as the new ones (w the number of
+address variables universal in ¬φ), every assignment of these variables to new users can
+be mapped, injectively, to idle users of the trace by a permutation of the users, which
+preserves the truth of ¬φ. To work out: the exact notion of idle (no transaction, not the
+value of a field or parameter, default entries, the same initial balance as the new users,
+which BMC and fuzzing may choose differently), the nesting of the universals (all of them,
+or only the outermost), and how the searches can leave enough idle users (m ≥ users of the
+trace + w).
+
+## Planned (later, agreed 2026-10-14): k-induction with a cutoff depending on k
+
+Goal: proofs on the transition system that hold for every n ≥ c, which Kind 2's proofs
+with c users do not give (its IC3 and invariant generation produce invariants about the
+users u1, ..., uc).
+
+Main steps: a k-induction proof consists of two formulas; each is a check on free states,
+like the steps of Houdini; read in first-order logic (DESIGN.md, Sect. 7.2), its cutoff
+grows linearly in k; both are checked with that many users, so the proof holds for every
+larger number (Thm. 7.3).
+
+- **The two formulas** (T one transaction, with the guard on construction of the rules):
+  Base_k: Init(s_0) ∧ T(s_0, t_0, s_1) ∧ ... ∧ T(s_{k-1}, t_{k-1}, s_k) ⇒ φ(s_0) ∧ ... ∧ φ(s_k);
+  Step_k: T(s_0, t_0, s_1) ∧ ... ∧ T(s_{k-1}, t_{k-1}, s_k) ∧ φ(s_0) ∧ ... ∧ φ(s_{k-1}) ⇒ φ(s_k),
+  with s_0 free. If both are valid with n users, φ holds in every reachable state of S_n.
+  The proved invariants C may be added as premises at every state of Step_k (then the
+  claim is for n ≥ max(c_H, c_k), Prop. 7.6).
+- **The cutoff.** In ¬Step_k, the address constants are the a_F address fields of s_0; for
+  each transaction, its sender and the address parameters of the procedure it calls (the
+  witness fixes the procedure, so p is the largest number of address parameters of a
+  procedure, constructors included, since the transition system can call them); the w
+  address universals of φ(s_k); the address existentials e of each premise φ(s_i) (and of
+  the invariants C, if added). So c_k = max(1, a_F + k(1 + p) + w + k·e), and Base_k needs
+  at most as many (Init fixes the address fields to null). φ must satisfy (F3) in both
+  polarities, since it is a premise and a conclusion. Bank: a_F = 0, p = 0, w = 1, e = 0,
+  so c_k = k + 1.
+- **Requirements.** Only plain k-induction: no IC3, no invariant generation (their
+  invariants name the users); path compression (states pairwise distinct), if enabled,
+  adds address existentials (a differing entry for each pair of states) and must be
+  disabled or counted. Sums as ghost variables (Lemma 7.4); in Base_k, the initial sum of
+  the balances becomes a free value (sound, weaker), while the sums of the fields are 0.
+- **Implementation.** Build Base_k and Step_k as free checks, as the steps of Houdini
+  (`invariants.py`), for k = 1, 2, ... with c_k users, rather than rely on Kind 2's
+  internal k-induction: then the checked formula is the one whose cutoff is computed, and
+  no auxiliary invariant enters. A counterexample of Base_k is a counterexample of φ with
+  c_k users (Lemma 7.5 or the symmetry extension above decides whether it extends); a
+  counterexample of Step_k only says that k is too small.
+- **Cost and open question.** c_k grows with k, so it helps only for small k; plain
+  k-induction without auxiliary invariants is much weaker than what Kind 2 ran for the
+  baseline proofs. First experiment: Kind 2 with BMC and k-induction only, with 2 users, on
+  the rules proved in `results/v1_benchmarks.csv` (about 10 rules, at most 10 minutes),
+  recording the depth k of each proof.
 
 ## Decisions taken after M1 (with the user)
 

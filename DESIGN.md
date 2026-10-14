@@ -466,32 +466,52 @@ extension is the extension of the transition). ∎
 
 ### 7.5 The parameterized mode
 
+Each check uses its own number of users, the least one for which Thm. 7.3 applies to it.
+Checks with different numbers of users combine as follows.
+
+**Proposition 7.6.** Let C be the final set of Houdini, and suppose that the step of each
+procedure f for C is valid with k_f ≥ max(1, k(χ#_f)) users. Let the check of a rule φ on a
+free state, with premises C' ⊆ C, be valid with u ≥ max(1, k(χ#_φ)) users. Then φ holds in
+the reachable states of S_n for every n ≥ max(c_H, u), where c_H = max_f k_f.
+
+*Proof.* Let n ≥ max(c_H, u). By Thm. 7.3 and Lemma 7.4, each step is valid with n users,
+so C is inductive in S_n; it holds in the initial states (no contract is constructed), so
+it holds in every reachable state. The check of φ is valid with n users for the same
+reasons; so every reachable state, which satisfies C', satisfies φ. ∎
+
 With `--parameterized` (strategy portfolio), for n users asked for:
-* the cutoff c of a file is the largest max(1, k(χ#)) of its checks (`Checks.cutoff`): the
-  step of each procedure, and each rule on a free state, with all the templates of the
-  invariant generator and the declared invariants as candidates. Houdini and the choice
-  of premises only remove candidates, which does not increase k: premises add their
-  counts, and the candidates after a call count for the largest one;
-* if the steps are in the fragment and c ≤ n, every task of a rule in the fragment uses c
-  users and ghost sums; a rule outside the fragment, or c > n, is checked as without the
-  option. The verdict says which;
-* `inductive` and `invariants` verdicts hold for every n' ≥ c (Thm. 7.3 and Lemma 7.4 for
-  every step of the final set of Houdini, which is then inductive with n' users, and for the
-  check of the rule);
-* a proof by Kind 2 on the transition system holds for c users only (its invariants, IC3
-  and k-induction are about c users), and is ignored if c < n;
-* a counterexample holds for every n' ≥ c if Lemma 7.5 applies; otherwise it holds for c
-  users only, and the outcome is unknown if c < n.
+* `Checks.cutoff` bounds the counts from above, with all the templates of the invariant
+  generator and the declared invariants as candidates: Houdini and the choice of premises
+  only remove candidates, which does not increase k (premises add their counts, and the
+  candidates after a call count for the largest one). A rule is checked in parameterized
+  mode if the steps and the rule are in the fragment and N = max(c_H, c_R) ≤ n, with these
+  bounds c_H (steps) and c_R (rule); otherwise it is checked as without the option. The
+  verdict says which;
+* each step of Houdini uses the cutoff of the step for the current candidates
+  (`Checks.step_count`); when Houdini ends, the invariants hold for every n' ≥ c_H, the
+  largest of the cutoffs of the final steps (`_Invariants.users`);
+* the check of the rule uses the cutoff of its premises (`Checks.rule_count`), possibly
+  fewer users than Houdini; a proof (`inductive` or `invariants`) holds for every
+  n' ≥ max(c_H, u) (Prop. 7.6), and the verdict gives both numbers;
+* the searches for counterexamples are sound with any number of users; the search for the
+  counterexample to induction uses the users of the check that produced it, fuzzing and
+  Kind 2 use N users. A counterexample with m users holds for every n' ≥ m if Lemma 7.5
+  applies; otherwise for m users only, and the outcome is unknown if m < n;
+* a proof by Kind 2 on the transition system holds for N users only (its invariants, IC3
+  and k-induction are about N users), and is ignored if N < n.
 
 For the step of procedure f, k(χ#) is the number of address fields, plus 1 for the sender,
 plus the address parameters of f, plus the largest number of address universals of a
 candidate (1 for the templates of Sect. 6), plus the address existentials of the declared
 invariants (as premises). For a rule, it is the number of address fields, plus the address
-universals of the rule, plus the latter term. On bank, c = 2 (the steps, and
-`No_frontrun_deposit`, which has two address universals).
+universals of the rule, plus the latter term. An `args` variable counts the address
+parameters of the procedures of the called contract other than the constructor (a method
+variable does not denote a constructor, and the other parameters do not affect the call).
+On bank, c_H = 2, and the rules need 1 or 2 users; on vault, the steps need 4 or 5 users
+and the rules 3 and 8.
 
-*Limits.* (1) Counterexamples are searched for with c users; one that needs more users is
-not found (registry `At_most_two` is unknown for every n). A BMC of depth d would need up
+*Limits.* (1) Counterexamples are searched for with few users; one that needs more users
+is not found (registry `At_most_two` is unknown for every n). A BMC of depth d would need up
 to d(1 + p) + w users (p address parameters, w witnesses). (2) Rules such as additivity
 P1_true, `forall c1 c2 . exists c3 v12 v3 . forall addr ...`, are outside (F3). (3) With
 c = n, ghost sums are weaker than exact sums with n users, so a proof for exactly n users
@@ -502,4 +522,7 @@ files, the time is 62–71 s for n = 2, 3, 4 and 100 (normal mode: 71–78 s for
 and 457 s with 23 rules decided for n = 100); 43 verdicts are correct for n ≥ 3, and three
 are unknown as expected (two counterexamples outside Lemma 7.5, one proof by Kind 2). On
 bank, the three rules proved with 2 users are proved for every n ≥ 2 in 15–16 s, for any n
-asked for; the normal mode with 100 users does not finish.
+asked for; the normal mode with 100 users does not finish. With one number of users per
+task, the verdicts on the regressions are unchanged, and most of their checks use 1 user;
+on vault_v2, the counterexample of `Two_steps_drainability` is found with 5 users in 17 s
+(75 s with 10 users, the former cutoff of the file).

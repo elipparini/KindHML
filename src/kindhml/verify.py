@@ -198,13 +198,16 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
          killed a solver.
     An invariant proved inductive (task 1) is valid ("inductive").
 
-    With `parameterized` (strategy "portfolio"; DESIGN.md, Sect. 7), if the checks have a
-    cutoff c <= n_users, every task uses c users and sums are state variables
-    (`effective_users`). A proof of tasks 1-2 then holds for every number of users n >= c,
-    and so does a counterexample if the rule has no address variable universal in its
-    negation (`Scanner.dual`; the other users stay idle); otherwise the counterexample says
-    nothing about n_users > c, and the outcome is unknown. A proof of task 5 holds only for
-    c users, and is ignored if c < n_users."""
+    With `parameterized` (strategy "portfolio"; DESIGN.md, Sect. 7), if the rule has a
+    cutoff N = max(c_H, c_R) <= n_users (`effective_users`), sums are state variables and
+    each task uses its own number of users: each step of Houdini its cutoff (the invariants
+    then hold for every n >= c_H, the largest of them, `_Invariants.users`); the check of
+    the rule on a free state the cutoff u of its premises (the rule then holds for every
+    n >= max(c_H, u)); the searches for counterexamples and Kind 2, N users. A
+    counterexample holds for every n >= its number of users if the rule has no address
+    variable universal in its negation (`Scanner.dual`; the other users stay idle);
+    otherwise it says nothing about more users, and the outcome is unknown. A proof of task
+    5 holds only for N users, and is ignored if N < n_users."""
     if context is None:
         context = {}
     users, ghost, cut = (effective_users(context, program, n_users, mode, expand, invgen,
@@ -220,33 +223,40 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
         return kind2_search(rule, lustre, timeout or None, extra_args, solver, cex)
     dual = ghost and Scanner(System.make(program, users)).dual(rule.formula)
 
-    def scoped(o: Outcome) -> Outcome:
-        """The outcome with the numbers of users for which it holds (parameterized mode)."""
+    def scoped(o: Outcome, low: int, checked: Optional[int] = None) -> Outcome:
+        """The outcome with the numbers of users for which it holds (parameterized mode):
+        a proof by tasks 1-2 for every n >= low, a counterexample with low users."""
         if cut is None:
             return o
         if not ghost:
-            why = (f"cutoff {cut.value} > {n_users}" if cut.of_rule(rule.name) is not None
+            c = cut.of_rule(rule.name)
+            why = (f"cutoff {c} > {n_users}" if c is not None
                    else f"no cutoff: {cut.outside.get(rule.name) or cut.reason}")
-            o.scope = f"with {users} users; {why}"
+            o.scope = f"with {_n(users)}; {why}"
             return o
         if o.status == "valid":
-            o.scope = (f"for every n >= {users} users" if o.method in ("inductive", "invariants")
-                       else f"for {users} users")
+            o.scope = (f"for every n >= {_n(low)}" if o.method in ("inductive", "invariants")
+                       else f"for {_n(low)}")
+            if checked is not None and checked != low:
+                o.scope += f"; rule checked with {_n(checked)}"
         elif o.status == "invalid" and not dual:
-            o.scope = f"counterexample with {users} users, for every n >= {users}"
-        elif o.status == "invalid" and reduced:
+            o.scope = f"counterexample with {_n(low)}, for every n >= {low}"
+        elif o.status == "invalid" and low < n_users:
             o = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), o.errors, o.solver,
                         o.method, o.cti, trace=o.trace,
-                        scope=f"a counterexample with {users} users does not extend to"
-                              f" {n_users} users")
+                        scope=f"a counterexample with {_n(low)} does not extend to"
+                              f" {_n(n_users)}")
         else:
-            o.scope = f"with {users} users"
+            o.scope = f"with {_n(low)}"
         return o
 
-    invs = _entry(context, program, users, mode, expand, invgen, user_invariants, ghost)
+    # Houdini once per file: with the cutoffs of its steps in parameterized mode
+    invs = _entry(context, program, cut.steps if ghost else users, mode, expand, invgen,
+                  user_invariants, ghost)
     nonlinear = is_nonlinear(program)
     start, budget = time.time(), FIRST_BUDGET
     proof_open, target, engines, kind2_open = True, None, extra_args, True
+    target_users = users                # the users of the counterexample to induction
     premises: List[List[str]] = []
     attempts: Optional[List[tuple]] = None
     last = Outcome(rule, kind2.PropertyResult(rule.name, "unknown"), [])
@@ -256,7 +266,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
             # searched for by "reach" in the same round
             if task == "invariants" and invs.proved is not None:
                 if rule.invariant and rule.name in invs.proved:
-                    return scoped(_valid(rule, "inductive", time.time() - start))
+                    return scoped(_valid(rule, "inductive", time.time() - start), invs.users)
                 continue
             if task == "proof" and (invs.proved is None or not proof_open):
                 continue
@@ -266,7 +276,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                 continue
             left = None if deadline is None else deadline - time.time()
             if left is not None and left <= 0:
-                return scoped(last)
+                return scoped(last, users)
             b = budget if left is None else min(budget, left)
             if task == "kind2":
                 # With a time limit and linear arithmetic, Kind 2 gets all the time left: it
@@ -279,7 +289,7 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
             if task == "invariants":
                 invs.attempt(b)
                 if invs.proved is not None and rule.invariant and rule.name in invs.proved:
-                    return scoped(_valid(rule, "inductive", time.time() - start))
+                    return scoped(_valid(rule, "inductive", time.time() - start), invs.users)
             elif task == "proof":
                 # forms to try: for each premise, from the smallest, the rule as one property
                 # and split into cases; a counterexample under the last premise (the
@@ -295,10 +305,13 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     if left is not None and left <= 1:
                         break
                     b = budget if left is None else min(budget, left)
-                    lus, names = invs.checks.rule_check(rule, premises[i], split)
+                    # parameterized mode: the cutoff of this check, with these premises
+                    u = max(1, invs.checks.rule_count(premises[i], rule)) if ghost else users
+                    lus, names = invs.checks_for(u).rule_check(rule, premises[i], split)
                     status, refuted, s = _free_run(lus, names, b)
                     if status == "valid":
-                        return scoped(_valid(rule, "invariants", time.time() - start, s))
+                        return scoped(_valid(rule, "invariants", time.time() - start, s),
+                                      max(invs.users, u), u)
                     if status == "invalid":
                         attempts = [a for a in attempts if a[0] != i]
                         if i == len(premises) - 1:
@@ -309,29 +322,33 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                             res = next((p for p in out.properties if p.name == refuted),
                                        None)
                             target = state_values(res.counterexample) if res else {}
+                            target_users = u
                             last.cti = describe_state(target)
                             break
             elif task == "fuzz":
                 deadline_fuzz = time.time() + b
-                for txs, st in invs.fuzzer.candidates(rule, b / 2):
+                checks = invs.checks_for(users)
+                for txs, st in invs.fuzzer_for(users).candidates(rule, b / 2):
                     left = deadline_fuzz - time.time()
                     if left <= 1:
                         break
-                    lus = invs.checks.concrete_check(
-                        rule, state_literal(st, invs.checks.enc.system, invs.checks.enc))
+                    lus = checks.concrete_check(
+                        rule, state_literal(st, checks.enc.system, checks.enc))
                     status, _, s = _free_run(lus, [rule.name], left)
                     if status == "invalid":
                         res = kind2.PropertyResult(rule.name, "invalid", len(txs), "fuzz",
                                                    time.time() - start)
                         return scoped(Outcome(rule, res, [], s, "fuzz",
-                                              trace="; ".join(describe_tx(tx) for tx in txs)))
+                                              trace="; ".join(describe_tx(tx) for tx in txs)),
+                                      users)
             elif task == "reach":
-                lus = invs.checks.reach_check(target)
+                lus = invs.checks_for(target_users).reach_check(target)
                 out = kind2.run(lus, b, solver="z3", extra_args=["--enable", "BMC"], cex=cex)
                 res = next((p for p in out.properties if p.name == "unreachable"), None)
                 if res and res.status == "invalid":
                     res.name, res.time = rule.name, time.time() - start
-                    return scoped(Outcome(rule, res, out.errors, "z3", "reach", last.cti))
+                    return scoped(Outcome(rule, res, out.errors, "z3", "reach", last.cti),
+                                  target_users)
             else:
                 o = kind2_search(rule, lustre, b, engines, solver, cex)
                 if o.status == "valid" and reduced:
@@ -340,12 +357,16 @@ def verify(program: S.Program, rule: S.Rule, n_users: int, timeout: Optional[flo
                     continue
                 if o.status in ("valid", "invalid"):
                     o.method = "kind2"
-                    return scoped(o)
+                    return scoped(o, users)
                 if o.memory_killed and engines is None:
                     engines = LIGHT_ENGINES
                 o.method, o.cti = "kind2", last.cti
                 last = o
         budget *= 2
+
+
+def _n(users: int) -> str:
+    return f"{users} user" if users == 1 else f"{users} users"
 
 
 def _entry(context: dict, program: S.Program, n_users: int, mode: str, expand,
@@ -361,12 +382,12 @@ def _entry(context: dict, program: S.Program, n_users: int, mode: str, expand,
 def effective_users(context: dict, program: S.Program, n_users: int, mode: str, expand,
                     invgen: bool, user_invariants: bool,
                     rule: Optional[S.Rule] = None) -> Tuple[int, bool, Cutoff]:
-    """Parameterized mode: the number of users of the checks, whether sums are state
-    variables, and the cutoff c of the checks on free values (`Checks.cutoff`, with all the
-    templates of `invgen` and the invariants of the file as candidates: those that survive
-    give smaller cutoffs). If c <= n_users: c users, with sums as state variables; otherwise
-    (or without a cutoff, for the file or for `rule`): n_users, as without parameterized
-    mode."""
+    """Parameterized mode: a number of users c, whether sums are state variables, and the
+    cutoffs of the checks on free values (`Checks.cutoff`, with all the templates of `invgen`
+    and the invariants of the file as candidates: those that survive give smaller cutoffs).
+    c is the cutoff of the steps of Houdini c_H or, for `rule`, max(c_H, its cutoff c_R).
+    If c <= n_users: c, with sums as state variables; otherwise (or without a cutoff):
+    n_users, as without parameterized mode."""
     key = ("cutoff", id(program), invgen, user_invariants)
     if key not in context:
         rules = [r for r in program.rules if user_invariants or not r.invariant]
@@ -375,7 +396,7 @@ def effective_users(context: dict, program: S.Program, n_users: int, mode: str, 
                              program.balance_type)
         context[key] = Checks(extended, 1, mode, expand, ghost_sums=True).cutoff(tasks(program))
     cut = context[key]
-    c = cut.value if rule is None else cut.of_rule(rule.name)
+    c = cut.steps if rule is None else cut.of_rule(rule.name)
     if c is None or n_users < c:
         return n_users, False, cut
     return c, True, cut
@@ -530,14 +551,52 @@ class _Invariants:
         self.keys: Dict[str, tuple] = {}        # their template keys (invgen.minimize)
         self.fuzzer = Fuzzer(checks.enc.system)
         self.cutoff: Optional[Cutoff] = None       # parameterized mode (`effective_users`)
+        self.parameterized = checks.enc.system.ghost_sums
+        size = checks.enc.system.n_users
+        self._checks: Dict[int, Checks] = {size: checks}   # the checks for other numbers
+        self._fuzzers: Dict[int, Fuzzer] = {size: self.fuzzer}     # of users
         self.candidates = [n for n in checks.candidates if n not in checks.axioms]
         self.proved: Optional[List[str]] = None if self.candidates else list(checks.axioms)
+        # once proved: in parameterized mode, the proved invariants hold for every number of
+        # users >= users (the largest cutoff of the steps); otherwise, for n_users
+        self.users: Optional[int] = None if self.candidates else self._proved_users([])
         self.dropped: Dict[str, str] = {}
         # for the current candidates: the step programs (one per procedure), and the
         # procedures whose step is proved
         self._for: Optional[List[str]] = None
         self._programs: List[tuple] = []
         self._done: set = set()
+
+    def checks_for(self, n_users: int) -> Checks:
+        """The checks of the same candidates with `n_users` users."""
+        if n_users not in self._checks:
+            c = self.checks
+            self._checks[n_users] = Checks(c.program, n_users, c.mode, c.expand,
+                                           c.enc.system.ghost_sums)
+        return self._checks[n_users]
+
+    def fuzzer_for(self, n_users: int) -> Fuzzer:
+        if n_users not in self._fuzzers:
+            self._fuzzers[n_users] = Fuzzer(self.checks_for(n_users).enc.system)
+        return self._fuzzers[n_users]
+
+    def _steps(self, names: List[str]) -> List[tuple]:
+        """The step programs of Houdini for the candidates `names`, one per procedure, with
+        their checks: in parameterized mode, each with the cutoff of its step for these
+        candidates (`Checks.step_count`)."""
+        if not self.parameterized:
+            return [(lus, c, p, self.checks) for lus, c, p in self.checks.step_conj_checks(names)]
+        out = []
+        for c, p in self.checks.enc.system.methods:
+            checks = self.checks_for(max(1, self.checks.step_count(names, c, p)))
+            out += [(lus, c, p, checks)
+                    for lus, c, p in checks.step_conj_checks(names, only=(c, p))]
+        return out
+
+    def _proved_users(self, programs: List[tuple]) -> int:
+        if not self.parameterized:
+            return self.checks.enc.system.n_users
+        return max([1] + [checks.enc.system.n_users for *_, checks in programs])
 
     @staticmethod
     def make(program: S.Program, n_users: int, mode: str, expand, invgen: bool = True,
@@ -589,13 +648,14 @@ class _Invariants:
             names = self.candidates
             if not names:
                 self.proved = list(self.checks.axioms)
+                self.users = self._proved_users([])
                 return
             if self._for != names:
                 self._for, self._done = list(names), set()
-                self._programs = self.checks.step_conj_checks(names)
+                self._programs = self._steps(names)
             refuted: Dict[str, str] = {}
             killed = False
-            for i, (lus, c, p) in enumerate(self._programs):
+            for i, (lus, c, p, checks) in enumerate(self._programs):
                 if i in self._done:
                     continue
                 left = deadline - time.time()
@@ -608,7 +668,7 @@ class _Invariants:
                     continue
                 found = set()
                 if status == "invalid" and res is not None:
-                    found = self.checks.refuted_after(res.counterexample, names, c, p)
+                    found = checks.refuted_after(res.counterexample, names, c, p)
                 if found:
                     refuted.update({n: f"inductive step ({p.name})" for n in found})
                     continue
@@ -622,7 +682,7 @@ class _Invariants:
                 if left < min(budget, FIRST_BUDGET):
                     break
                 given = min(left, budget)
-                lus1, about = self.checks.step_check(names, only=(c, p))
+                lus1, about = checks.step_check(names, only=(c, p))
                 decided, killed = _free_run_all(lus1, given)
                 refuted.update({about[q]: f"inductive step ({p.name})"
                                 for q, st in decided.items() if st == "invalid"})
@@ -642,6 +702,7 @@ class _Invariants:
                 continue
             if len(self._done) == len(self._programs):
                 self.proved = self.checks.axioms + names
+                self.users = self._proved_users(self._programs)
             return
 
 
@@ -650,7 +711,9 @@ def invariant_summary(invs: "_Invariants") -> str:
     parameterized mode, also the cutoff and the number of users of the checks."""
     users = ""
     if invs.cutoff is not None:
-        users = f"; {invs.cutoff.describe()}, checks with {invs.checks.enc.system.n_users} users"
+        users = f"; {invs.cutoff.describe()}"
+        if invs.parameterized and invs.proved is not None:
+            users += f"; invariants for every n >= {_n(invs.users)}"
     if invs.proved is None:
         return (f"invariants: not proved within the time ({len(invs.candidates)} candidates"
                 f" left, {len(invs.dropped)} dropped){users}")

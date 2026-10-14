@@ -42,6 +42,7 @@ class Checks:
     def __init__(self, program: S.Program, n_users: int, mode: str, expand: Sequence[str],
                  ghost_sums: bool = False):
         self.program = program
+        self.mode, self.expand = mode, tuple(expand)
         self.enc = Encoder(System.make(program, n_users, ghost_sums))
         self.fenc = FormulaEncoder(self.enc, mode, tuple(expand))
         lemmas = [(n, (lambda st, e=e: self.fenc.inliner.run(e, {"s": st})))
@@ -100,34 +101,51 @@ class Checks:
             out.append(L.op("=>", guard, L.conj(bounds)))
         return L.conj(out)
 
+    def _premise_count(self, names: List[str]) -> int:
+        """The address constants of the free state and of the premises `names` in the
+        negation of a check (`cutoff.py`). Raises OutOfFragment."""
+        scan = Scanner(self.enc.system)
+        return check_program(self.enc.system) + sum(
+            scan.skolems(self.program.rule(n).formula, positive=False)
+            for n in names if n not in self.axioms)
+
+    def step_count(self, names: List[str], c: S.Contract, p: S.Procedure) -> int:
+        """k of the step of Houdini for procedure p with the candidates `names`
+        (`step_conj_checks`): its cutoff is max(1, k). Raises OutOfFragment."""
+        conj: S.Expr = S.BoolLit(True)
+        for n in names:
+            if n not in self.axioms:
+                conj = S.BinOp("&&", conj, self.program.rule(n).formula)
+        after = self._after(c, p, self._guard(conj))
+        return self._premise_count(names) + Scanner(self.enc.system).skolems(after, True)
+
+    def rule_count(self, premises: List[str], rule: S.Rule) -> int:
+        """k of the check of `rule` on a free state with the premises `premises`
+        (`rule_check`): its cutoff is max(1, k). Raises OutOfFragment."""
+        return (self._premise_count(premises)
+                + Scanner(self.enc.system).skolems(rule.formula, True))
+
     def cutoff(self, rules: List[S.Rule]) -> Cutoff:
-        """The cutoffs of the checks (`cutoff.py`) with all the candidates as premises: the
-        step of each procedure, and each rule on a free state. Fewer premises or candidates
-        do not increase them: premises add their counts, and the candidates after a call
-        the largest one."""
-        system = self.enc.system
-        scan = Scanner(system)
+        """The counts of the checks (`cutoff.py`) with all the candidates as premises: the
+        step of each procedure, and each rule on a free state. They bound those with fewer
+        premises or candidates: premises add their counts, and the candidates after a call
+        count for the largest one. The checks themselves use the counts of their actual
+        premises and candidates (`step_count`, `rule_count`)."""
         names = [n for n in self.candidates if n not in self.axioms]
-        cands = [self.program.rule(n).formula for n in names]
+        checks: Dict[str, int] = {}
         try:
-            fields = check_program(system)
-            premise = fields + sum(scan.skolems(f, positive=False) for f in cands)
-            checks: Dict[str, int] = {}
-            conj: S.Expr = S.BoolLit(True)
-            for f in cands:
-                conj = S.BinOp("&&", conj, f)
-            for c, p in system.methods:
-                after = self._after(c, p, self._guard(conj))
-                checks[f"step of {c.name}.{p.name}"] = premise + scan.skolems(after, True)
+            for c, p in self.enc.system.methods:
+                checks[f"step of {c.name}.{p.name}"] = self.step_count(names, c, p)
         except OutOfFragment as e:
             return Cutoff(None, str(e))
         outside: Dict[str, str] = {}
         for r in rules:
             try:
-                checks[f"rule {r.name}"] = premise + scan.skolems(r.formula, True)
+                checks[f"rule {r.name}"] = self.rule_count(names, r)
             except OutOfFragment as e:
                 outside[r.name] = str(e)
-        return Cutoff(max([1] + list(checks.values())), "", checks, outside)
+        steps = max([1] + [v for k, v in checks.items() if k.startswith("step ")])
+        return Cutoff(steps, "", checks, outside)
 
     def _program(self) -> L.Program:
         """Types and functions of the encoding, without the main node."""
@@ -147,14 +165,17 @@ class Checks:
         prog.decls.append(node)
         return prog.render()
 
-    def step_conj_checks(self, names: List[str]) -> List[Tuple[str, S.Contract, S.Procedure]]:
+    def step_conj_checks(self, names: List[str],
+                         only: Optional[Tuple[S.Contract, S.Procedure]] = None
+                         ) -> List[Tuple[str, S.Contract, S.Procedure]]:
         """The step of Houdini, one program per procedure f, with one property: all the
         candidates in `names` hold after any call of f from a state satisfying them,
         C(s) ⇒ Φ(∀a, x̄, v[, δ]. ⟨a : C.f(x̄) $ v @ δ⟩ (constructed → ∧ names))(s). If it is
         refuted, its counterexample identifies the candidates that do not hold after the
         call (`refuted_after`). With one property per candidate, the inlined call is copied
         into every property: on the lending protocol, 71 candidates were not decided in
-        64 s; as one conjunction, each procedure takes 1-6 s."""
+        64 s; as one conjunction, each procedure takes 1-6 s. With `only`, for that
+        procedure only."""
         conj: S.Expr = S.BoolLit(True)
         for n in names:
             conj = S.BinOp("&&", conj, self.program.rule(n).formula)
@@ -163,6 +184,8 @@ class Checks:
                           self.sum_axioms(self.axioms + names, s)])
         out = []
         for c, p in self.enc.system.methods:
+            if only is not None and (c.name, p.name) != (only[0].name, only[1].name):
+                continue
             after = self.fenc.state_formula(self._after(c, p, self._guard(conj)), s)
             node = L.Function("main", [("s", ST)], [],
                               properties=[("step", L.op("=>", premise, after))],

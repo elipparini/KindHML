@@ -16,12 +16,14 @@ max(1, k) <= n' <= n. Proof: keep null, the contracts, the values of ā, and fur
 to n'; the restriction is a substructure, and universal sentences hold in substructures.
 
 So, with the cutoff c = max(1, k): χ valid with c users implies χ valid with every n >= c.
+Each check has its own cutoff: the steps of Houdini (`Checks.step_count`) and each rule
+(`Checks.rule_count`) are checked with their own numbers of users.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import syntax as S
 from .model import System
@@ -33,23 +35,30 @@ class OutOfFragment(Exception):
 
 @dataclass
 class Cutoff:
-    """The cutoffs of the checks of a file: the steps of Houdini, and each rule on a free
-    state. A rule outside the fragment has none, and is checked as without parameterized
-    mode; if a step is outside the fragment, the file has no cutoff."""
-    value: Optional[int]                      # of the steps and the rules in the fragment
-    reason: str = ""                          # why the file has no cutoff
-    checks: Dict[str, int] = field(default_factory=dict)   # the cutoff of each check
+    """Upper bounds on the cutoffs of the checks of a file, with all the candidates: the
+    steps of Houdini, and each rule on a free state. A rule outside the fragment has none,
+    and is checked as without parameterized mode; if a step is outside the fragment, no rule
+    has one."""
+    steps: Optional[int]                      # max(1, the counts of the steps); None: outside
+    reason: str = ""                          # why the steps have no cutoff
+    checks: Dict[str, int] = field(default_factory=dict)   # the count k of each check
     outside: Dict[str, str] = field(default_factory=dict)  # rule -> why it has none
 
     def of_rule(self, name: str) -> Optional[int]:
-        """The cutoff for the rule `name` (with the steps), or None."""
-        return None if self.value is None or name in self.outside else self.value
+        """The least number of users for which a verdict on the rule `name` can be claimed
+        for every larger number: max(steps, its own cutoff); None outside the fragment."""
+        if self.steps is None or name in self.outside:
+            return None
+        return max(self.steps, self.checks.get(f"rule {name}", 1))
 
     def describe(self) -> str:
-        if self.value is None:
+        if self.steps is None:
             return f"no cutoff ({self.reason})"
-        worst = max(self.checks.items(), key=lambda x: x[1])[0] if self.checks else "-"
-        out = f"cutoff {self.value} (largest: {worst})"
+        rules = [max(1, v) for k, v in self.checks.items() if k.startswith("rule ")]
+        out = f"cutoffs: steps of Houdini <= {self.steps}"
+        if rules:
+            out += (f", rules {min(rules)}" if min(rules) == max(rules)
+                    else f", rules {min(rules)}-{max(rules)}")
         if self.outside:
             out += f", {len(self.outside)} rules outside the fragment"
         return out
@@ -73,8 +82,37 @@ class Scanner:
 
     def __init__(self, system: System):
         self.methods = sum(1 for _, p in system.methods if p.name != S.CONSTRUCTOR)
-        self.params = len(system.param_vars)
-        self.addr_params = sum(1 for v in system.param_vars if v.type == S.ADDRESS)
+        # per contract, the parameters of the procedures a method variable can denote (not
+        # the constructor): only those of the called procedure matter in a modality
+        self.params: Dict[str, int] = {}
+        self.addr_params: Dict[str, int] = {}
+        for c, p in system.methods:
+            if p.name != S.CONSTRUCTOR:
+                self.params[c.name] = self.params.get(c.name, 0) + len(p.params)
+                self.addr_params[c.name] = self.addr_params.get(c.name, 0) + sum(
+                    1 for x in p.params if x.type == S.ADDRESS)
+
+    @staticmethod
+    def _callees(var: str, e) -> set:
+        """The contracts called by the modalities of e whose arguments are the variable var
+        (of type calldataargs)."""
+        out = set()
+        if isinstance(e, S.Modal) and any(isinstance(a, S.QVar) and a.name == var
+                                          for a in e.args):
+            out.add(e.contract)
+        for name in getattr(e, "__dataclass_fields__", ()):
+            v = getattr(e, name)
+            for x in (v if isinstance(v, tuple) else (v,)):
+                if isinstance(x, S.Expr):
+                    out |= Scanner._callees(var, x)
+        return out
+
+    def _args(self, e: S.Quant) -> Tuple[int, int]:
+        """(parameters, address parameters) that matter for the calldataargs variable of e:
+        those of the procedures, other than the constructors, of the contracts it calls."""
+        callees = self._callees(e.var, e.body)
+        return (sum(self.params.get(c, 0) for c in callees),
+                sum(self.addr_params.get(c, 0) for c in callees))
 
     def skolems(self, e: S.Expr, positive: bool, blocked: bool = False) -> int:
         """The number of address existentials of ¬χ in e (Skolem constants), bounded from
@@ -93,11 +131,12 @@ class Scanner:
                     raise OutOfFragment(f"address existential '{e.var}' under a universal")
                 return 1 + body(blocked)
             if e.type == S.ARGS:
+                params, addrs = self._args(e)
                 if not existential:
-                    return body(blocked or self.params > 0)
-                if blocked and self.addr_params:
+                    return body(blocked or params > 0)
+                if blocked and addrs:
                     raise OutOfFragment(f"address arguments '{e.var}' under a universal")
-                return self.addr_params + body(blocked)
+                return addrs + body(blocked)
             if e.type in (S.METHOD, S.BOOL):
                 # a universal over a finite domain: one copy of the witnesses per value
                 size = self.methods if e.type == S.METHOD else 2
@@ -111,11 +150,11 @@ class Scanner:
             if isinstance(e.proc, S.QVar) and not e.args:
                 # h(): its parameters are existential in χ (DESIGN.md, Sect. 4)
                 if positive:
-                    blocked = blocked or self.params > 0
-                elif self.addr_params:
+                    blocked = blocked or self.params.get(e.contract, 0) > 0
+                elif self.addr_params.get(e.contract, 0):
                     if blocked:
                         raise OutOfFragment("address arguments of h() under a universal")
-                    k = self.addr_params
+                    k = self.addr_params[e.contract]
             return k + self.skolems(e.body, positive, blocked)    # Trans is a function
         if isinstance(e, S.UnOp) and e.op == "!":
             return self.skolems(e.arg, not positive, blocked)
@@ -141,11 +180,12 @@ class Scanner:
         if isinstance(e, S.Quant):
             universal = (e.kind == "exists") == positive        # in ¬e
             if universal and (e.type == S.ADDRESS
-                              or (e.type == S.ARGS and self.addr_params)):
+                              or (e.type == S.ARGS and self._args(e)[1])):
                 return True
             return self.dual(e.body, positive)
         if isinstance(e, S.Modal):
-            if isinstance(e.proc, S.QVar) and not e.args and positive and self.addr_params:
+            if (isinstance(e.proc, S.QVar) and not e.args and positive
+                    and self.addr_params.get(e.contract, 0)):
                 return True
             return self.dual(e.body, positive)
         if isinstance(e, S.UnOp) and e.op == "!":

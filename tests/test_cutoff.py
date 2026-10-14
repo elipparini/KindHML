@@ -34,7 +34,7 @@ contract C {
     mapping (address => int) m;
     address owner;
     int x;
-    constructor () { owner = msg.sender }
+    constructor (address o) { owner = o }
     function f(address a, int k) { m[a] = k }
     function g() { x = x + 1 }
 }
@@ -56,6 +56,10 @@ def formula(text: str) -> S.Expr:
     ("(exists a : address . m[a] > 0) -> (forall b : address . m[b] > 0)", 2, False),
     ("exists h : method . forall a : address . m[a] >= 0", 2, False),    # 2 methods
     ("forall a : address . << a : C . f(a, 1) >> m[a] == 1", 1, False),
+    # only the address parameter of f counts: method variables do not denote constructors
+    ("forall a : address . forall h : method . forall args : calldataargs ."
+     " << a : C . h(args) >> m[a] >= 0", 2, False),
+    ("exists h : method . exists args : calldataargs . << null : C . h(args) >> x > 0", 0, True),
 ])
 def test_skolem_constants(text, skolems, dual):
     program, _ = check(parse(SOURCE))
@@ -75,7 +79,7 @@ def test_address_existential_under_a_universal():
 def test_cutoffs_of_the_benchmarks():
     bank, _ = V.load(os.path.join(ROOT, "contracts", "bank", "bank.sol"))
     _, _, cut = V.effective_users({}, bank, 100, V.DEFAULT_MODE, V.DEFAULT_EXPAND, True, True)
-    assert cut.value == 2
+    assert cut.steps == 2 and cut.of_rule("Liquidity") == 2
     assert cut.checks["rule No_frontrun_deposit"] == 2 and cut.checks["rule Liquidity"] == 1
     # P1_true: forall c1 c2 . exists c3 v12 v3 . forall addr ...
     additivity, _ = V.load(os.path.join(ROOT, "contracts", "regression", "additivity.sol"))
@@ -87,6 +91,20 @@ def test_cutoffs_of_the_benchmarks():
         (100, False)
     assert V.effective_users({}, additivity, 100, *args, additivity.rule("P3_true"))[:2] == \
         (1, True)
+
+
+def test_steps_of_houdini_have_their_own_cutoffs():
+    """In parameterized mode, each step is checked with the cutoff of that step for the
+    current candidates (vault: its procedures have different address parameters)."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "vault", "vault.sol"))
+    invs = V._Invariants.make(program, 5, V.DEFAULT_MODE, V.DEFAULT_EXPAND, invgen=False,
+                              ghost_sums=True)
+    names = invs.candidates
+    users = {}
+    for _, c, p, checks in invs._steps(names):
+        users[p.name] = checks.enc.system.n_users
+        assert users[p.name] == max(1, invs.checks.step_count(names, c, p))
+    assert len(set(users.values())) > 1, users
 
 
 def test_effective_users():
@@ -160,7 +178,7 @@ def test_parameterized_registry():
            for r in V.tasks(program)}
     for name in ("Flags", "Count_nonnegative", "Registered_bounded"):
         assert out[name].status == "valid", out[name].describe()
-        assert out[name].scope == "for every n >= 2 users"
+        assert out[name].scope.startswith("for every n >= 2 users"), out[name].scope
     assert out["At_most_two"].status == "unknown"
     rule = program.rule("At_most_two")
     for n, status in ((2, "valid"), (3, "invalid")):
