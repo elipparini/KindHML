@@ -201,18 +201,31 @@ def test_refuted_after_an_expanded_address_argument(tmp_path):
 
 @pytest.mark.kind2
 @pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_first_houdini_pass_runs():
+    """A pass of FIRST_BUDGET seconds, the first round of `verify`, decides steps (they take
+    about 0.5 s on the swap pool); it used to start none."""
+    program, _ = V.load(POOL)
+    invs = V._entry({}, program, 2, V.DEFAULT_MODE, V.DEFAULT_EXPAND, False, True)
+    invs.attempt(V.FIRST_BUDGET)
+    assert invs._done or invs.dropped
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
 def test_portfolio_on_the_swap_pool():
     """Inv is proved (inductive, or by Kind 2 if Houdini needs more than its first budget),
     Small_reserves is dropped, Swap_reversibility is proved on a free state under Inv,
-    Swap_takes_everything is refuted."""
+    Swap_takes_everything is refuted. Without an invariant phase before the rules, Houdini
+    runs in the rounds of the rules; its passes start programs from the first round."""
     program, _ = V.load(POOL)
     context = {}
     out = {r.name: V.verify(program, r, 2, 60, context=context) for r in program.rules}
-    assert out["Inv"].status == "valid"
+    assert out["Inv"].status == "valid", out["Inv"].describe()
     assert (out["Swap_reversibility"].status, out["Swap_reversibility"].method) == \
         ("valid", "invariants")
     assert out["Swap_takes_everything"].status == "invalid"
     assert out["Small_reserves"].status == "invalid"
     invs = next(iter(context.values()))
-    assert invs.proved == ["_lemma_balances_nonnegative", "Inv"]
-    assert invs.dropped == {"Small_reserves": "inductive step"}
+    declared = [n for n in invs.proved if n not in invs.generated]
+    assert declared == ["_lemma_balances_nonnegative", "Inv"]
+    assert invs.dropped["Small_reserves"].startswith("inductive step")

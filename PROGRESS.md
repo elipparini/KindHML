@@ -474,10 +474,35 @@ Results (100 users asked for; data in `runs/local-20261014-1532-idle2` and
   - `test_regression[swap_pool-Inv]`, `[swap_pool-Swap_reversibility]`: fail on HEAD too
     (unknown within the budget); with this change, "true up to 3 / 2 steps";
   - `test_invariants.py::test_portfolio_on_the_swap_pool`: status "error" with this change,
-    "unknown" on HEAD (expected "valid" in both). **To investigate first**: possibly the
-    reserve templates (more candidates on swap_pool), or an error of Kind 2.
-  Next: investigate the error above; rerun the regressions in parameterized mode (100 users)
-  and the use cases (AMM, lending: time of the invariant phase with the new templates).
+    "unknown" on HEAD (expected "valid" in both). Resolved on 2026-10-15, see below.
+  Next: rerun the regressions in parameterized mode (100 users) and the use cases (AMM,
+  lending: time of the invariant phase with the new templates).
+
+## Done (2026-10-15): the first pass of Houdini (with the user)
+
+- **Cause of the swap_pool failure.** It fails on every commit since 7772ac4 (generated
+  invariants); "error" or "unknown" depends on the run (whether Kind 2 reports a bound
+  before its time limit), not on the reserve templates. Two causes:
+  - a pass of Houdini (`_Invariants.attempt`) started a program only with at least
+    min(budget, FIRST_BUDGET) s left. In the first round of `verify` the budget is
+    FIRST_BUDGET, so the pass started none; later passes stopped with 4 s left, for steps
+    of 0.5 s. When Houdini runs in the rounds of the rules (`verify` without the invariant
+    phase, as in the tests), it waited one round, which Kind 2 used without a verdict
+    (16 s, then 32 s): Inv had no verdict within 60 s;
+  - the test expected the proved invariants without the generated ones, and the message
+    "inductive step" without the procedure.
+- **Fix.** A program starts when more than 1 s is left, as the checks of `verify`. The test
+  compares the declared invariants only; new test `test_first_houdini_pass_runs` (it fails
+  without the fix). Swap pool: Inv proved by Houdini in 24 s (before: no verdict in 60 s);
+  Swap_reversibility in 1.5 s (before: 20 s). The command line and `run_all.py` run the
+  invariant phase first, where only the first pass was lost.
+- **Suite** (`-m "not slow"`, 24 min, log `runs/suite-20261015-1321.log`): 382 passed, 3
+  failed, 5 xfailed, 3 xpassed. `swap_pool-Inv` and `swap_pool-Swap_reversibility` pass,
+  and the four `test_trans_kind2[lending*]`. The 3 failures are on `calls`, while Firefox
+  left about 0.9 GB available (Kind 2's limit is half of it). Rerun: `Report_sees_balance_at_call_point`
+  and `Pay_zero_reverts` pass; `Buy_mints` is at the edge, with or without the fix (3 of 6
+  runs pass with it, 2 of 7 without): Kind 2 proves it (ind2) in its first run of 16 s or
+  not, depending on the processes killed by the memory limit.
 
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 

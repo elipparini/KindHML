@@ -816,8 +816,7 @@ class _Invariants:
         constructed, and none is in the initial states; the constructor's step establishes
         them. For each procedure not yet done, the conjunction step (`step_conj_checks`)
         gets the time left, at most `budget` (z3 3/4, cvc5 the rest; a program starts only
-        with at least min(budget, FIRST_BUDGET) seconds left, since a program cut short says
-        nothing):
+        with more than 1 s left, as the checks of `verify`):
         * valid: the procedure is done for the current candidates;
         * invalid: the candidates false after the call of its counterexample are refuted;
         * otherwise, or if the counterexample identifies none, the step is checked with one
@@ -843,7 +842,7 @@ class _Invariants:
                 if i in self._done:
                     continue
                 left = deadline - time.time()
-                if left < min(budget, FIRST_BUDGET):
+                if left <= 1:
                     break
                 given = min(left, budget)
                 status, res, solver, killed = _free_run_cex(lus, "step", given)
@@ -863,7 +862,7 @@ class _Invariants:
                     break
                 # localise with one property per candidate
                 left = deadline - time.time()
-                if left < min(budget, FIRST_BUDGET):
+                if left <= 1:
                     break
                 given = min(left, budget)
                 lus1, about = checks.step_check(names, only=(c, p))
