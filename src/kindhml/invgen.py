@@ -22,7 +22,7 @@ of the contracts (f, g numeric fields, m mappings to numbers, c constants of the
 They are written as source text and type-checked like invariants written by the user. A
 candidate false in a reachable state of the fuzzer (random transactions run by the reference
 interpreter) is discarded at once, as Daikon does; Houdini proves the others or drops them.
-The rules then assume the proved ones not implied by others (`minimize`).
+The properties then assume the proved ones not implied by others (`minimize`).
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from .errors import KindHMLError
 from .fuzz import Fuzzer
 from .lustre import render_real
 from .reference import FormulaEvaluator
-from .typecheck import check_rule
+from .typecheck import check_property
 
 PREFIX = "_gen_"
 
@@ -223,25 +223,25 @@ def minimize(keys: List[tuple]) -> List[tuple]:
     return [k for k in keys if not implied(k)]
 
 
-def _typed(program: S.Program) -> List[Tuple[S.Rule, tuple]]:
+def _typed(program: S.Program) -> List[Tuple[S.Property, tuple]]:
     """The templates as resolved invariants, with their keys (ill-typed ones are left out)."""
     out = []
     for i, (text, key) in enumerate(_templates(program)):
         try:
-            raw = S.Rule(f"{PREFIX}{i}", parse_expr(text), invariant=True)
-            out.append((check_rule(program, raw), key))
+            raw = S.Property(f"{PREFIX}{i}", parse_expr(text), invariant=True)
+            out.append((check_property(program, raw), key))
         except KindHMLError:
             pass
     return out
 
 
-def candidates(program: S.Program) -> List[S.Rule]:
+def candidates(program: S.Program) -> List[S.Property]:
     """The templates as resolved invariants (ill-typed ones are left out)."""
     return [r for r, _ in _typed(program)]
 
 
 def generate(program: S.Program, fuzzer: Fuzzer,
-             seconds: float = 2.0) -> Tuple[List[S.Rule], int, Dict[str, tuple]]:
+             seconds: float = 2.0) -> Tuple[List[S.Property], int, Dict[str, tuple]]:
     """The candidates that hold in the reachable states (all contracts constructed) of
     random traces explored for `seconds`; also returns the number of candidates, and the
     keys of the candidates (for `minimize`, which is applied after Houdini, to the proved
@@ -249,9 +249,9 @@ def generate(program: S.Program, fuzzer: Fuzzer,
     by (res0 > 0) == (sc0 > 0), false when all the reserves are borrowed)."""
     typed = _typed(program)
     key_of = {r.name: k for r, k in typed}
-    rules = [r for r, _ in typed]
+    properties = [r for r, _ in typed]
     ev = FormulaEvaluator(fuzzer.system, range(-1, 4))
-    alive = list(rules)
+    alive = list(properties)
     deadline = time.time() + seconds
     while time.time() < deadline and alive:
         for _, st in fuzzer.traces():
@@ -266,4 +266,4 @@ def generate(program: S.Program, fuzzer: Fuzzer,
                 if ok:
                     keep.append(r)
             alive = keep
-    return alive, len(rules), key_of
+    return alive, len(properties), key_of

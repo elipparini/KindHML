@@ -64,7 +64,7 @@ contract Router {
 }
 
 // @groundtruth: True
-rule Buy_mints {
+property Buy_mints {
     forall a : address . forall n : int .
     (is_EOA(a) && n > 0 && balance[a] >= n) ->
     << a : Shop . buy(n) $ n >> Token.bal[a] == old(Token.bal[a]) + n
@@ -72,27 +72,27 @@ rule Buy_mints {
 
 // The argument `balance` of Token.seen is evaluated before the transfer of 1 token.
 // @groundtruth: True
-rule Report_sees_balance_at_call_point {
+property Report_sees_balance_at_call_point {
     forall a : address . is_EOA(a) ->
     << a : Shop . report() $ 0 >> (!lastReverted -> Token.supply == old(Shop.balance))
 }
 
 // Counterexample: the constructors (Shop's with a positive value), then report().
 // @groundtruth: False
-rule Report_sees_balance_after_transfer {
+property Report_sees_balance_after_transfer {
     forall a : address . is_EOA(a) ->
     << a : Shop . report() $ 0 >> (!lastReverted -> Token.supply == Shop.balance)
 }
 
 // Router has no tokens of its own, so Token.give fails.
 // @groundtruth: False
-rule Relay_never_reverts {
+property Relay_never_reverts {
     forall a : address . is_EOA(a) ->
     << a : Shop . relay(1) $ 0 >> !lastReverted
 }
 
 // Division by zero in an argument reverts the whole transaction.
 // @groundtruth: True
-rule Pay_zero_reverts {
+property Pay_zero_reverts {
     forall a : address . << a : Router . pay(0) $ 0 >> lastReverted
 }

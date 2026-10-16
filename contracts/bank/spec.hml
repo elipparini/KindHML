@@ -1,4 +1,4 @@
-rule Reversibility_deposit {
+property Reversibility_deposit {
     forall addr : address .
     forall c1 : int .
     exists f: method .
@@ -9,7 +9,7 @@ rule Reversibility_deposit {
             (funds[addr] == old(old(funds[addr])))))
 }
 
-rule Liquidity {
+property Liquidity {
     forall addr : address .
     forall n : int .
     (n >= 0 && n <= funds[addr]) ->
@@ -22,7 +22,7 @@ rule Liquidity {
     )
 }
 
-rule No_frontrun_deposit {
+property No_frontrun_deposit {
     forall addrA : address .
     forall nA : int .
     forall addrB : address .
@@ -48,7 +48,7 @@ rule No_frontrun_deposit {
     )
 }
 
-rule Additivity {
+property Additivity {
     forall addr : address .
     forall c1 : int .
     forall c2 : int .

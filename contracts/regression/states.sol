@@ -23,7 +23,7 @@ contract Vault {
 
 }
 
-rule Dummy_true {
+property Dummy_true {
     (
       << owner : Vault . withdraw() $ 0 >>		
         << owner : Vault . finalize() $ 0 >>	

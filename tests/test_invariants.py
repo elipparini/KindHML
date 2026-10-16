@@ -41,7 +41,7 @@ def test_candidates_include_the_balance_lemma():
 def test_only_relevant_invariants_are_assumed():
     """The balance lemma (over balance) does not concern Swap_reversibility."""
     program, c = checks()
-    prop = c.fenc.rule(program.rule("Swap_reversibility"), L.Var("s"))
+    prop = c.fenc.prop(program.prop("Swap_reversibility"), L.Var("s"))
     assert "Pool_r1" in state_fields(prop) and "balance" not in state_fields(prop)
     assert c.relevant(prop, list(c.candidates)) == ["Inv", "Small_reserves"]
 
@@ -52,14 +52,14 @@ def test_premises_direct_then_transitive():
     program, _ = V.load(os.path.join(ROOT, "contracts", "amm-real", "amm_real.sol"))
     c = Checks(program, 2, "inline", ("address", "method"))
     invariants = c.axioms + ["Nonnegative", "Shares"]
-    assert c.premises(program.rule("Swap_reversibility"), invariants) == \
+    assert c.premises(program.prop("Swap_reversibility"), invariants) == \
         [["Nonnegative"], ["Nonnegative", "Shares"]]
 
 
 def test_programs_have_no_transition_system():
     program, c = checks()
     step, about = c.step_check(["Inv"])
-    for lus in (step, c.rule_check(program.rule("Swap_reversibility"), ["Inv"])[0]):
+    for lus in (step, c.property_check(program.prop("Swap_reversibility"), ["Inv"])[0]):
         main = lus[lus.index("node main"):]
         assert "pre" not in main and "->" not in main.replace("=>", "")
     # one step property per procedure, constructor included
@@ -73,13 +73,13 @@ def test_cases_through_implications():
     assert cases(L.op("and", L.op("=>", a, b), c_)) == [L.op("=>", a, b), c_]
 
 
-def test_rule_split_into_cases():
+def test_property_split_into_cases():
     """Swap_reversibility quantifies over the addresses but null: one case per user (with
     the sender Pool, the transaction reverts, and its case simplifies to true)."""
     program, c = checks()
-    _, names = c.rule_check(program.rule("Swap_reversibility"), ["Inv"], split=True)
+    _, names = c.property_check(program.prop("Swap_reversibility"), ["Inv"], split=True)
     assert names == ["Swap_reversibility__0", "Swap_reversibility__1"]
-    _, names = c.rule_check(program.rule("Swap_reversibility"), ["Inv"])
+    _, names = c.property_check(program.prop("Swap_reversibility"), ["Inv"])
     assert names == ["Swap_reversibility"]
 
 
@@ -87,17 +87,17 @@ def test_sum_of_a_mapping():
     """sum(m): typed as the values of m, encoded as the sum of the fields of the record,
     evaluated by the reference interpreter."""
     program, _ = V.load(os.path.join(ROOT, "tests", "contracts", "reals.sol"))
-    rule = program.rule("Shares_total")
-    assert isinstance(rule.formula.left, S.SumMap) and rule.formula.real
+    prop = program.prop("Shares_total")
+    assert isinstance(prop.formula.left, S.SumMap) and prop.formula.real
     c = Checks(program, 2, "inline", ("address", "method"))
-    text = L.render(c.fenc.rule(rule, L.Var("s")))
+    text = L.render(c.fenc.prop(prop, L.Var("s")))
     assert "(((s.Pool_share.k_null + s.Pool_share.k_Pool) + s.Pool_share.k_u1)" in text
     st = initial_state(c.enc.system, {})
     st.fields[("Pool", "share")]["u1"] = Fraction(3, 2)
     st.fields[("Pool", "total")] = Fraction(3, 2)
-    assert FormulaEvaluator(c.enc.system, range(2)).holds(rule.formula, [st])
+    assert FormulaEvaluator(c.enc.system, range(2)).holds(prop.formula, [st])
     with pytest.raises(KindHMLError, match="mapping to numbers"):
-        check(parse("contract C { int x; } rule R { sum(x) == 0 }"))
+        check(parse("contract C { int x; } property R { sum(x) == 0 }"))
 
 
 def test_invariant_templates():
@@ -162,13 +162,13 @@ def test_fuzzer_reaches_constructed_states():
 def test_fuzzer_candidates_and_witnesses():
     program, c = checks()
     f = Fuzzer(c.enc.system, seed="test")
-    found = f.candidates(program.rule("Swap_takes_everything"), 5)
+    found = f.candidates(program.prop("Swap_takes_everything"), 5)
     assert found and all(all(st.constructed.values()) for _, st in found)
-    assert not has_witness(program.rule("Swap_reversibility").formula)
+    assert not has_witness(program.prop("Swap_reversibility").formula)
     amm, _ = V.load(os.path.join(ROOT, "contracts", "amm-real", "amm_real.sol"))
-    assert has_witness(amm.rule("Swap_additivity").formula)        # exists v12, v3
-    assert has_witness(amm.rule("Arbitrage_exists").formula)       # exists x
-    assert not has_witness(amm.rule("Slippage").formula)
+    assert has_witness(amm.prop("Swap_additivity").formula)        # exists v12, v3
+    assert has_witness(amm.prop("Arbitrage_exists").formula)       # exists x
+    assert not has_witness(amm.prop("Slippage").formula)
 
 
 def test_state_values_of_a_counterexample():
@@ -215,11 +215,11 @@ def test_first_houdini_pass_runs():
 def test_portfolio_on_the_swap_pool():
     """Inv is proved (inductive, or by Kind 2 if Houdini needs more than its first budget),
     Small_reserves is dropped, Swap_reversibility is proved on a free state under Inv,
-    Swap_takes_everything is refuted. Without an invariant phase before the rules, Houdini
-    runs in the rounds of the rules; its passes start programs from the first round."""
+    Swap_takes_everything is refuted. Without an invariant phase before the properties, Houdini
+    runs in the rounds of the properties; its passes start programs from the first round."""
     program, _ = V.load(POOL)
     context = {}
-    out = {r.name: V.verify(program, r, 2, 60, context=context) for r in program.rules}
+    out = {r.name: V.verify(program, r, 2, 60, context=context) for r in program.properties}
     assert out["Inv"].status == "valid", out["Inv"].describe()
     assert (out["Swap_reversibility"].status, out["Swap_reversibility"].method) == \
         ("valid", "invariants")

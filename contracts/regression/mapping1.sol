@@ -6,7 +6,7 @@ contract Mapping1 {
     }
 }  
 
-rule P1_true {
+property P1_true {
     forall a : address .
     is_EOA(a) ->
     exists h : method .
@@ -14,7 +14,7 @@ rule P1_true {
             m[a] == old(m[a]) + 1
 }
 
-rule P1b_true {
+property P1b_true {
     forall a : address .
     is_EOA(a) ->
     exists h : method .
@@ -23,7 +23,7 @@ rule P1b_true {
 }
 
 
-rule P2_false {
+property P2_false {
     forall a : address .
     exists h : method .
         << a : Mapping1 . h() $ 0 >> 
@@ -31,7 +31,7 @@ rule P2_false {
 }
 
 
-rule P3_true {
+property P3_true {
     forall a : address .
     is_EOA(a) ->
     exists h1 : method .

@@ -47,4 +47,4 @@ contract Features {
 }
 
 // @groundtruth: True
-rule Trivial { true }
+property Trivial { true }

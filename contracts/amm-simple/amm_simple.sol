@@ -1,5 +1,5 @@
 // Simplified constant-product AMM: the swaps of contracts/amm-real/amm_real.sol, without liquidity
-// tokens (the constructor creates the pool with the reserves x0, x1). The existential rules
+// tokens (the constructor creates the pool with the reserves x0, x1). The existential properties
 // of amm_real.sol (Sandwich, Arbitrage) are stated with an explicit strategy, which the tool
 // checks (a winning strategy is a witness of the existential).
 pragma balance real;

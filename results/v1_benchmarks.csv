@@ -1,4 +1,4 @@
-file,rule,status,groundtruth,check,wall
+file,property,status,groundtruth,check,wall
 contracts/bank/bank.sol,Reversibility_deposit,valid,True,OK,5.7
 contracts/bank/bank.sol,Liquidity,valid,True,OK,55.12
 contracts/bank/bank.sol,No_frontrun_deposit,valid,True,OK,1.92

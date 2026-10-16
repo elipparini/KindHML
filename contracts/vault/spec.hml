@@ -1,4 +1,4 @@
-rule Two_steps_drainability {
+property Two_steps_drainability {
     (state == 0) ->
     (exists addr: address .
     exists recipient: address .
@@ -18,7 +18,7 @@ rule Two_steps_drainability {
 
 // Two transactions within less than wait_time blocks do not increase any balance
 // (d1, d2: the increases of the block number made by the two transactions).
-rule Two_steps_drainability_non_inflation {
+property Two_steps_drainability_non_inflation {
     (state == 0) ->
     forall a : address . forall b : address . forall c : address .
     forall f1 : method . forall f2 : method .

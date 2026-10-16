@@ -1,10 +1,11 @@
 """KindHML: verification of CHML properties of contracts with Kind 2.
 
 Usage:
-    python3 src/kindHML.py <contract.sol> <Rule|ALL> <n_participants> <timeout> [--only_lus]
+    python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants> <timeout> [--only_lus]
 
-For each rule, the Lustre encoding is saved in out_lus/<contract>_<Rule>_<n>_<timeout>.lus and
-the verdict in out_results/<contract>_<Rule>_<n>_<timeout>.out.
+For each property, the Lustre encoding is saved in
+out_lus/<contract>_<Property>_<n>_<timeout>.lus and the verdict in
+out_results/<contract>_<Property>_<n>_<timeout>.out.
 """
 
 import argparse
@@ -22,12 +23,12 @@ from kindhml.kind2 import SOLVERS, format_counterexample   # noqa: E402
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Verify CHML rules of a contract with Kind 2.")
+    ap = argparse.ArgumentParser(description="Verify CHML properties of a contract with Kind 2.")
     ap.add_argument("contract", help="path of the contract file")
-    ap.add_argument("property", help="rule name, or ALL")
+    ap.add_argument("property", help="property name, or ALL")
     ap.add_argument("n_of_participants", type=int, help="number of user addresses")
     ap.add_argument("timeout", type=float,
-                    help="time limit per rule, in seconds (0: no limit, the search goes on"
+                    help="time limit per property, in seconds (0: no limit, the search goes on"
                          " until there is a verdict)")
     ap.add_argument("--strategy", choices=V.STRATEGIES, default="portfolio",
                     help="portfolio (default): invariants, checks on free states, and Kind 2"
@@ -43,7 +44,7 @@ def main() -> int:
     ap.add_argument("--print_invariants", action="store_true",
                     help="print the invariants proved (declared and generated)")
     ap.add_argument("--invariants_timeout", type=float, default=None,
-                    help="time limit of the invariant phase, before the rules (default: 3 x"
+                    help="time limit of the invariant phase, before the properties (default: 3 x"
                          " timeout; 0: no limit)")
     ap.add_argument("--parameterized", action="store_true",
                     help="check with the cutoff of the checks on free values, if it is at"
@@ -72,7 +73,7 @@ def main() -> int:
 
     try:
         program, warnings = V.load(args.contract, lemmas=not args.no_lemmas)
-        rules = V.select_rules(program, args.property)
+        properties = V.select_properties(program, args.property)
     except KindHMLError as e:
         print(f"{args.contract}: {ce.red('error:')} {e}", file=sys.stderr)
         return 2
@@ -88,7 +89,7 @@ def main() -> int:
     name = V.stem(args.contract)
     timeout = int(args.timeout) if args.timeout == int(args.timeout) else args.timeout
     os.makedirs(args.out_lus, exist_ok=True)
-    context: dict = {}                  # invariants are proved once for all the rules
+    context: dict = {}                  # invariants are proved once for all the properties
     if args.strategy == "portfolio" and not args.only_lus:
         start = time.time()
         limit = (args.invariants_timeout if args.invariants_timeout is not None
@@ -101,21 +102,21 @@ def main() -> int:
         print(f"{name} - {V.invariant_summary(invs, c)}"
               f" {c.dim(f'[{time.time() - start:.1f}s]')}", flush=True)
     code = 0
-    for rule in rules:
-        tag = f"{name}_{rule.name}_{args.n_of_participants}_{timeout}"
+    for prop in properties:
+        tag = f"{name}_{prop.name}_{args.n_of_participants}_{timeout}"
         lus_path = os.path.join(args.out_lus, tag + ".lus")
         if args.only_lus:
             users, ghost = args.n_of_participants, False
             if args.parameterized:
                 users, ghost, _ = V.effective_users(context, program, users, args.mode, expand,
                                                     not args.no_invgen,
-                                                    not args.no_user_invariants, rule)
+                                                    not args.no_user_invariants, prop)
             with open(lus_path, "w") as f:
-                f.write(V.lustre_for(program, rule, users, args.mode, expand,
+                f.write(V.lustre_for(program, prop, users, args.mode, expand,
                                      ghost_sums=ghost))
-            print(f"{name} - {rule.name}: {lus_path}")
+            print(f"{name} - {prop.name}: {lus_path}")
             continue
-        outcome = V.verify(program, rule, args.n_of_participants, args.timeout or None,
+        outcome = V.verify(program, prop, args.n_of_participants, args.timeout or None,
                            mode=args.mode, expand=expand, lus_path=lus_path,
                            solver=args.solver, cex=args.cex, strategy=args.strategy,
                            context=context, invgen=not args.no_invgen,

@@ -1,4 +1,4 @@
-rule Winnability {
+property Winnability {
     (rate > 100 && player_has_joined)
     -> 
     exists a : address .
@@ -9,7 +9,7 @@ rule Winnability {
         balance[a] == old(balance[a] + balance)		
 }
 
-rule Liquidity {
+property Liquidity {
     player_has_joined
     ->
     exists a1 : address .
@@ -23,7 +23,7 @@ rule Liquidity {
             (balance == 0)
 }
 
-rule Frontrunning {
+property Frontrunning {
     (player_has_joined)
     ->
     (

@@ -33,7 +33,7 @@ contract Pool {
 }
 
 // @groundtruth: True
-rule Total_nonnegative {
+property Total_nonnegative {
     total >= 0 && count >= 0
 }
 
@@ -44,50 +44,50 @@ invariant Shares_total {
 }
 
 // @groundtruth: False
-rule Rate_positive {
+property Rate_positive {
     rate > 0
 }
 
 // The division of reals is exact.
 // @groundtruth: True
-rule Scale_halves {
+property Scale_halves {
     forall u : address . is_EOA(u) ->
         << u : Pool.scale(2) >> rate == old(rate) / 2
 }
 
 // A division by 0 reverts.
 // @groundtruth: True
-rule Scale_by_nonzero_succeeds {
+property Scale_by_nonzero_succeeds {
     forall u : address . forall k : real . (is_EOA(u) && k != 0) ->
         << u : Pool.scale(k) >> !lastReverted
 }
 
 // @groundtruth: False
-rule Scale_succeeds {
+property Scale_succeeds {
     forall u : address . forall k : real . is_EOA(u) ->
         << u : Pool.scale(k) >> !lastReverted
 }
 
 // n / 2 is the integer division (3 / 2 = 1), then converted to real.
 // @groundtruth: True
-rule Halve_is_integer_division {
+property Halve_is_integer_division {
     forall u : address . is_EOA(u) -> << u : Pool.halve(3) >> rate == 1
 }
 
 // @groundtruth: False
-rule Halve_is_real_division {
+property Halve_is_real_division {
     forall u : address . is_EOA(u) -> << u : Pool.halve(3) >> rate == 1.5
 }
 
 // Deposits can be arbitrarily small (false with integers).
 // @groundtruth: True
-rule Small_deposit {
+property Small_deposit {
     exists u : address . exists a : real .
         << u : Pool.deposit(a) >> (total > old(total) && total < old(total) + 0.001)
 }
 
 // @groundtruth: True
-rule Average_succeeds {
+property Average_succeeds {
     forall u : address . (is_EOA(u) && count > 0) ->
         << u : Pool.average() >> !lastReverted
 }

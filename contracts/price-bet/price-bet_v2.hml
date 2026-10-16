@@ -1,4 +1,4 @@
-rule Winnability {
+property Winnability {
     (rate > 100 && player_has_joined && block.number > deadline)
     -> 
     exists a : address .

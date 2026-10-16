@@ -5,7 +5,7 @@ invariant Nonnegative {
 }
 
 // No user other than the oracle can make a healthy user unhealthy.
-rule Health_non_interference {
+property Health_non_interference {
     forall a : address . forall b : address .
     forall f : method . forall args : calldataargs .
     (is_EOA(a) && a != b && b != oracle && (c0[a] + c1[a] * p1) * 0.8 >= debt[a]) ->
@@ -13,7 +13,7 @@ rule Health_non_interference {
 }
 
 // Defence against liquidation (Thm 5.1), with an explicit strategy: repay the whole debt.
-rule Liquidation_defence {
+property Liquidation_defence {
     forall a : address .
     (is_EOA(a) && (c0[a] + c1[a] * p1) * 0.8 < debt[a] && w0[a] >= debt[a]) ->
     << a : Lending.repay(debt[a]) >>
@@ -22,7 +22,7 @@ rule Liquidation_defence {
 
 // Defence against liquidation (Thm 5.1): an unhealthy user who holds enough T0 can act so
 // that every liquidation of it fails.
-rule Liquidation_defence_exists {
+property Liquidation_defence_exists {
     forall a : address .
     (is_EOA(a) && (c0[a] + c1[a] * p1) * 0.8 < debt[a] && w0[a] >= debt[a]) ->
     exists f : method . exists args : calldataargs .
@@ -32,7 +32,7 @@ rule Liquidation_defence_exists {
 
 // Liquidation attack (Thm 6.2), with an explicit strategy: set the price to
 // debt[b] / (2 * c1[b]) (b becomes unhealthy), liquidate debt[b] / 4, restore the price.
-rule Liquidation_attack {
+property Liquidation_attack {
     forall a : address . forall b : address .
     (is_EOA(a) && is_EOA(b) && a != b && a != oracle && w0[a] >= debt[b] / 4
      && debt[b] > 0 && c1[b] > 0 && c0[b] == 0
@@ -45,7 +45,7 @@ rule Liquidation_attack {
 
 // Liquidation attack (Thm 6.2): whoever can move the price can profitably liquidate a
 // healthy borrower whose collateral is in T1 (lower the price, liquidate, restore the price).
-rule Liquidation_attack_exists {
+property Liquidation_attack_exists {
     forall a : address . forall b : address .
     (is_EOA(a) && is_EOA(b) && a != b && a != oracle && w0[a] > 0
      && debt[b] > 0 && c1[b] > 0 && c0[b] == 0
@@ -59,7 +59,7 @@ rule Liquidation_attack_exists {
 
 // Liquidation attack (Thm 6.2), without a given strategy: some sequence of three calls of
 // a (a call that reverts leaves the state unchanged) increases its net worth.
-rule Liquidation_attack_any {
+property Liquidation_attack_any {
     forall a : address . forall b : address .
     (is_EOA(a) && is_EOA(b) && a != b && a != oracle && w0[a] > 0
      && debt[b] > 0 && c1[b] > 0 && c0[b] == 0
@@ -73,7 +73,7 @@ rule Liquidation_attack_any {
 }
 
 // Deposits, redeems, borrows and repays do not change the net worth of anyone.
-rule Net_worth_preserved {
+property Net_worth_preserved {
     forall a : address . forall b : address . forall f : method . forall args : calldataargs .
     (f == Lending.deposit0 || f == Lending.redeem0 || f == Lending.deposit1
      || f == Lending.redeem1 || f == Lending.borrow || f == Lending.repay) ->
@@ -83,7 +83,7 @@ rule Net_worth_preserved {
 }
 
 // A healthy user can undo a deposit.
-rule Deposit_reversibility {
+property Deposit_reversibility {
     forall a : address . forall v : real .
     ((c0[a] + c1[a] * p1) * 0.8 >= debt[a]) ->
     << a : Lending.deposit0(v) >>
@@ -92,13 +92,13 @@ rule Deposit_reversibility {
 }
 
 // A borrower is healthy after borrowing.
-rule Borrow_safe {
+property Borrow_safe {
     forall a : address . forall v : real .
     << a : Lending.borrow(v) >> (lastReverted || (c0[a] + c1[a] * p1) * 0.8 >= debt[a])
 }
 
 // Only unhealthy users can be liquidated.
-rule Liquidation_only_unhealthy {
+property Liquidation_only_unhealthy {
     forall a : address . forall b : address . forall v : real .
     ((c0[b] + c1[b] * p1) * 0.8 >= debt[b]) ->
     << a : Lending.liquidate(b, v) >> lastReverted

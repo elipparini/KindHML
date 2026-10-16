@@ -31,19 +31,19 @@ contract Bank {
 """
 
 
-def checked(rules: str, contract: str = BANK) -> S.Program:
-    program, _ = check(parse(contract + rules))
+def checked(properties: str, contract: str = BANK) -> S.Program:
+    program, _ = check(parse(contract + properties))
     return program
 
 
-def formula(rule_body: str, contract: str = BANK) -> str:
-    program = checked("rule R { " + rule_body + " }", contract)
-    return pretty.expr(program.rules[0].formula)
+def formula(property_body: str, contract: str = BANK) -> str:
+    program = checked("property R { " + property_body + " }", contract)
+    return pretty.expr(program.properties[0].formula)
 
 
-def rejects(rule_body: str, message: str, contract: str = BANK):
+def rejects(property_body: str, message: str, contract: str = BANK):
     with pytest.raises(KindHMLError, match=message):
-        checked("rule R { " + rule_body + " }", contract)
+        checked("property R { " + property_body + " }", contract)
 
 
 @pytest.mark.parametrize("path", ALL_FILES, ids=os.path.basename)
@@ -56,13 +56,13 @@ def test_benchmarks_outside_families_have_groundtruth():
     for path in ALL_FILES:
         if os.path.dirname(path) not in FAMILIES:
             program, _ = V.load(path)
-            missing = [r.name for r in program.rules if r.groundtruth is None]
+            missing = [r.name for r in program.properties if r.groundtruth is None]
             assert not missing, (path, missing)
 
 
 @pytest.mark.parametrize("family", FAMILIES, ids=os.path.basename)
 def test_family_groundtruth_covers_the_tasks(family):
-    """groundtruth.csv has exactly one row per task (contract, rule) of the family, and the
+    """groundtruth.csv has exactly one row per task (contract, property) of the family, and the
     ground truth is only there (not in @groundtruth comments of the .hml files)."""
     with open(os.path.join(family, V.GROUNDTRUTH), newline="") as f:
         rows = [(r["contract"], r["property"]) for r in csv.DictReader(f)]
@@ -86,9 +86,9 @@ FAMILY = {
     "c.sol": "contract C { int x; function inc() { x = x + 1 } }",
     "c_v2.sol": "contract C { int x; function inc() { x = x - 1 } }",
     V.SPEC: "invariant Pos { x >= 0 }\n"
-            "rule Inc { forall a : address . << a : C.inc() >> x > old(x) }\n",
-    "c_v2.hml": "rule Inc { forall a : address . << a : C.inc() >> x < old(x) }\n"
-                "rule Extra { true }\n",
+            "property Inc { forall a : address . << a : C.inc() >> x > old(x) }\n",
+    "c_v2.hml": "property Inc { forall a : address . << a : C.inc() >> x < old(x) }\n"
+                "property Extra { true }\n",
     V.GROUNDTRUTH: "contract,property,expected,note\n"
                    "c.sol,Pos,true,\nc.sol,Inc,true,\n"
                    "c_v2.sol,Pos,false,decreases\nc_v2.sol,Inc,unknown,\n",
@@ -98,38 +98,38 @@ FAMILY = {
 def test_family_spec_override_and_groundtruth(tmp_path):
     write_family(tmp_path, FAMILY)
     base, _ = V.load(str(tmp_path / "c.sol"))
-    assert [(r.name, r.groundtruth) for r in base.rules] == [("Pos", True), ("Inc", True)]
+    assert [(r.name, r.groundtruth) for r in base.properties] == [("Pos", True), ("Inc", True)]
     v2, _ = V.load(str(tmp_path / "c_v2.sol"))
-    assert [(r.name, r.groundtruth) for r in v2.rules] == [
+    assert [(r.name, r.groundtruth) for r in v2.properties] == [
         ("Pos", False), ("Inc", None), ("Extra", None)]
-    assert "<" in pretty.expr(v2.rule("Inc").formula)
+    assert "<" in pretty.expr(v2.prop("Inc").formula)
 
 
 def test_family_lemmas_are_not_tasks(tmp_path):
     write_family(tmp_path, {**FAMILY, V.LEMMAS_FILE: "invariant Help { x >= 0 }"})
     program, _ = V.load(str(tmp_path / "c.sol"))
-    help_ = program.rule("Help")
+    help_ = program.prop("Help")
     assert help_.lemma and help_.invariant and help_.groundtruth is None
     assert [r.name for r in V.tasks(program)] == ["Pos", "Inc"]
-    assert [r.name for r in V.select_rules(program, "ALL")] == ["Pos", "Inc"]
+    assert [r.name for r in V.select_properties(program, "ALL")] == ["Pos", "Inc"]
     program, _ = V.load(str(tmp_path / "c.sol"), lemmas=False)
-    assert program.rule("Help") is None
+    assert program.prop("Help") is None
 
 
 def test_family_lemma_must_be_an_invariant(tmp_path):
-    write_family(tmp_path, {**FAMILY, V.LEMMAS_FILE: "rule Help { true }"})
+    write_family(tmp_path, {**FAMILY, V.LEMMAS_FILE: "property Help { true }"})
     with pytest.raises(KindHMLError, match="not an invariant"):
         V.load(str(tmp_path / "c.sol"))
 
 
-def test_family_contract_has_no_rules(tmp_path):
-    write_family(tmp_path, {**FAMILY, "c.sol": FAMILY["c.sol"] + " rule R { true }"})
-    with pytest.raises(KindHMLError, match="has no rules"):
+def test_family_contract_has_no_properties(tmp_path):
+    write_family(tmp_path, {**FAMILY, "c.sol": FAMILY["c.sol"] + " property R { true }"})
+    with pytest.raises(KindHMLError, match="has no properties"):
         V.load(str(tmp_path / "c.sol"))
 
 
 def test_family_errors_name_the_spec_file(tmp_path):
-    write_family(tmp_path, {**FAMILY, V.SPEC: "rule Bad {\n  y > 0 }"})
+    write_family(tmp_path, {**FAMILY, V.SPEC: "property Bad {\n  y > 0 }"})
     with pytest.raises(KindHMLError, match=r"spec\.hml, line 2"):
         V.load(str(tmp_path / "c.sol"))
 
@@ -164,16 +164,16 @@ def test_implication_is_right_associative():
     assert formula("true -> false -> true") == "(true -> (false -> true))"
 
 
-def test_groundtruth_comment_attaches_to_next_rule():
+def test_groundtruth_comment_attaches_to_next_property():
     program = parse(BANK + """
         // @groundtruth: True
-        rule A { true }
-        rule B { true }
-        /* @groundtruth: False */ rule C { true }
-        rule D_false { true }
+        property A { true }
+        property B { true }
+        /* @groundtruth: False */ property C { true }
+        property D_false { true }
         // @groundtruth: True
-        rule E_false { true }""")
-    assert [r.groundtruth for r in program.rules] == [True, None, False, False, True]
+        property E_false { true }""")
+    assert [r.groundtruth for r in program.properties] == [True, None, False, False, True]
 
 
 def test_syntax_error_has_position():
@@ -189,21 +189,21 @@ def test_balance_forms():
 
 
 def test_old_moves_one_level_up():
-    program = checked("rule R { forall a : address . << a : Bank . deposit() $ 1 >> "
+    program = checked("property R { forall a : address . << a : Bank . deposit() $ 1 >> "
                       "funds[a] == old(funds[a]) + 1 }")
-    modal = program.rules[0].formula.body
+    modal = program.properties[0].formula.body
     assert isinstance(modal, S.Modal) and isinstance(modal.proc, S.ProcConst)
 
 
 def test_method_variable_and_args():
-    program = checked("rule R { forall f : method . forall x : calldataargs . "
+    program = checked("property R { forall f : method . forall x : calldataargs . "
                       "f != withdraw -> << null : Bank . f(x) $ 0 >> true }")
-    modal = program.rules[0].formula.body.body.right
+    modal = program.properties[0].formula.body.body.right
     assert modal.proc == S.QVar("f", S.METHOD) and modal.args == (S.QVar("x", S.ARGS),)
 
 
 def test_method_variable_without_args():
-    checked("rule R { exists f : method . << null : Bank . f() $ 0 >> true }")
+    checked("property R { exists f : method . << null : Bank . f() $ 0 >> true }")
 
 
 # ---------------------------------------------------------------- errors
@@ -216,7 +216,7 @@ def test_old_too_deep():
     rejects("<< null : Bank . deposit() $ 1 >> old(old(balance)) > 0", "scope of a modality")
 
 
-def test_sender_in_rule_A6():
+def test_sender_in_property_A6():
     rejects("msg.sender == null", "A6")
 
 
@@ -250,7 +250,7 @@ def test_quantified_name_clash():
 
 
 def test_lastreverted_in_contract():
-    with pytest.raises(KindHMLError, match="only occur in rules"):
+    with pytest.raises(KindHMLError, match="only occur in properties"):
         checked("", "contract C { bool b; function f() { b = lastReverted } }")
 
 
@@ -290,8 +290,8 @@ def test_real_quantifier():
 
 
 def test_real_division_flag():
-    program = checked("rule R { r / 2 == n / 2 }", POOL)
-    eq = program.rules[0].formula
+    program = checked("property R { r / 2 == n / 2 }", POOL)
+    eq = program.properties[0].formula
     assert eq.real and eq.left.real and not eq.right.arg.real    # real(n div 2)
 
 
@@ -311,7 +311,7 @@ def test_integer_division_converted_to_real_warns():
 
 def test_real_value_needs_real_balances():
     rejects("<< null : P.f(1, 1) $ 0.5 >> true", "type int, found real", POOL)
-    program = checked("rule R { << null : P.f(1, 1) $ 0.5 >> balance > 0.25 }",
+    program = checked("property R { << null : P.f(1, 1) $ 0.5 >> balance > 0.25 }",
                       "pragma balance real;" + POOL)
     assert program.balance_type == S.REAL
 
@@ -323,8 +323,8 @@ def test_amounts_are_real_with_real_balances():
 
 
 def test_invariant_declaration():
-    program = checked("invariant I { forall a : address . funds[a] >= 0 } rule R { true }")
-    assert [(r.name, r.invariant) for r in program.rules] == [("I", True), ("R", False)]
+    program = checked("invariant I { forall a : address . funds[a] >= 0 } property R { true }")
+    assert [(r.name, r.invariant) for r in program.properties] == [("I", True), ("R", False)]
 
 
 def test_invariant_without_modalities():

@@ -1,5 +1,5 @@
 """Run KindHML on many verification tasks and compare with the ground truth. One Kind 2 job
-at a time. A task is a rule of a contract file (an invariant of a spec included; lemmas
+at a time. A task is a property of a contract file (an invariant of a spec included; lemmas
 are not tasks).
 
 Usage:
@@ -11,10 +11,10 @@ Without files, runs every task of contracts/regression and of the benchmark fami
 selection options restrict the tasks; they combine (a task must satisfy all of them):
     --families bank,vault     the directory of the file (e.g. contracts/bank)
     --versions 1,3            the version of the file: N for <name>_vN.sol, 1 for <name>.sol
-    --rules Liquidity,...     the rule (property) names
-    --tasks FILE.csv          the pairs (file, rule) of a CSV file, with columns file (or
-                              contract) and rule (or property). The files are relative to
-                              the CSV file or to the repository; an empty rule means all the
+    --properties Liquidity,...  the property names
+    --tasks FILE.csv          the pairs (file, property) of a CSV file, with columns file (or
+                              contract) and property. The files are relative to
+                              the CSV file or to the repository; an empty property means all the
                               tasks of the file. Without files on the command line, the
                               files are those of the CSV. The results.csv of a run, or a
                               groundtruth.csv, can be given.
@@ -107,14 +107,14 @@ def version(path: str) -> int:
 
 
 def read_tasks(path: str):
-    """The tasks of a CSV file, as (file, rule) pairs in order; rule None means all of them.
-    The file column is `file` or `contract`, the rule column `rule` or `property`."""
+    """The tasks of a CSV file, as (file, property) pairs in order; property None means all of
+    them. The file column is `file` or `contract`, the property column `property`."""
     out = []
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
         cols = reader.fieldnames or []
         fcol = next((c for c in ("file", "contract") if c in cols), None)
-        rcol = next((c for c in ("rule", "property") if c in cols), None)
+        rcol = next((c for c in ("property",) if c in cols), None)
         if fcol is None:
             sys.exit(f"{path}: no column file (or contract)")
         for n, row in enumerate(reader, start=2):
@@ -124,13 +124,13 @@ def read_tasks(path: str):
             found = next((c for c in here if os.path.isfile(c)), None)
             if found is None:
                 sys.exit(f"{path}, line {n}: no file {name}")
-            rule = (row.get(rcol) or "").strip() if rcol else ""
-            out.append((os.path.realpath(found), rule or None))
+            prop = (row.get(rcol) or "").strip() if rcol else ""
+            out.append((os.path.realpath(found), prop or None))
     return out
 
 
 def select(args):
-    """The selected tasks, as (file, program, rules) per file, in order."""
+    """The selected tasks, as (file, program, properties) per file, in order."""
     csv_tasks = read_tasks(args.tasks) if args.tasks else None
     if args.paths:
         paths = args.paths
@@ -141,8 +141,8 @@ def select(args):
                  *sorted(glob.glob(os.path.join(ROOT, "contracts", "*", "")))]
     families = set(args.families.split(",")) if args.families else None
     versions = {int(v) for v in args.versions.split(",")} if args.versions else None
-    names = set(args.rules.split(",")) if args.rules else None
-    wanted = None                     # file -> rule names (None: all) of the CSV
+    names = set(args.properties.split(",")) if args.properties else None
+    wanted = None                     # file -> property names (None: all) of the CSV
     if csv_tasks is not None:
         wanted = {}
         for f, r in csv_tasks:
@@ -167,17 +167,17 @@ def select(args):
         except KindHMLError as e:
             say(f"{V.stem(f)}: error: {e}")
             continue
-        rules = [r for r in V.tasks(program)
+        properties = [r for r in V.tasks(program)
                  if (names is None or r.name in names)
                  and (wanted is None or wanted[real] is None or r.name in wanted[real])]
-        matched |= {r.name for r in rules}
+        matched |= {r.name for r in properties}
         if wanted is not None and wanted[real] is not None:
             for r in sorted(wanted[real] - {r.name for r in V.tasks(program)}):
                 say(f"warning: {args.tasks}: {os.path.relpath(f, ROOT)} has no task {r}")
-        if rules:
-            out.append((f, program, rules))
+        if properties:
+            out.append((f, program, properties))
     for n in sorted((names or set()) - matched):
-        say(f"warning: --rules: no selected file has a task {n}")
+        say(f"warning: --properties: no selected file has a task {n}")
     return out
 
 
@@ -193,13 +193,14 @@ def main():
     ap.add_argument("--mode", default=V.DEFAULT_MODE)
     ap.add_argument("--solver", default="auto")
     ap.add_argument("--expand", default=",".join(V.DEFAULT_EXPAND))
-    ap.add_argument("--rules", default="", help="comma-separated rule names to run (default all)")
+    ap.add_argument("--properties", default="",
+                    help="comma-separated property names to run (default all)")
     ap.add_argument("--families", default="",
                     help="comma-separated families (directories, e.g. bank,amm-real) to run")
     ap.add_argument("--versions", default="",
                     help="comma-separated versions to run (N for <name>_vN.sol, 1 for <name>.sol)")
     ap.add_argument("--tasks", default="",
-                    help="a CSV file of the tasks to run (columns file and rule)")
+                    help="a CSV file of the tasks to run (columns file and property)")
     ap.add_argument("--list", action="store_true",
                     help="print the selected tasks, without running them")
     ap.add_argument("--strategy", default="portfolio", choices=V.STRATEGIES)
@@ -225,8 +226,8 @@ def main():
     expand = () if args.expand == "none" else tuple(args.expand.split(","))
     if args.list:
         selected = select(args)
-        for f, _, rules in selected:
-            for r in rules:
+        for f, _, properties in selected:
+            for r in properties:
                 print(f"{os.path.relpath(f, ROOT)},{r.name},{r.groundtruth}")
         print(f"{sum(len(rs) for _, _, rs in selected)} tasks in {len(selected)} files")
         return
@@ -239,14 +240,14 @@ def main():
     say(f"{sum(len(rs) for _, _, rs in selected)} tasks in {len(selected)} files")
 
     # The CSV is written row by row, so that an interrupted run keeps its partial results.
-    fields = ["file", "rule", "status", "method", "groundtruth", "check", "wall"]
+    fields = ["file", "property", "status", "method", "groundtruth", "check", "wall"]
     out_csv = open(args.csv, "w", newline="") if args.csv else None
     writer = csv.DictWriter(out_csv, fieldnames=fields) if out_csv else None
     if writer:
         writer.writeheader()
         out_csv.flush()
     tally = {}
-    for f, program, rules in selected:
+    for f, program, properties in selected:
         context: dict = {}
         if args.strategy == "portfolio":
             # the invariant phase of the file, with its own time limit
@@ -261,10 +262,10 @@ def main():
             elapsed = f"[{time.time()-start:.1f}s]"
             say(f"{V.stem(f):>18}   {V.invariant_summary(invs)} {elapsed}",
                 colored=f"{V.stem(f):>18}   {V.invariant_summary(invs, C)} {C.dim(elapsed)}")
-        for rule in rules:
+        for prop in properties:
             start = time.time()
             try:
-                out = V.verify(program, rule, args.participants, args.timeout,
+                out = V.verify(program, prop, args.participants, args.timeout,
                                mode=args.mode, expand=expand, solver=args.solver,
                                strategy=args.strategy, context=context,
                                invgen=not args.no_invgen,
@@ -273,16 +274,16 @@ def main():
                 gt, desc, colored = out.groundtruth_check(), out.describe(), out.describe(C)
                 status, method = out.status, out.method
             except KindHMLError as e:
-                gt, desc, status, method = "error", f"{rule.name}: error: {e}", "error", ""
-                colored = f"{C.bold(rule.name)}: {C.magenta('error:')} {e}"
+                gt, desc, status, method = "error", f"{prop.name}: error: {e}", "error", ""
+                colored = f"{C.bold(prop.name)}: {C.magenta('error:')} {e}"
             wall = time.time() - start
             tally[gt] = tally.get(gt, 0) + 1
             say(f"{V.stem(f):>18} - {desc} [{wall:.1f}s]",
                 colored=f"{V.stem(f):>18} - {colored} {C.dim(f'[{wall:.1f}s]')}")
             if writer:
-                writer.writerow({"file": os.path.relpath(f, ROOT), "rule": rule.name,
+                writer.writerow({"file": os.path.relpath(f, ROOT), "property": prop.name,
                                  "status": status, "method": method,
-                                 "groundtruth": rule.groundtruth, "check": gt,
+                                 "groundtruth": prop.groundtruth, "check": gt,
                                  "wall": round(wall, 2)})
                 out_csv.flush()
         if args.print_invariants or LOG:

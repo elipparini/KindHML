@@ -1,7 +1,7 @@
 """Cutoffs on the number of users (parameterized mode; DESIGN.md, Sect. 7).
 
 A check on free values (`invariants.py`) is a verification condition χ = P ⇒ Q: P the
-premises (invariants, axioms), Q a rule, or the candidates after a call. Read in
+premises (invariants, axioms), Q a property, or the candidates after a call. Read in
 first-order logic, with a sort of addresses whose only constants are null and the contracts,
 χ is in the *fragment* if
 * no map has address values, and no sum over the addresses occurs (in parameterized mode,
@@ -16,8 +16,8 @@ max(1, k) <= n' <= n. Proof: keep null, the contracts, the values of ā, and fur
 to n'; the restriction is a substructure, and universal sentences hold in substructures.
 
 So, with the cutoff c = max(1, k): χ valid with c users implies χ valid with every n >= c.
-Each check has its own cutoff: the steps of Houdini (`Checks.step_count`) and each rule
-(`Checks.rule_count`) are checked with their own numbers of users.
+Each check has its own cutoff: the steps of Houdini (`Checks.step_count`) and each property
+(`Checks.property_count`) are checked with their own numbers of users.
 """
 
 from __future__ import annotations
@@ -37,31 +37,31 @@ class OutOfFragment(Exception):
 @dataclass
 class Cutoff:
     """Upper bounds on the cutoffs of the checks of a file, with all the candidates: the
-    steps of Houdini, and each rule on a free state. A rule outside the fragment has none,
-    and is checked as without parameterized mode; if a step is outside the fragment, no rule
+    steps of Houdini, and each property on a free state. A property outside the fragment has none,
+    and is checked as without parameterized mode; if a step is outside the fragment, no property
     has one."""
     steps: Optional[int]                      # max(1, the counts of the steps); None: outside
     reason: str = ""                          # why the steps have no cutoff
     checks: Dict[str, int] = field(default_factory=dict)   # the count k of each check
-    outside: Dict[str, str] = field(default_factory=dict)  # rule -> why it has none
+    outside: Dict[str, str] = field(default_factory=dict)  # property -> why it has none
 
-    def of_rule(self, name: str) -> Optional[int]:
-        """The least number of users for which a verdict on the rule `name` can be claimed
+    def of_property(self, name: str) -> Optional[int]:
+        """The least number of users for which a verdict on the property `name` can be claimed
         for every larger number: max(steps, its own cutoff); None outside the fragment."""
         if self.steps is None or name in self.outside:
             return None
-        return max(self.steps, self.checks.get(f"rule {name}", 1))
+        return max(self.steps, self.checks.get(f"property {name}", 1))
 
     def describe(self) -> str:
         if self.steps is None:
             return f"no cutoff ({self.reason})"
-        rules = [max(1, v) for k, v in self.checks.items() if k.startswith("rule ")]
+        properties = [max(1, v) for k, v in self.checks.items() if k.startswith("property ")]
         out = f"cutoffs: steps of Houdini <= {self.steps}"
-        if rules:
-            out += (f", rules {min(rules)}" if min(rules) == max(rules)
-                    else f", rules {min(rules)}-{max(rules)}")
+        if properties:
+            out += (f", properties {min(properties)}" if min(properties) == max(properties)
+                    else f", properties {min(properties)}-{max(properties)}")
         if self.outside:
-            out += f", {len(self.outside)} rules outside the fragment"
+            out += f", {len(self.outside)} properties outside the fragment"
         return out
 
 

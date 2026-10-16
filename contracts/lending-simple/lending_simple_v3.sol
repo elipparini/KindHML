@@ -1,7 +1,7 @@
 // mutation: borrow checks the health of the borrower before adding the debt
 // Simplified lending protocol: contracts/lending/lending.sol without interest (the exchange
 // rate of the credits and the interest index are 1, so credits are deposits and debts are
-// not scaled). a is healthy if (c0[a] + c1[a] * p1) * 0.8 >= debt[a]. The existential rules
+// not scaled). a is healthy if (c0[a] + c1[a] * p1) * 0.8 >= debt[a]. The existential properties
 // of lending.sol are stated with an explicit strategy, which the tool checks.
 pragma balance real;
 

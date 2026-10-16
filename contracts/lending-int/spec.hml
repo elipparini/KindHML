@@ -11,8 +11,8 @@ invariant Totals {
         (c0[u] + c0[v] <= sc0 && sdebt[u] + sdebt[v] <= ssdebt)
 }
 
-// ------------------------------------------------------------------ rules
-rule Health_non_interference {
+// ------------------------------------------------------------------ properties
+property Health_non_interference {
     forall a : address . forall b : address .
     forall f : method . forall args : calldataargs .
     (is_EOA(a) && a != b && b != oracle
@@ -21,7 +21,7 @@ rule Health_non_interference {
 }
 
 // Repaying the whole debt (sdebt[a] * idx / 1000) may leave a remainder of the scaled debt.
-rule Liquidation_defence {
+property Liquidation_defence {
     forall a : address .
     (is_EOA(a) && (c0[a] * xr0 / 1000 + c1[a] * p1) * 4 < sdebt[a] * idx / 1000 * 5
      && w0[a] >= sdebt[a] * idx / 1000) ->
@@ -30,7 +30,7 @@ rule Liquidation_defence {
         forall b : address . forall v : int . << b : Lending.liquidate(a, v) >> lastReverted
 }
 
-rule Liquidation_attack {
+property Liquidation_attack {
     forall a : address . forall b : address .
     (is_EOA(a) && is_EOA(b) && a != b && a != oracle && w0[a] > 0
      && sdebt[b] > 0 && c1[b] > 0 && c0[b] == 0
@@ -44,13 +44,13 @@ rule Liquidation_attack {
 }
 
 // Rounding: accrue recomputes the exchange rate from rounded values.
-rule Exchange_rate_monotone {
+property Exchange_rate_monotone {
     forall a : address . forall f : method . forall args : calldataargs .
     << a : Lending.f(args) >> xr0 >= old(xr0)
 }
 
 // Rounding: a deposit gives v * 1000 / xr0 credits, rounded down.
-rule Net_worth_preserved {
+property Net_worth_preserved {
     forall a : address . forall b : address . forall f : method . forall args : calldataargs .
     (f == Lending.deposit0 || f == Lending.redeem0 || f == Lending.deposit1
      || f == Lending.redeem1 || f == Lending.borrow || f == Lending.repay) ->
@@ -60,7 +60,7 @@ rule Net_worth_preserved {
 }
 
 // Rounding: redeeming the credits of a deposit gives back less.
-rule Deposit_reversibility {
+property Deposit_reversibility {
     forall a : address . forall v : int .
     ((c0[a] * xr0 / 1000 + c1[a] * p1) * 4 >= sdebt[a] * idx / 1000 * 5) ->
     << a : Lending.deposit0(v) >>
@@ -69,13 +69,13 @@ rule Deposit_reversibility {
             (w0[a] == old(old(w0[a])) && c0[a] == old(old(c0[a]))))
 }
 
-rule Borrow_safe {
+property Borrow_safe {
     forall a : address . forall v : int .
     << a : Lending.borrow(v) >>
         (lastReverted || (c0[a] * xr0 / 1000 + c1[a] * p1) * 4 >= sdebt[a] * idx / 1000 * 5)
 }
 
-rule Liquidation_only_unhealthy {
+property Liquidation_only_unhealthy {
     forall a : address . forall b : address . forall v : int .
     ((c0[b] * xr0 / 1000 + c1[b] * p1) * 4 >= sdebt[b] * idx / 1000 * 5) ->
     << a : Lending.liquidate(b, v) >> lastReverted

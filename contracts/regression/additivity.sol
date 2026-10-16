@@ -10,7 +10,7 @@ contract Additivity {
         v = v + c
     }
 }
-rule P1_true {
+property P1_true {
     forall c1 : int .
     forall c2 : int .
     exists c3 : int .
@@ -29,7 +29,7 @@ rule P1_true {
 }
 
 
-rule P2_false {
+property P2_false {
     forall c1 : int .
     forall c2 : int .
     forall c3 : int .
@@ -47,7 +47,7 @@ rule P2_false {
 }
 
 /*
-rule P_signature_error {
+property P_signature_error {
     forall v1 : int .
     forall addr : address .
     (<< addr : Additivity . add() $ 0 >>		
@@ -57,7 +57,7 @@ rule P_signature_error {
 
 
 
-rule P3_true {
+property P3_true {
     forall addr : address .
     is_EOA(addr) ->
     << addr : Additivity . add(2) $ 0 >>		
@@ -65,27 +65,27 @@ rule P3_true {
 }
 
 
-rule P4_false {
+property P4_false {
     forall addr : address .
     << addr : Additivity . add(v) $ 0 >>		
         v == old(v)+3
 }
 
-rule P5_true {
+property P5_true {
     forall addr : address .
     is_EOA(addr) ->
     << addr : Additivity . add(v) $ 0 >>		
         v == 2*old(v)
 }
 
-rule P6_false {
+property P6_false {
     forall addr : address .
     << addr : Additivity . add(v) $ 0 >>		
         v == 3*old(v)
 }
 
 
-rule P7_true {
+property P7_true {
     forall addr : address .
     is_EOA(addr) ->
     << addr : Additivity . add(1) $ 0 >>		
@@ -94,7 +94,7 @@ rule P7_true {
 }
 
 
-rule P8_false {
+property P8_false {
     forall addr : address .
     << addr : Additivity . add(1) $ 0 >>		
     << addr : Additivity . add(v) $ 0 >>		
@@ -102,7 +102,7 @@ rule P8_false {
 }
 
 
-rule P9_true {
+property P9_true {
     forall addr : address .
     is_EOA(addr) ->
     << addr : Additivity . add(v) $ 0 >>		
@@ -111,7 +111,7 @@ rule P9_true {
 }
 
 
-rule P10_false {
+property P10_false {
     forall addr : address .
     << addr : Additivity . add(v) $ 0 >>		
     << addr : Additivity . add(1) $ 0 >>		

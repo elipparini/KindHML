@@ -2,7 +2,7 @@
 Sect. 6).
 
 Random sequences of transactions are run by the reference interpreter from random initial
-states, so their states are reachable. The rule is evaluated on these states with bounded
+states, so their states are reachable. The property is evaluated on these states with bounded
 quantifiers (`reference.FormulaEvaluator`, with a random sample of the arguments of all
 procedures when they are too many). A state where it fails is only a candidate: a bounded
 existential may have missed its witness. Kind 2 then evaluates the exact formula at that
@@ -44,7 +44,7 @@ class Fuzzer:
         self.interp = Interpreter(system)
         self.rnd = random.Random(seed)
         self.ev = FormulaEvaluator(system, INT_DOMAIN, max_records=MAX_RECORDS, rnd=self.rnd)
-        self.seen: dict = {}            # rule name -> states already proposed (`states`)
+        self.seen: dict = {}            # property name -> states already proposed (`states`)
 
     # ------------------------------------------------------------ random values
 
@@ -149,16 +149,16 @@ class Fuzzer:
             txs.append(tx)
             yield list(txs), st
 
-    def candidates(self, rule: S.Rule, seconds: float,
+    def candidates(self, prop: S.Property, seconds: float,
                    limit: int = 3) -> List[Tuple[List[Tx], State]]:
-        """Reachable states where the bounded evaluation of the rule is false, found within
-        `seconds` (rules and invariants are required in states where all contracts are
-        constructed). For a rule with an existential quantifier over numbers in
+        """Reachable states where the bounded evaluation of the property is false, found within
+        `seconds` (properties and invariants are required in states where all contracts are
+        constructed). For a property with an existential quantifier over numbers in
         positive position, the bounded evaluation almost always misses the witnesses (e.g.
-        the values carried across the branches of an additivity rule): then any new
+        the values carried across the branches of an additivity property): then any new
         reachable state is a candidate, and only the exact check decides."""
-        if has_witness(rule.formula):
-            return self.states(rule, seconds, limit)
+        if has_witness(prop.formula):
+            return self.states(prop, seconds, limit)
         out: List[Tuple[List[Tx], State]] = []
         deadline = time.time() + seconds
         old = signal.signal(signal.SIGALRM, _alarm)
@@ -172,12 +172,12 @@ class Fuzzer:
                         continue
                     signal.setitimer(signal.ITIMER_REAL, left)
                     try:
-                        if not self.ev.holds(rule.formula, [st]):
+                        if not self.ev.holds(prop.formula, [st]):
                             out.append((txs, st))
                     except _TooSlow:
                         break
                     except (ZeroDivisionError, KeyError, TypeError):
-                        pass          # unspecified values (unguarded division) in a rule
+                        pass          # unspecified values (unguarded division) in a property
                     finally:
                         signal.setitimer(signal.ITIMER_REAL, 0)
         finally:
@@ -185,7 +185,7 @@ class Fuzzer:
             signal.signal(signal.SIGALRM, old)
         return out
 
-    def states(self, rule: S.Rule, seconds: float,
+    def states(self, prop: S.Property, seconds: float,
                limit: int) -> List[Tuple[List[Tx], State]]:
         """Distinct reachable states with all contracts constructed, not returned before:
         the last of random traces."""
@@ -199,7 +199,7 @@ class Fuzzer:
             if last is None:
                 continue
             key = repr(sorted(last[1].fields.items())) + repr(sorted(last[1].balance.items()))
-            seen = self.seen.setdefault(rule.name, set())
+            seen = self.seen.setdefault(prop.name, set())
             if key not in seen:
                 seen.add(key)
                 out.append(last)

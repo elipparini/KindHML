@@ -45,7 +45,7 @@ contract TwoDonatee {
 
 }
 
-rule P1_false {
+property P1_false {
     started ->
     (
         exists a : address .
@@ -58,7 +58,7 @@ rule P1_false {
 }
 
 // kind2 returns unknown
-rule P2_true {
+property P2_true {
     (started && balance[p2] > 0) ->
     (
         exists a : address .
@@ -71,7 +71,7 @@ rule P2_true {
 }
 
 
-rule P3_false {
+property P3_false {
     (started && balance[this] > 0) ->
     (
         exists a : address .
@@ -86,7 +86,7 @@ rule P3_false {
 
 
 // kind2 returns unknown
-rule P4_true {
+property P4_true {
     (started && balance[p2] > 0 && balance[this] > 0) ->
     (
         exists a : address .
@@ -99,7 +99,7 @@ rule P4_true {
 }
 
 
-rule P2b_true {
+property P2b_true {
     (started && balance[p2] > 0) ->
     (   
         << p2 : TwoDonatee . donate(1) $ 1 >>
@@ -107,7 +107,7 @@ rule P2b_true {
     )	
 }
 
-rule P5_true {
+property P5_true {
     (started && balance[p2] == 1 && balance[this] == 1 && p1 != p2) ->
     (
         << p2 : TwoDonatee . donate(1) $ 1 >>
@@ -115,7 +115,7 @@ rule P5_true {
     )	
 }
 
-rule P5_false {
+property P5_false {
     (started && balance[p2] == 1 && balance[this] == 1 && p1 != p2) ->
     (
         << p2 : TwoDonatee . donate(1) $ 1 >>
@@ -127,7 +127,7 @@ rule P5_false {
 
 
 
-rule P2_false {
+property P2_false {
     started -> 
     (
         exists a : address .
@@ -144,7 +144,7 @@ rule P2_false {
 
 
 
-rule P2b_false {
+property P2b_false {
     started -> 
     (
         exists a : address .
@@ -158,7 +158,7 @@ rule P2b_false {
     )
 }
 
-rule P2c_false {
+property P2c_false {
     started -> 
     (
         exists donate_arg : int .    
@@ -169,7 +169,7 @@ rule P2c_false {
 }
 
 
-rule P2d_true {
+property P2d_true {
     started -> 
     (
         << p2 : TwoDonatee . donate(0) $ 0 >>
@@ -177,7 +177,7 @@ rule P2d_true {
     )
 }
 
-rule P2d_false {
+property P2d_false {
     started -> 
     (
         << p2 : TwoDonatee . donate(0) $ 0 >>
@@ -185,7 +185,7 @@ rule P2d_false {
     )
 }
 
-rule P3b_false {
+property P3b_false {
     started -> 
     (
         exists a : address .
@@ -198,7 +198,7 @@ rule P3b_false {
 }
 
 // kind2 returns unknown
-rule P3c_true {
+property P3c_true {
     (started && balance[p1] > 0) -> 
     (
         exists a : address .

@@ -73,7 +73,7 @@ def ghost_var(key) -> str:
 
 
 def summed_maps(program: S.Program) -> List:
-    """The maps m such that sum(m) occurs in the program (contracts and rules), in order."""
+    """The maps m such that sum(m) occurs in the program (contracts and properties), in order."""
     out: List = []
 
     def visit(x):
@@ -86,7 +86,7 @@ def summed_maps(program: S.Program) -> List:
             for n in x.__dataclass_fields__:
                 visit(getattr(x, n))
     visit(program.contracts)
-    visit(program.rules)
+    visit(program.properties)
     return out
 
 

@@ -46,7 +46,7 @@ Experiments with Kind 2 v2.3.0 (see `PROGRESS.md`, Milestone 1) fix the followin
 * `function trans(s: St; t: Tx) returns (r: St)` is the switch of `Trans` / `Trans_C`.
 * The main node has inputs `t: Tx` and the initial user balances, and a state stream
   `s = init -> pre trans(s, t)`; `Init` constrains the initial balances by an `assert`.
-* The property is `--%PROPERTY "<Rule>" (∧_C s.constructed_C) => Φ(φ)`.
+* The Kind 2 property is `--%PROPERTY "<Property>" (∧_C s.constructed_C) => Φ(φ)`.
 
 ### Contract calls
 
@@ -66,11 +66,11 @@ an unfolded call, the sender is the calling contract.
 
 ### Lemmas
 
-Kind 2's invariant generator does not work on quantified properties, so rules whose proof
+Kind 2's invariant generator does not work on quantified properties, so properties whose proof
 needs an auxiliary invariant fail. The tool adds to every Lustre program the
 quantifier-free property `_lemma_balances_nonnegative` (true in every system: Init makes
 balances nonnegative and transfers require 0 <= amount <= balance); Kind 2 proves it and uses
-it in the induction for the rule (e.g. `tests/contracts/calls.sol` Buy_mints: unknown after
+it in the induction for the property (e.g. `tests/contracts/calls.sol` Buy_mints: unknown after
 60 s without it, valid in 6 s with it). `KINDHML_LEMMAS=0` disables it.
 
 ### Encoding of formulas (`encode_formula.py`)
@@ -106,10 +106,10 @@ Nested method quantifiers multiply the copies, each with the transitions of its
 modalities: three free calls of the 10 methods of lending-simple give 1000 copies, whose
 encoding did not finish in 5 minutes. So a method quantifier is expanded only if the
 product of the numbers of methods of the expanded method quantifiers around it, and of
-its own, is at most a bound (`--expand method:N`, default 32: every benchmark rule so far
+its own, is at most a bound (`--expand method:N`, default 32: every benchmark property so far
 has at most 11 copies; two free calls of lending-simple, 100 copies, took 22 s to encode
 instead of 3 s). The outer quantifiers are expanded first; the others stay quantified.
-Neither choice is better on every rule (30 s per rule): with expansion, price-bet
+Neither choice is better on every property (30 s per property): with expansion, price-bet
 `Liquidity` and lending-simple `Liquidation_defence_exists` are proved and are not without
 it; without expansion, two-donatees `P3c_true` is proved and is not with it.
 Quantifiers over records break Kind 2's BMC and k-induction, so an `args` variable is expanded
@@ -131,10 +131,10 @@ output is used only with `--cex`.
 
 ### Solvers
 
-With cvc5, on many rules that have a counterexample, Kind 2's inductive step crashes
+With cvc5, on many properties that have a counterexample, Kind 2's inductive step crashes
 (`Ltree.fold : quantified term`) and Kind 2 then stops BMC as well, so that only IC3 may
 still find the counterexample (the old tool filtered this error out). With z3, BMC finds
-counterexamples; on many valid rules cvc5 is faster. `--solver auto` (default) runs
+counterexamples; on many valid properties cvc5 is faster. `--solver auto` (default) runs
 cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the rest
 (benchmarks with a budget of 120 s: 3 min 51 s in total, against about 16 min for z3 first).
 
@@ -199,7 +199,7 @@ round trip `swap0(10); swap1(out)` from reserves (100, 100) stays unknown, becau
 must establish, through the nonlinear swaps, that wallets and reserves are nonnegative.
 
 **Invariants.** A file may declare `invariant I { ψ }`, with ψ a formula without
-modalities, required, like a rule, in the reachable states where all contracts are
+modalities, required, like a property, in the reachable states where all contracts are
 constructed. The candidates are the declared invariants and the generated ones (below).
 Built-in facts, true in every system, are assumed without checks: balances are
 nonnegative; the fields of an unconstructed contract have their default values (only the
@@ -219,17 +219,17 @@ constructed). The largest inductive subset C is found by Houdini (Flanagan, Lein
 * the candidates refuted in a pass are dropped together, and the steps are checked again;
   generated candidates still undecided after 16 s are dropped too (declared ones wait).
 
-Houdini runs once per file, before its rules, as a phase with its own time limit
+Houdini runs once per file, before its properties, as a phase with its own time limit
 (`prove_invariants`; in `run_all.py` and the CLI, `--invariants_timeout`, by default 3 times
-the time limit of a rule; its time is printed); if it does not finish, the rules go on with
+the time limit of a property; its time is printed); if it does not finish, the properties go on with
 it in their rounds. A run killed by the memory limit says nothing about the candidates: the
 pass stops and a later one tries again (under memory pressure, all the AMM candidates were
 once dropped as undecided). Within the rounds of
-each rule, Houdini shared the time with the other tasks and restarted from small budgets:
-on the lending protocol it did not finish within 11 rules of 60 s, while alone it takes
+each property, Houdini shared the time with the other tasks and restarted from small budgets:
+on the lending protocol it did not finish within 11 properties of 60 s, while alone it takes
 about 110 s.
 
-The rules assume the proved invariants minus the generated ones implied by other proved
+The properties assume the proved invariants minus the generated ones implied by other proved
 ones (`invgen.minimize`, syntactic: `f >= 0` by `f > 0`, an implication by the equivalence,
 `sum(m) <= f` by `sum(m) == f`, ...): fewer, stronger premises are faster for the solvers.
 Minimizing before Houdini would lose candidates: `res0 > 0 -> sc0 > 0` is implied by
@@ -257,7 +257,7 @@ fuzzer, 61 proved in 111 s; in both, the proved ones include every invariant wri
 hand for the use case (e.g. `sum(minted) == supply`, and the exchange rate
 `sc0 > 0 -> xr0 * sc0 == res0 + ssdebt * idx`).
 
-**Checking a rule on a free state.** `C'(s) ⇒ ((∧ constructed) → Φ(φ))(s)` for an arbitrary
+**Checking a property on a free state.** `C'(s) ⇒ ((∧ constructed) → Φ(φ))(s)` for an arbitrary
 state s, where C' is a subset of C. If it holds, φ holds in every reachable state (all of them
 satisfy C): the proof is sound, for any C'. The solvers are sensitive to the form of the
 query, so the tool tries several forms in turn:
@@ -285,10 +285,10 @@ cannot be decided in general.
 **Random testing** (`fuzz.py`). Kind 2 rarely finds counterexamples through nonlinear
 transitions (on the integer AMM, BMC reaches depth 1 in 60 s, and a counterexample needs a
 constructor, a deposit and a swap). Random transactions, run by the reference interpreter
-(reverted ones left out), give reachable states; the rule is evaluated there with bounded
+(reverted ones left out), give reachable states; the property is evaluated there with bounded
 quantifiers (and a sample of the arguments of all procedures). A state where it fails is a
 candidate, which Kind 2 checks exactly (the formula at that concrete state, `concrete_check`);
-a confirmed candidate is a counterexample, reported with its transactions. For a rule with
+a confirmed candidate is a counterexample, reported with its transactions. For a property with
 an existential quantifier over numbers in positive position, the bounded evaluation almost
 always misses the witness, so new random states are checked exactly instead. The random
 values are chosen half of the time among the numbers of the current state (or their half
@@ -304,8 +304,8 @@ budget (4 s, doubled at each round), until a task gives a verdict or the time li
 with linear arithmetic it gets all the time left (a Kind 2 run restarts from scratch, and on
 the regressions the other tasks succeed in seconds or not at all); on nonlinear contracts (a
 product of two variables, a division by a variable) the rounds go on.
-1. Houdini on the invariants (once per file; shared by its rules).
-2. The rule on a free state under the proved invariants, in the forms above (z3 with 3/4 of
+1. Houdini on the invariants (once per file; shared by its properties).
+2. The property on a free state under the proved invariants, in the forms above (z3 with 3/4 of
    the budget, then cvc5: z3 decides nonlinear real queries with nlsat, and Kind 2 cannot
    read cvc5's models of such queries).
 3. The BMC search for s*, once 2 has found it.
@@ -317,8 +317,8 @@ product of two variables, a division by a variable) the rounds go on.
 Verdicts say how they were found: `inductive` (an invariant proved by Houdini),
 `invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `kind2` (task 5).
 
-On the regressions and test contracts (30 s per rule), 82 rules out of 89 match; 28 are
-decided by free-state checks (0.4–2.6 s each). Two rules at the edge of the time limit with
+On the regressions and test contracts (30 s per property), 82 properties out of 89 match; 28 are
+decided by free-state checks (0.4–2.6 s each). Two properties at the edge of the time limit with
 Kind 2 alone (about 27 s) are now unknown: `two-donatees` P5 and `calls`
 Report_sees_balance_after_transfer.
 
@@ -363,14 +363,14 @@ uses these results (Sect. 7.5).
 
 **Setting.** For n ≥ 1, S_n is the system with the addresses A_n = F ∪ U_n, where
 F = {null, C_1, ..., C_m} (null and the contracts) and U_n = {u1, ..., un}. Addresses are
-compared only with `==` and `!=` (type checker), and neither contracts nor rules can name a
+compared only with `==` and `!=` (type checker), and neither contracts nor properties can name a
 user. The only constructs that range over all addresses are the quantifiers of formulas and
 `sum(m)`.
 
 ### 7.1 No cutoff for the reachable states
 
 **Proposition 7.1.** No computable function c(P, φ) has the following property: for every
-contract P and rule φ, if φ holds in the reachable states of S_n for every n ≤ c(P, φ), then
+contract P and property φ, if φ holds in the reachable states of S_n for every n ≤ c(P, φ), then
 φ holds in the reachable states of S_n for every n.
 
 *Proof.* Let M be a deterministic two-counter machine. The contract P_M has integer fields
@@ -388,8 +388,8 @@ proved with 2 users (from the invariant `sum(registered) == count`), and refuted
 
 ### 7.2 Checks as first-order formulas
 
-A check of Sect. 6 (a step of Houdini, or a rule on a free state) is a verification
-condition χ = P ⇒ Q: P the premises, Q a rule or the candidates after a call. We read χ in
+A check of Sect. 6 (a step of Houdini, or a property on a free state) is a verification
+condition χ = P ⇒ Q: P the premises, Q a property or the candidates after a call. We read χ in
 many-sorted first-order logic with a sort Addr, whose constants are null and the contracts;
 a map is a function symbol from Addr to numbers or booleans, a field is a constant, and the
 free state and the transaction are free symbols. χ is *valid with n users* if it holds in
@@ -465,7 +465,7 @@ normal form: its address quantifiers are existential. By induction on ¬φ, a su
 in a state of S_c is true in its extension (for a modality, the transition from the
 extension is the extension of the transition). ∎
 
-For a rule such as `exists a : address . ...` (price-bet `Winnability`), the new users
+For a property such as `exists a : address . ...` (price-bet `Winnability`), the new users
 must also fail, and Lemma 7.5 does not apply. They fail if the trace leaves enough users
 in the same situation. In a state s, a user u is *idle for* a balance b if every map entry
 at u has its default value, `balance[u] = b`, and no address field of s holds u. For a
@@ -486,7 +486,7 @@ it; the sums are unchanged (the new entries are 0, and b = 0 if `sum(balance)` m
 Two facts are used.
 
 (a) Symmetry. Let π be a permutation of the users. The transition function commutes with
-π (contracts and rules name no user, and compare addresses only with `==` and `!=`), so a
+π (contracts and properties name no user, and compare addresses only with `==` and `!=`), so a
 formula holds in a sequence of states (a state and its ancestors, which `old` reads) under
 an assignment ν iff it holds in their images under π ∘ ν. If π exchanges two users that are
 idle for b in every state of the sequence, and fixes the values of ν, then it maps each
@@ -526,7 +526,7 @@ Each check uses its own number of users, the least one for which Thm. 7.3 applie
 Checks with different numbers of users combine as follows.
 
 **Proposition 7.7.** Let C be the final set of Houdini, and suppose that the step of each
-procedure f for C is valid with k_f ≥ max(1, k(χ#_f)) users. Let the check of a rule φ on a
+procedure f for C is valid with k_f ≥ max(1, k(χ#_f)) users. Let the check of a property φ on a
 free state, with premises C' ⊆ C, be valid with u ≥ max(1, k(χ#_φ)) users. Then φ holds in
 the reachable states of S_n for every n ≥ max(c_H, u), where c_H = max_f k_f.
 
@@ -548,14 +548,14 @@ With `--parameterized` (strategy portfolio), for n users asked for:
 * `Checks.cutoff` bounds the counts from above, with all the templates of the invariant
   generator and the declared invariants as candidates: Houdini and the choice of premises
   only remove candidates, which does not increase k (premises add their counts, and the
-  candidates after a call count for the largest one). A rule is checked in parameterized
-  mode if the steps and the rule are in the fragment and N = max(c_H, c_R) ≤ n, with these
-  bounds c_H (steps) and c_R (rule); otherwise it is checked as without the option. The
+  candidates after a call count for the largest one). A property is checked in parameterized
+  mode if the steps and the property are in the fragment and N = max(c_H, c_R) ≤ n, with these
+  bounds c_H (steps) and c_R (property); otherwise it is checked as without the option. The
   verdict says which;
 * each step of Houdini uses the cutoff of the step for the current candidates
   (`Checks.step_count`); when Houdini ends, the invariants hold for every n' ≥ c_H, the
   largest of the cutoffs of the final steps (`_Invariants.users`);
-* the check of the rule uses the cutoff of its premises (`Checks.rule_count`), possibly
+* the check of the property uses the cutoff of its premises (`Checks.property_count`), possibly
   fewer users than Houdini; a proof (`inductive` or `invariants`) holds for every
   n' ≥ max(c_H, u) (Prop. 7.7), and the verdict gives both numbers;
 * the searches for counterexamples are sound with any number of users; the search for the
@@ -565,7 +565,7 @@ With `--parameterized` (strategy portfolio), for n users asked for:
   state, the counterexample of the search, requested with its values, or that of a run of
   BMC after Kind 2, without the lemmas, so that Kind 2 stops at the counterexample), after
   setting to 0 the balances of the users outside the trace if needed. These confirmations
-  get CONFIRM_SECONDS (10 s) each, also after the time limit of the rule. Otherwise the
+  get CONFIRM_SECONDS (10 s) each, also after the time limit of the property. Otherwise the
   counterexample holds for m users only; if m < n, the other searches go on, and the
   outcome is unknown if none decides;
 * a proof by Kind 2 on the transition system with m users holds for m users (its
@@ -577,31 +577,31 @@ With `--parameterized` (strategy portfolio), for n users asked for:
   to k steps", or "no verdict"). A proof with n users gives the verdict valid; a
   counterexample with m + 1 users is handled as above (it extends to n if Lemma 7.5 or
   7.6 applies). After the first proof, the other searches for counterexamples stop: one
-  with m' ≤ m users that extends to every n' ≥ m' would extend to m. The check of the rule
+  with m' ≤ m users that extends to every n' ≥ m' would extend to m. The check of the property
   on a free state goes on while it is open (it may prove φ for every n' ≥ max(c_H, u)).
 
 For the step of procedure f, k(χ#) is the number of address fields, plus 1 for the sender,
 plus the address parameters of f, plus the largest number of address universals of a
 candidate (1 for the templates of Sect. 6), plus the address existentials of the declared
-invariants (as premises). For a rule, it is the number of address fields, plus the address
-universals of the rule, plus the latter term. An `args` variable counts the address
+invariants (as premises). For a property, it is the number of address fields, plus the address
+universals of the property, plus the latter term. An `args` variable counts the address
 parameters of the procedures of the called contract other than the constructor (a method
 variable does not denote a constructor, and the other parameters do not affect the call).
-On bank, c_H = 2, and the rules need 1 or 2 users; on vault, the steps need 4 or 5 users
-and the rules 3 and 8.
+On bank, c_H = 2, and the properties need 1 or 2 users; on vault, the steps need 4 or 5 users
+and the properties 3 and 8.
 
 *Limits.* (1) Counterexamples are searched for with few users; one that needs more users
 is not found (registry `At_most_two` is unknown for every n). A BMC of depth d would need up
-to d(1 + p) + w users (p address parameters, w witnesses). (2) Rules such as additivity
+to d(1 + p) + w users (p address parameters, w witnesses). (2) Properties such as additivity
 P1_true, `forall c1 c2 . exists c3 v12 v3 . forall addr ...`, are outside (F3). (3) With
 c = n, ghost sums are weaker than exact sums with n users, so a proof for exactly n users
 can be lost (registry `At_most_two` with n = 2).
 
-*Results* (10 s per rule; PROGRESS.md, 2026-10-14). On the 46 rules of seven regression
+*Results* (10 s per property; PROGRESS.md, 2026-10-14). On the 46 properties of seven regression
 files, the time is 62–71 s for n = 2, 3, 4 and 100 (normal mode: 71–78 s for n = 2, 3, 4,
-and 457 s with 23 rules decided for n = 100); 43 verdicts are correct for n ≥ 3, and three
+and 457 s with 23 properties decided for n = 100); 43 verdicts are correct for n ≥ 3, and three
 are unknown as expected (two counterexamples outside Lemma 7.5, one proof by Kind 2). On
-bank, the three rules proved with 2 users are proved for every n ≥ 2 in 15–16 s, for any n
+bank, the three properties proved with 2 users are proved for every n ≥ 2 in 15–16 s, for any n
 asked for; the normal mode with 100 users does not finish. With one number of users per
 task, the verdicts on the regressions are unchanged, and most of their checks use 1 user;
 on vault_v2, the counterexample of `Two_steps_drainability` is found with 5 users in 17 s

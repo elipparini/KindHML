@@ -54,8 +54,8 @@ class _Builder(KindHMLVisitor):
                                    " 'pragma balance real'", _pos(p))
             balance_type = t
         contracts = tuple(self.visit(c) for c in ctx.contract())
-        rules = tuple(self.visit(r) for r in ctx.rule_())
-        return S.Program(contracts, rules, balance_type)
+        properties = tuple(self.visit(r) for r in ctx.property_())
+        return S.Program(contracts, properties, balance_type)
 
     def visitContract(self, ctx):
         fields: List[S.VarDecl] = []
@@ -161,15 +161,15 @@ class _Builder(KindHMLVisitor):
     def visitParenStmt(self, ctx):
         return self.visit(ctx.stmts())
 
-    # ---------------------------------------------------------- rules
+    # ---------------------------------------------------------- properties
 
-    def visitRule_(self, ctx):
-        return S.Rule(ctx.name.text, self.visit(ctx.expr()), self._groundtruth(ctx), _pos(ctx),
+    def visitProperty_(self, ctx):
+        return S.Property(ctx.name.text, self.visit(ctx.expr()), self._groundtruth(ctx), _pos(ctx),
                       invariant=ctx.kind.text == "invariant")
 
     def _groundtruth(self, ctx) -> Optional[bool]:
-        """The last `@groundtruth: True|False` comment right before the rule; otherwise
-        the suffix `_true`/`_false` of the rule name (convention of the Solvent regressions)."""
+        """The last `@groundtruth: True|False` comment right before the property; otherwise
+        the suffix `_true`/`_false` of the property name (convention of the Solvent regressions)."""
         hidden = self.tokens.getHiddenTokensToLeft(ctx.start.tokenIndex) or []
         found = None
         for tok in hidden:
@@ -309,12 +309,12 @@ def parse(text: str, source: str = "") -> S.Program:
     return _Builder(tokens).visit(parser.program())
 
 
-def parse_spec(text: str, source: str = "") -> Tuple[S.Rule, ...]:
-    """Parse a text of rules only (a spec file, see `verify.load`) into raw rules. Raises
+def parse_spec(text: str, source: str = "") -> Tuple[S.Property, ...]:
+    """Parse a text of properties only (a spec file, see `verify.load`) into raw properties. Raises
     KindHMLError."""
     tokens, parser = _parser(text, source)
     builder = _Builder(tokens)
-    return tuple(builder.visit(r) for r in parser.spec().rule_())
+    return tuple(builder.visit(r) for r in parser.spec().property_())
 
 
 def parse_expr(text: str) -> S.Expr:

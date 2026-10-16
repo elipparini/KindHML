@@ -1,15 +1,15 @@
-// Grammar of KindHML input files: one or more contracts followed by rules (`program`), or
-// only rules (`spec`: the shared properties of a benchmark family, see contracts/README.md).
-// Contract expressions and rule formulas share the rule `expr`; the type checker
+// Grammar of KindHML input files: one or more contracts followed by properties (`program`), or
+// only properties (`spec`: the shared properties of a benchmark family, see contracts/README.md).
+// Contract expressions and property formulas share the rule `expr`; the type checker
 // restricts which constructs may occur in each context. Reserved names such as
 // `msg.sender`, `balance`, `this`, `lastReverted`, `old(e)`, `is_EOA(e)` are
 // ordinary identifiers here and are resolved by the AST builder.
 
 grammar KindHML;
 
-program : pragma* contract+ rule_* EOF ;
+program : pragma* contract+ property_* EOF ;
 
-spec : rule_* EOF ;
+spec : property_* EOF ;
 
 // `pragma balance real;` makes balances, values and amounts real (default: int). The key is
 // an identifier (`balance` must remain one); the builder checks it.
@@ -56,11 +56,11 @@ stmt
 
 stmtBody : block | stmt ;
 
-// ---------------------------------------------------------------- rules
+// ---------------------------------------------------------------- properties
 
-// An `invariant` is a rule without modalities that the tool proves inductive and then
-// assumes when it checks the other rules (DESIGN.md, "Invariants").
-rule_ : kind=('rule' | 'invariant') name=ID '{' expr '}' ;
+// An `invariant` is a property without modalities that the tool proves inductive and then
+// assumes when it checks the other properties (DESIGN.md, "Invariants").
+property_ : kind=('property' | 'invariant') name=ID '{' expr '}' ;
 
 // `method`/`proc` and `calldataargs`/`args` are identifiers (`args` is a common
 // variable name); the builder checks them.

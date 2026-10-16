@@ -1,6 +1,6 @@
 #!/bin/sh
-# The benchmarks of the paper: every rule of every benchmark contract, 2 participants,
-# a budget of 1000 s per rule. Rules are checked one at a time.
+# The benchmarks of the paper: every property of every benchmark contract, 2 participants,
+# a budget of 1000 s per property. Properties are checked one at a time.
 # The table of verdicts is written to results/benchmarks.csv.
 cd "$(dirname "$0")"
 PY=${PYTHON:-.venv/bin/python}

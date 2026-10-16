@@ -16,7 +16,7 @@ contract C {
 }
 
 
-rule P1_true {
+property P1_true {
     forall addr : address .
     is_EOA(addr) ->
     exists f : method .
@@ -25,7 +25,7 @@ rule P1_true {
         v == old(v)+1
 }
 
-rule P2_true {
+property P2_true {
     exists addr : address .
     exists f : method .
     exists args : calldataargs .
@@ -34,7 +34,7 @@ rule P2_true {
 }
 
 
-rule P3_false {
+property P3_false {
     forall addr : address .
     addr != owner ->
     exists f : method .
@@ -43,7 +43,7 @@ rule P3_false {
         v == old(v) - 1
 }
 
-rule P4_true {
+property P4_true {
     forall addr : address .
     forall f : method .
     forall args : calldataargs .
@@ -51,7 +51,7 @@ rule P4_true {
         balance[owner] == old(balance[owner])
 }
 
-rule P5_false {
+property P5_false {
     exists addr : address .
     exists f : method .
     exists args : calldataargs .

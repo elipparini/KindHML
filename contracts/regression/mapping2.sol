@@ -25,7 +25,7 @@ contract Mapping2 {
 
 
 
-rule P1_true {
+property P1_true {
     forall a : address .
     is_EOA(a) ->
     exists h : method .

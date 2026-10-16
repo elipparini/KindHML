@@ -139,8 +139,8 @@ class KindHMLVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by KindHMLParser#rule_.
-    def visitRule_(self, ctx:KindHMLParser.Rule_Context):
+    # Visit a parse tree produced by KindHMLParser#property_.
+    def visitProperty_(self, ctx:KindHMLParser.Property_Context):
         return self.visitChildren(ctx)
 
 

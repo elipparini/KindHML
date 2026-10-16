@@ -11,14 +11,14 @@ contract C4 {
 }
 
 
-rule P1_false {
+property P1_false {
   forall addr : address .
   exists v : int .   
     << addr : C4 . pay(v) $ 0 >>		
       balance[addr] == old(balance[addr]) + 1
 }
 
-rule P2_true {
+property P2_true {
   forall addr : address .
   is_EOA(addr) ->
   exists v : int .   
@@ -28,14 +28,14 @@ rule P2_true {
 }
 
 
-rule P3_false {
+property P3_false {
   forall addr : address .
   exists v : int .   
     << addr : C4 . pay(v) $ 0 >>		
       balance[addr] == old(balance[addr]) + (balance - 1)
 }
 
-rule P4_true {
+property P4_true {
   forall addr : address .
   is_EOA(addr) ->
   exists v : int .   
@@ -45,7 +45,7 @@ rule P4_true {
 }
 
 
-rule P5_false {
+property P5_false {
   forall addr : address .
   exists v : int .   
   << addr : C4 . pay(v) $ 0 >>
@@ -54,7 +54,7 @@ rule P5_false {
 
 
 // properties P6 and P7 are the same as P4 and P5 except for the "-1" inside/outside the scope of old()  
-rule P6_true {
+property P6_true {
   forall addr : address .
   is_EOA(addr) ->
   exists v : int .   
@@ -64,7 +64,7 @@ rule P6_true {
 }
 
 
-rule P7_false {
+property P7_false {
   forall addr : address .
   exists v : int .   
   << addr : C4 . pay(v) $ 0 >>
@@ -72,7 +72,7 @@ rule P7_false {
 }
 
 
-rule P8_true {
+property P8_true {
   forall addr : address .
   exists v : int .   
   << addr : C4 . pay(v) $ 0 >>
@@ -80,7 +80,7 @@ rule P8_true {
 }
 
 
-rule P9_false {
+property P9_false {
   forall addr : address .
   exists v : int .   
   balance > 1 ->		
@@ -90,7 +90,7 @@ rule P9_false {
 
 
 
-rule P10_true {
+property P10_true {
   forall addr : address .
   exists v : int .   
   << addr : C4 . pay(v) $ 0 >>
@@ -99,7 +99,7 @@ rule P10_true {
 }
 
 
-rule P11_false {
+property P11_false {
   forall addr : address .
   exists v : int .   
   << addr : C4 . pay(v) $ 0 >>
@@ -108,7 +108,7 @@ rule P11_false {
 }
 
 
-rule P12_true {
+property P12_true {
   forall addr : address .
   is_EOA(addr) ->
   exists v : int .   
@@ -117,7 +117,7 @@ rule P12_true {
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
 
-rule P13_false {
+property P13_false {
   forall addr : address .
   exists v : int .   
   balance > 1 ->		
@@ -125,7 +125,7 @@ rule P13_false {
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
 
-rule P14_true {
+property P14_true {
   forall addr : address .
   is_EOA(addr) ->
   exists v : int .   
@@ -135,7 +135,7 @@ rule P14_true {
       balance[addr] == old(balance[addr]) + old(balance) - 1
 }
 
-rule P15_false {
+property P15_false {
   forall addr : address .
   exists v : int .
   balance > 1 ->		
@@ -144,7 +144,7 @@ rule P15_false {
 }
 
 /*
-rule P15_false {
+property P15_false {
   forall addr : address .
   forall f : method .   
   forall arg1 : calldataargs .

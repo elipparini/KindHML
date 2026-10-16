@@ -11,14 +11,14 @@ contract C {
     }
 }
 
-rule P0_false {
+property P0_false {
     exists a : address .
     exists arg : calldataargs .
         << a : C . add(0) $ 0 >> 
             v == -1
 }
 
-rule P1_true {
+property P1_true {
     forall a : address .
     is_EOA(a) ->
     forall v_after : int .
@@ -28,7 +28,7 @@ rule P1_true {
             v == v_after
 }
 // false if v_after < 0
-rule P2_false {
+property P2_false {
     forall a : address .
     forall v_after : int .
     forall h : method .
@@ -38,7 +38,7 @@ rule P2_false {
 }
 
 
-rule P3a_true {
+property P3a_true {
     forall a : address .
     is_EOA(a) ->
     forall v_after : int .
@@ -51,7 +51,7 @@ rule P3a_true {
 }
 
 
-rule P3b_false {
+property P3b_false {
     forall a : address .
     forall v_after : int .
     v_after > 0 ->
@@ -63,7 +63,7 @@ rule P3b_false {
 }
 
 
-rule P3c_true {
+property P3c_true {
     forall a : address .
     is_EOA(a) ->
     forall v_after : int .
@@ -76,7 +76,7 @@ rule P3c_true {
 }
 
 
-rule P4_false {
+property P4_false {
     forall a : address .
     forall v_after : int .
     forall h : method .
@@ -86,7 +86,7 @@ rule P4_false {
 }
 
 
-rule P5_true {
+property P5_true {
     forall a : address .
     exists h : method .
     forall arg : calldataargs .
@@ -95,7 +95,7 @@ rule P5_true {
 }
 
 
-rule P6_false {
+property P6_false {
     forall a : address .
     forall h : method .
     forall arg : calldataargs .
@@ -104,7 +104,7 @@ rule P6_false {
 }
 
 
-rule P7_true {
+property P7_true {
     forall a : address .
     forall h : method .
     h != set ->

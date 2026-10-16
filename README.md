@@ -1,6 +1,6 @@
 # KindHML — verification of smart contracts against CHML properties
 
-KindHML encodes a contract and a CHML rule (a Hennessy–Milner-style formula) into a Lustre
+KindHML encodes a contract and a CHML property (a Hennessy–Milner-style formula) into a Lustre
 transition system with an invariant property, and checks it with the Kind 2 model checker.
 The encoding follows the paper (Sect. "Encoding in first-order logic"); `DESIGN.md` maps the
 paper's definitions to the modules and lists the deviations.
@@ -16,11 +16,11 @@ paper's definitions to the modules and lists the deviations.
 ## Usage
 
 ```
-python3 src/kindHML.py <contract.sol> <Rule|ALL> <n_participants> <timeout> [options]
+python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants> <timeout> [options]
 ```
 
 - `n_participants`: number of user addresses (EOAs) besides `null` and the contracts.
-- `timeout`: time limit per rule, in seconds; 0 for no limit (the search then goes on until
+- `timeout`: time limit per property, in seconds; 0 for no limit (the search then goes on until
   there is a verdict).
 
 Examples:
@@ -34,7 +34,7 @@ Options:
 
 - `--only_lus`: only write the Lustre encoding.
 - `--cex`: print counterexamples. Kind 2 may need much longer to build a counterexample than
-  to find it, so a rule can then need a larger budget.
+  to find it, so a property can then need a larger budget.
 - `--solver auto|z3|cvc5`: SMT solver used by Kind 2. `auto` (default) runs cvc5 for at most
   half of the budget and, if it gives no verdict, z3 for the rest.
 - `--mode inline|levels|exists|subst`: encoding of modalities (default `inline`, see
@@ -44,7 +44,7 @@ Options:
   (the product of the numbers of methods of the nested expanded ones) are at most `N`
   (default 32); the outer quantifiers are expanded first, the others stay quantified.
 - `--strategy portfolio|kind2`: `portfolio` (default) proves the file's invariants, checks
-  each rule on an arbitrary state satisfying them, searches for the state that refutes it,
+  each property on an arbitrary state satisfying them, searches for the state that refutes it,
   and runs Kind 2 on the transition system, in rounds with doubling budgets; `kind2` only
   runs Kind 2 on the transition system. See `DESIGN.md`, Sect. 6.
 - `--no_invgen`: do not generate candidate invariants (only those of the file are used).
@@ -56,18 +56,18 @@ Options:
   unknown and timeout in yellow, errors in magenta). `auto` (default) uses colors only on a
   terminal, and not when `NO_COLOR` is set. The files in `out_results` never contain colors.
 - `--invariants_timeout`: time limit of the invariant phase, which runs once before the
-  rules (default: 3 times `timeout`).
+  properties (default: 3 times `timeout`).
 - `--parameterized`: run each check with its own cutoff (a number of users at most
   `n_participants`), and report for which numbers of users each verdict holds (a proof by
   invariants: every n from a cutoff on). See `DESIGN.md`, Sect. 7.
 
-Each rule's Lustre file is saved in `out_lus/<contract>_<Rule>_<n>_<timeout>.lus`, and its
-verdict in `out_results/<contract>_<Rule>_<n>_<timeout>.out`. The verdict is compared with the
-ground truth of the rule. For a contract of a benchmark family (a directory with `spec.hml`,
-see `contracts/README.md`), the rules and the ground truth come from the files of the family.
-Otherwise, the rules follow the contracts in the same file, and the ground truth of a rule is
-a comment `// @groundtruth: True|False` right before it, or else the suffix `_true`/`_false` of
-its name.
+Each property's Lustre file is saved in `out_lus/<contract>_<Property>_<n>_<timeout>.lus`, and its
+verdict in `out_results/<contract>_<Property>_<n>_<timeout>.out`. The verdict is compared with the
+ground truth of the property. For a contract of a benchmark family (a directory with `spec.hml`,
+see `contracts/README.md`), the properties and the ground truth come from the files of the family.
+Otherwise, the properties follow the contracts in the same file, and the ground truth of a
+property is a comment `// @groundtruth: True|False` right before it, or else the
+suffix `_true`/`_false` of its name.
 
 Each Kind 2 run, with its solvers, is placed in a `systemd-run --user` scope, which limits
 their memory to the smaller of 3 GB and half of the available memory (or
@@ -88,7 +88,7 @@ contract Bank {
 }
 
 // @groundtruth: True
-rule Liquidity {
+property Liquidity {
     forall a : address . forall n : int .
     (is_EOA(a) && n >= 0 && n <= funds[a]) ->
     exists f : method . exists args : calldataargs .
@@ -111,15 +111,15 @@ transaction; `old(e)`; `lastReverted`; `is_EOA(e)`; `balance`, `balance[a]`,
 `block.number`, contract fields; `sum(m)`, the sum of a mapping `m` (or of `balance`) over
 all addresses.
 
-Besides rules, a file may declare invariants, `invariant Name { φ }`, with `φ` without
+Besides properties, a file may declare invariants, `invariant Name { φ }`, with `φ` without
 modalities, required where all contracts are constructed. The tool also generates
 candidate invariants from templates (signs, bounds, totals such as `sum(m) == total`, ...).
-It proves those that are inductive and assumes them when it checks the other rules (see
+It proves those that are inductive and assumes them when it checks the other properties (see
 `tests/contracts/swap_pool.sol`); this helps much with nonlinear arithmetic.
 
 A file may contain several contracts, which can call each other (no cycles):
 `Token.mint(msg.sender, n) $ msg.value` calls `mint` of contract `Token`, transferring
-`msg.value` tokens with the call. With several contracts, rules write `C.x` for a field `x` of
+`msg.value` tokens with the call. With several contracts, properties write `C.x` for a field `x` of
 `C` and `C.balance` (or `balance[C]`) for its balance; see `tests/contracts/calls.sol`.
 
 ## Tests and experiments
@@ -132,10 +132,10 @@ A file may contain several contracts, which can call each other (no cycles):
 bash run_experiments.sh              # the benchmarks of the paper
 ```
 
-Without files, `tests/run_all.py` runs every task (a rule of a contract file) of
+Without files, `tests/run_all.py` runs every task (a property of a contract file) of
 `contracts/regression` and of the benchmark families. The tasks can be restricted with
 `--families bank,vault`, `--versions 1,3` (`<name>_vN.sol` is version N, `<name>.sol` version
-1), `--rules Liquidity,...` and `--tasks FILE.csv` (columns `file` and `rule`, as in the
+1), `--properties Liquidity,...` and `--tasks FILE.csv` (columns `file` and `property`, as in the
 `results.csv` of a run, or `contract` and `property`, as in a `groundtruth.csv`); the
 restrictions combine. `--list` prints the selected tasks without running them.
 `tests/run_all.py --out DIR` saves the run in `DIR`: `results.csv` (one row per task),
@@ -143,6 +143,3 @@ restrictions combine. `--list` prints the selected tasks without running them.
 the date, the git commit and the versions of Kind 2, Z3 and cvc5).
 
 `tools/gen_parser.sh` regenerates the parser from `src/kindhml/grammar/KindHML.g4`.
-
-
-// TODO change "rule" into "property"

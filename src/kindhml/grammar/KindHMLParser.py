@@ -146,7 +146,7 @@ class KindHMLParser ( Parser ):
                      "'payable'", "'public'", "'external'", "','", "'int'", 
                      "'uint'", "'real'", "'bool'", "'address'", "'mapping'", 
                      "'=>'", "'skip'", "'require'", "'if'", "'else'", "'['", 
-                     "']'", "'='", "'+='", "'-='", "'.'", "'$'", "'rule'", 
+                     "']'", "'='", "'+='", "'-='", "'.'", "'$'", "'property'", 
                      "'invariant'", "':'", "'true'", "'false'", "'null'", 
                      "'!'", "'-'", "'*'", "'/'", "'%'", "'+'", "'<'", "'<='", 
                      "'>'", "'>='", "'=='", "'!='", "'&&'", "'and'", "'||'", 
@@ -184,7 +184,7 @@ class KindHMLParser ( Parser ):
     RULE_stmts = 10
     RULE_stmt = 11
     RULE_stmtBody = 12
-    RULE_rule_ = 13
+    RULE_property_ = 13
     RULE_qtype = 14
     RULE_qvars = 15
     RULE_expr = 16
@@ -192,7 +192,7 @@ class KindHMLParser ( Parser ):
 
     ruleNames =  [ "program", "spec", "pragma", "contract", "member", "modifier", 
                    "params", "param", "type_", "block", "stmts", "stmt", 
-                   "stmtBody", "rule_", "qtype", "qvars", "expr", "exprs" ]
+                   "stmtBody", "property_", "qtype", "qvars", "expr", "exprs" ]
 
     EOF = Token.EOF
     T__0=1
@@ -295,11 +295,11 @@ class KindHMLParser ( Parser ):
                 return self.getTypedRuleContext(KindHMLParser.ContractContext,i)
 
 
-        def rule_(self, i:int=None):
+        def property_(self, i:int=None):
             if i is None:
-                return self.getTypedRuleContexts(KindHMLParser.Rule_Context)
+                return self.getTypedRuleContexts(KindHMLParser.Property_Context)
             else:
-                return self.getTypedRuleContext(KindHMLParser.Rule_Context,i)
+                return self.getTypedRuleContext(KindHMLParser.Property_Context,i)
 
 
         def getRuleIndex(self):
@@ -348,7 +348,7 @@ class KindHMLParser ( Parser ):
             _la = self._input.LA(1)
             while _la==32 or _la==33:
                 self.state = 47
-                self.rule_()
+                self.property_()
                 self.state = 52
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
@@ -374,11 +374,11 @@ class KindHMLParser ( Parser ):
         def EOF(self):
             return self.getToken(KindHMLParser.EOF, 0)
 
-        def rule_(self, i:int=None):
+        def property_(self, i:int=None):
             if i is None:
-                return self.getTypedRuleContexts(KindHMLParser.Rule_Context)
+                return self.getTypedRuleContexts(KindHMLParser.Property_Context)
             else:
-                return self.getTypedRuleContext(KindHMLParser.Rule_Context,i)
+                return self.getTypedRuleContext(KindHMLParser.Property_Context,i)
 
 
         def getRuleIndex(self):
@@ -405,7 +405,7 @@ class KindHMLParser ( Parser ):
             _la = self._input.LA(1)
             while _la==32 or _la==33:
                 self.state = 55
-                self.rule_()
+                self.property_()
                 self.state = 60
                 self._errHandler.sync(self)
                 _la = self._input.LA(1)
@@ -1529,7 +1529,7 @@ class KindHMLParser ( Parser ):
         return localctx
 
 
-    class Rule_Context(ParserRuleContext):
+    class Property_Context(ParserRuleContext):
         __slots__ = 'parser'
 
         def __init__(self, parser, parent:ParserRuleContext=None, invokingState:int=-1):
@@ -1546,21 +1546,21 @@ class KindHMLParser ( Parser ):
             return self.getToken(KindHMLParser.ID, 0)
 
         def getRuleIndex(self):
-            return KindHMLParser.RULE_rule_
+            return KindHMLParser.RULE_property_
 
         def accept(self, visitor:ParseTreeVisitor):
-            if hasattr( visitor, "visitRule_" ):
-                return visitor.visitRule_(self)
+            if hasattr( visitor, "visitProperty_" ):
+                return visitor.visitProperty_(self)
             else:
                 return visitor.visitChildren(self)
 
 
 
 
-    def rule_(self):
+    def property_(self):
 
-        localctx = KindHMLParser.Rule_Context(self, self._ctx, self.state)
-        self.enterRule(localctx, 26, self.RULE_rule_)
+        localctx = KindHMLParser.Property_Context(self, self._ctx, self.state)
+        self.enterRule(localctx, 26, self.RULE_property_)
         self._la = 0 # Token type
         try:
             self.enterOuterAlt(localctx, 1)

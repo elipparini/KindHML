@@ -31,7 +31,7 @@ null
 '-='
 '.'
 '$'
-'rule'
+'property'
 'invariant'
 ':'
 'true'
@@ -150,7 +150,7 @@ block
 stmts
 stmt
 stmtBody
-rule_
+property_
 qtype
 qvars
 expr

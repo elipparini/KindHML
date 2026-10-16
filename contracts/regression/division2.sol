@@ -20,7 +20,7 @@ contract Division {
 }
 
 /*
-rule P1_true {
+property P1_true {
     forall c1 : int .
     forall c2 : int .
     exists c3 : int .
@@ -39,7 +39,7 @@ rule P1_true {
 
 
 
-rule P2_false {
+property P2_false {
     forall c1 : int .
     exists c3 : int .
     exists v1_storage : int .

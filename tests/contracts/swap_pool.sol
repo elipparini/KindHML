@@ -63,7 +63,7 @@ invariant Small_reserves {
 }
 
 // @groundtruth: True
-rule Swap_reversibility {
+property Swap_reversibility {
     forall a : address . forall x : real .
     << a : Pool.swap0(x) >>
         (lastReverted ||
@@ -72,7 +72,7 @@ rule Swap_reversibility {
 }
 
 // @groundtruth: False
-rule Swap_takes_everything {
+property Swap_takes_everything {
     forall a : address . forall x : real .
     << a : Pool.swap0(x) >> (lastReverted || r1 == 0)
 }

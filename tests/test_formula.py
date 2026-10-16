@@ -30,32 +30,32 @@ FILES = sorted(glob.glob(os.path.join(ROOT, "contracts", "*", "*.sol"))
                + glob.glob(os.path.join(ROOT, "tests", "contracts", "*.sol")))
 INTS = (-1, 0, 1, 2)
 STATES = 6
-BUDGET = 3.0            # seconds per rule and configuration; later states are skipped
+BUDGET = 3.0            # seconds per property and configuration; later states are skipped
 CONFIGS = [("inline", ("address", "method")), ("inline", ()), ("subst", ("address", "method"))]
 
 
 def cases():
     for path in FILES:
         program, _ = V.load(path)
-        for rule in program.rules:
+        for prop in program.properties:
             for mode, expand in CONFIGS:
-                yield pytest.param(path, rule.name, mode, expand,
-                                   id=f"{V.stem(path)}-{rule.name}-{mode}-{'x' if expand else 'q'}")
+                yield pytest.param(path, prop.name, mode, expand,
+                                   id=f"{V.stem(path)}-{prop.name}-{mode}-{'x' if expand else 'q'}")
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("path,rule_name,mode,expand", list(cases()))
-def test_formula_matches_reference(path, rule_name, mode, expand):
+@pytest.mark.parametrize("path,property_name,mode,expand", list(cases()))
+def test_formula_matches_reference(path, property_name, mode, expand):
     program, _ = V.load(path)
-    rule = program.rule(rule_name)
+    prop = program.prop(property_name)
     system = System.make(program, 2)
     enc = Encoder(system)
     prog, _ = enc.program()
-    prop = FormulaEncoder(enc, mode, expand).rule(rule)
+    goal = FormulaEncoder(enc, mode, expand).prop(prop)
     lev = Evaluator(prog, int_domain=INTS)
     ref = FormulaEvaluator(system, INTS)
     interp = Interpreter(system)
-    rnd = random.Random(f"{path}:{rule_name}")
+    rnd = random.Random(f"{path}:{property_name}")
     start, checked = time.time(), 0
     signal.signal(signal.SIGALRM, _too_slow)
     try:
@@ -67,8 +67,8 @@ def test_formula_matches_reference(path, rule_name, mode, expand):
             signal.setitimer(signal.ITIMER_REAL, left)
             try:
                 state = lev.eval(T.state_literal(st, system, enc), {})
-                encoded = lev.eval(prop, {"s": state})
-                expected = (not all(st.constructed.values())) or ref.holds(rule.formula, [st])
+                encoded = lev.eval(goal, {"s": state})
+                expected = (not all(st.constructed.values())) or ref.holds(prop.formula, [st])
             except _TooSlow:
                 break
             finally:
@@ -107,8 +107,8 @@ def test_method_copies_bound_the_expansion(bound, symbolic):
     fresh variables q_f1_N, q_f2_N."""
     program, _ = V.load(VAULT)
     enc = Encoder(System.make(program, 2))
-    prop = FormulaEncoder(enc, "inline", ("address", f"method:{bound}")).rule(
-        program.rule("Two_steps_drainability"))
+    prop = FormulaEncoder(enc, "inline", ("address", f"method:{bound}")).prop(
+        program.prop("Two_steps_drainability"))
     text = L.render(prop)
     assert {f for f in ("f1", "f2") if f"q_{f}_" in text} == symbolic
 

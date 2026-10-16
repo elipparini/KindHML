@@ -77,9 +77,9 @@ class FormulaEncoder:
         self._fresh += 1
         return f"{base}_{self._fresh}"
 
-    # ------------------------------------------------------------ rules
+    # ------------------------------------------------------------ properties
 
-    def rule(self, r: S.Rule, state: L.LExpr = L.Var("s")) -> L.LExpr:
+    def prop(self, r: S.Property, state: L.LExpr = L.Var("s")) -> L.LExpr:
         """(∧_C constructed_C) → Φ(φ): φ is required in the states where all contracts are
         constructed (DESIGN.md, Sect. 4)."""
         self._fresh = 0

@@ -1,4 +1,4 @@
-rule Frontrunning {
+property Frontrunning {
     (player_won)
     ->
     (

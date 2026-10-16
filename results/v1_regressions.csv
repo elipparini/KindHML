@@ -1,4 +1,4 @@
-file,rule,status,groundtruth,check,wall
+file,property,status,groundtruth,check,wall
 contracts/regression/additivity.sol,P1_true,valid,True,OK,1.16
 contracts/regression/additivity.sol,P2_false,invalid,False,OK,0.97
 contracts/regression/additivity.sol,P3_true,valid,True,OK,0.98

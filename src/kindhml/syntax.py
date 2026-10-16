@@ -1,4 +1,4 @@
-"""Abstract syntax of contracts and rules.
+"""Abstract syntax of contracts and properties.
 
 The builder produces a *raw* AST in which names are unresolved (`Name`,
 `Member`). The type checker produces a *resolved* AST in which every name is
@@ -212,7 +212,7 @@ class Param(Expr):
 
 @dataclass(frozen=True)
 class QVar(Expr):
-    """Variable bound by a quantifier of a rule."""
+    """Variable bound by a quantifier of a property."""
     name: str
     type: Type
     pos: Pos = _pos()
@@ -438,9 +438,9 @@ class Contract:
 
 
 @dataclass(frozen=True)
-class Rule:
-    """A rule, or an invariant: a rule without modalities, which the tool proves inductive
-    and then assumes when checking other rules. Both are required in the reachable states
+class Property:
+    """A property, or an invariant: a property without modalities, which the tool proves inductive
+    and then assumes when checking other properties. Both are required in the reachable states
     where all contracts are constructed. A lemma is an invariant that only helps the proofs
     (from the lemmas file of a benchmark family): it is not a verification task."""
     name: str
@@ -454,11 +454,11 @@ class Rule:
 @dataclass(frozen=True)
 class Program:
     contracts: Tuple[Contract, ...]
-    rules: Tuple[Rule, ...]
+    properties: Tuple[Property, ...]
     balance_type: Type = INT        # of balances, values and amounts (`pragma balance real`)
 
     def contract(self, name: str) -> Optional[Contract]:
         return next((c for c in self.contracts if c.name == name), None)
 
-    def rule(self, name: str) -> Optional[Rule]:
-        return next((r for r in self.rules if r.name == name), None)
+    def prop(self, name: str) -> Optional[Property]:
+        return next((r for r in self.properties if r.name == name), None)

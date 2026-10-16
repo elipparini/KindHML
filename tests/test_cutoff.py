@@ -16,7 +16,7 @@ from kindhml.invariants import Checks
 from kindhml.lustre_eval import Evaluator
 from kindhml.model import System
 from kindhml.reference import Interpreter
-from kindhml.typecheck import check, check_rule
+from kindhml.typecheck import check, check_property
 
 import test_trans as T
 
@@ -44,7 +44,7 @@ contract C {
 
 def formula(text: str) -> S.Expr:
     program, _ = check(parse(SOURCE))
-    return check_rule(program, S.Rule("R", parse_expr(text))).formula
+    return check_property(program, S.Property("R", parse_expr(text))).formula
 
 
 @pytest.mark.parametrize("text, skolems, dual", [
@@ -123,17 +123,17 @@ def test_address_existential_under_a_universal():
 def test_cutoffs_of_the_benchmarks():
     bank, _ = V.load(os.path.join(ROOT, "contracts", "bank", "bank.sol"))
     _, _, cut = V.effective_users({}, bank, 100, V.DEFAULT_MODE, V.DEFAULT_EXPAND, True, True)
-    assert cut.steps == 2 and cut.of_rule("Liquidity") == 2
-    assert cut.checks["rule No_frontrun_deposit"] == 2 and cut.checks["rule Liquidity"] == 1
+    assert cut.steps == 2 and cut.of_property("Liquidity") == 2
+    assert cut.checks["property No_frontrun_deposit"] == 2 and cut.checks["property Liquidity"] == 1
     # P1_true: forall c1 c2 . exists c3 v12 v3 . forall addr ...
     additivity, _ = V.load(os.path.join(ROOT, "contracts", "regression", "additivity.sol"))
     args = (V.DEFAULT_MODE, V.DEFAULT_EXPAND, True, True)
     users, ghost, cut = V.effective_users({}, additivity, 100, *args)
     assert (users, ghost, sorted(cut.outside)) == (1, True, ["P1_true", "P2_false"])
     assert "under a universal" in cut.outside["P1_true"]
-    assert V.effective_users({}, additivity, 100, *args, additivity.rule("P1_true"))[:2] == \
+    assert V.effective_users({}, additivity, 100, *args, additivity.prop("P1_true"))[:2] == \
         (100, False)
-    assert V.effective_users({}, additivity, 100, *args, additivity.rule("P3_true"))[:2] == \
+    assert V.effective_users({}, additivity, 100, *args, additivity.prop("P3_true"))[:2] == \
         (1, True)
 
 
@@ -163,17 +163,19 @@ def test_effective_users():
 
 def test_default_mode_expands_sums():
     program, _ = V.load(REGISTRY)
-    rule = check_rule(program, S.Rule("S", parse_expr("sum(registered) == count")))
-    assert "sum_Registry_registered" not in V.lustre_for(program, rule, 2)
-    assert "sum_Registry_registered" in V.lustre_for(program, rule, 2, ghost_sums=True)
+    prop = check_property(program, S.Property("S", parse_expr("sum(registered) == count")))
+    assert "sum_Registry_registered" not in V.lustre_for(program, prop, 2)
+    assert "sum_Registry_registered" in V.lustre_for(program, prop, 2, ghost_sums=True)
 
 
 def with_sums(path: str) -> S.Program:
-    """The program of `path` with rules summing every map to numbers, and the balances."""
+    """The program of `path` with properties summing every map to numbers, and the balances."""
     program, _ = check(parse(open(path).read()))
-    rules = [check_rule(program, S.Rule("_sum_balance", parse_expr("sum(balance) >= 0")))]
-    rules += invgen.candidates(program)            # sum(m) == f, ... for the fields f
-    return S.Program(program.contracts, program.rules + tuple(rules), program.balance_type)
+    properties = [check_property(program,
+                                 S.Property("_sum_balance", parse_expr("sum(balance) >= 0")))]
+    properties += invgen.candidates(program)            # sum(m) == f, ... for the fields f
+    return S.Program(program.contracts, program.properties + tuple(properties),
+                     program.balance_type)
 
 
 @pytest.mark.parametrize("path", T.FILES, ids=os.path.basename)
@@ -196,11 +198,11 @@ def test_sum_axioms_need_nonnegative_entries():
     """The bounds by sum(m) are assumed only with premises making the entries of m
     nonnegative (`forall u. m[u] >= 0` and `m[null] >= 0`)."""
     program, _ = V.load(REGISTRY)
-    invariants = [check_rule(program, S.Rule(name, parse_expr(text), invariant=True))
+    invariants = [check_property(program, S.Property(name, parse_expr(text), invariant=True))
                   for name, text in [("Every", "forall u : address . registered[u] >= 0"),
                                      ("Null", "registered[null] >= 0"),
                                      ("Total", "sum(registered) == count")]]
-    extended = S.Program(program.contracts, program.rules + tuple(invariants),
+    extended = S.Program(program.contracts, program.properties + tuple(invariants),
                          program.balance_type)
     checks = Checks(extended, 2, V.DEFAULT_MODE, V.DEFAULT_EXPAND, ghost_sums=True)
     s = L.Var("s")
@@ -212,7 +214,7 @@ def test_sum_axioms_need_nonnegative_entries():
 @pytest.mark.kind2
 @pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
 def test_parameterized_registry():
-    """With 3 users asked for, the checks use 2: the rules true for every number of users
+    """With 3 users asked for, the checks use 2: the properties true for every number of users
     are proved for every n >= 2; At_most_two, false with 3 users, is not proved. Without
     parameterized mode, it is proved with 2 users and refuted with 3."""
     program, _ = V.load(REGISTRY)
@@ -224,24 +226,24 @@ def test_parameterized_registry():
         assert out[name].status == "valid", out[name].describe()
         assert out[name].scope.startswith("for every n >= 2 users"), out[name].scope
     assert out["At_most_two"].status != "valid"
-    rule = program.rule("At_most_two")
+    prop = program.prop("At_most_two")
     for n, status in ((2, "valid"), (3, "invalid")):
         context = {}
         V.prove_invariants(program, n, 30, context)
-        assert V.verify(program, rule, n, 20, context=context).status == status
+        assert V.verify(program, prop, n, 20, context=context).status == status
 
 
 @pytest.mark.kind2
 @pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
 def test_kind2_with_more_users():
     """With 3 users asked for, Kind 2 proves At_most_two with 2 users (the cutoff), not a
-    proof for 3 users; it goes on with 3 users and refutes it. The rule has no address
+    proof for 3 users; it goes on with 3 users and refutes it. The property has no address
     quantifier, so the proof holds for every n <= 2 (Cor. 7.8) and the counterexample for
     every n >= 3 (Lemma 7.5)."""
     program, _ = V.load(REGISTRY)
     context: dict = {}
     V.prove_invariants(program, 3, 30, context, parameterized=True)
-    out = V.verify(program, program.rule("At_most_two"), 3, 120, context=context,
+    out = V.verify(program, program.prop("At_most_two"), 3, 120, context=context,
                    parameterized=True)
     assert out.status == "invalid", out.describe()
     assert out.scope == ("counterexample with 3 users, for every n >= 3; true up to 2 users"), \
@@ -253,7 +255,7 @@ def test_kind2_with_more_users():
 def test_counterexamples_extend_with_idle_users():
     """With 3 users asked for, the checks use at most 2. The counterexample of
     Someone_registered leaves idle users and holds for every larger number of users
-    (Lemma 7.6); that of Someone_unregistered has none and is not extended (the rule holds
+    (Lemma 7.6); that of Someone_unregistered has none and is not extended (the property holds
     with 3 users). With 2 users asked for, Someone_unregistered is refuted."""
     program, _ = V.load(CAPPED)
     context: dict = {}
@@ -266,6 +268,6 @@ def test_counterexamples_extend_with_idle_users():
         out["Someone_unregistered"].describe()
     context = {}
     V.prove_invariants(program, 2, 30, context, parameterized=True)
-    rule = program.rule("Someone_unregistered")
-    assert V.verify(program, rule, 2, 20, context=context, parameterized=True).status == \
+    prop = program.prop("Someone_unregistered")
+    assert V.verify(program, prop, 2, 20, context=context, parameterized=True).status == \
         "invalid"

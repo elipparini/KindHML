@@ -1,18 +1,18 @@
 """Invariant-assisted checking (DESIGN.md, "Invariants").
 
-Kind 2 checks a rule on the reachable states of (Init, Trans), by BMC and k-induction through
-Trans. When Trans is nonlinear and the rule holds only because of facts about the reachable
+Kind 2 checks a property on the reachable states of (Init, Trans), by BMC and k-induction through
+Trans. When Trans is nonlinear and the property holds only because of facts about the reachable
 states (e.g. nonnegative reserves), this often fails. The checks below avoid the transition
 system: each is one Kind 2 run on free values (a node without `pre`), i.e. one SMT query.
 
-* Invariants, like rules, are required in the states where all contracts are constructed:
+* Invariants, like properties, are required in the states where all contracts are constructed:
   (∧_C constructed_C) → I. So they hold trivially in the initial states, and a set C of
   candidates is inductive if, for every procedure f (constructors included),
   C(s) ⇒ C(Trans(s, t)) for every state s and call t of f (`step_conj_checks`;
   `step_check` with one property per candidate). Candidates refuted are dropped until the
   remaining set is inductive (Houdini, `verify._Invariants`). The built-in facts
   (balances are nonnegative; an unconstructed contract has default fields) are assumed.
-* A rule φ is checked on a free state s: C(s) ⇒ ((∧_C constructed_C) → Φ(φ))(s), with C the
+* A property φ is checked on a free state s: C(s) ⇒ ((∧_C constructed_C) → Φ(φ))(s), with C the
   proved invariants. If it holds, φ holds in every reachable state (they all satisfy C).
   If it fails, the counterexample s* may be unreachable; `reach_check(s*)` asks BMC
   whether s* is reachable, which gives a counterexample of φ.
@@ -47,10 +47,10 @@ class Checks:
         self.fenc = FormulaEncoder(self.enc, mode, tuple(expand))
         lemmas = [(n, (lambda st, e=e: self.fenc.inliner.run(e, {"s": st})))
                   for n, e in self.enc.lemmas()]
-        # an invariant, like a rule, is required in the states where all contracts are
+        # an invariant, like a property, is required in the states where all contracts are
         # constructed: (∧_C constructed_C) → Φ(I)
-        mine = [(r.name, (lambda st, r=r: self.fenc.rule(r, st)))
-                for r in program.rules if r.invariant]
+        mine = [(r.name, (lambda st, r=r: self.fenc.prop(r, st)))
+                for r in program.properties if r.invariant]
         # the built-in lemmas hold in every system (DESIGN.md, "Lemmas"): assumed, not checked
         self.axioms: List[str] = [n for n, _ in lemmas]
         self.candidates: Dict[str, StateFormula] = dict(lemmas + mine)
@@ -78,7 +78,7 @@ class Checks:
         universal over the addresses, so they do not change the cutoff (DESIGN.md, Sect. 7)."""
         if not self.enc.ghosts:
             return L.TRUE
-        formulas = [self.program.rule(n).formula for n in names if n not in self.axioms]
+        formulas = [self.program.prop(n).formula for n in names if n not in self.axioms]
         nonneg = nonnegative_maps(formulas)
         constructed = L.conj([L.proj(st, constructed_var(c.name))
                               for c in self.enc.system.contracts])
@@ -106,7 +106,7 @@ class Checks:
         negation of a check (`cutoff.py`). Raises OutOfFragment."""
         scan = Scanner(self.enc.system)
         return check_program(self.enc.system) + sum(
-            scan.skolems(self.program.rule(n).formula, positive=False)
+            scan.skolems(self.program.prop(n).formula, positive=False)
             for n in names if n not in self.axioms)
 
     def step_count(self, names: List[str], c: S.Contract, p: S.Procedure) -> int:
@@ -115,22 +115,22 @@ class Checks:
         conj: S.Expr = S.BoolLit(True)
         for n in names:
             if n not in self.axioms:
-                conj = S.BinOp("&&", conj, self.program.rule(n).formula)
+                conj = S.BinOp("&&", conj, self.program.prop(n).formula)
         after = self._after(c, p, self._guard(conj))
         return self._premise_count(names) + Scanner(self.enc.system).skolems(after, True)
 
-    def rule_count(self, premises: List[str], rule: S.Rule) -> int:
-        """k of the check of `rule` on a free state with the premises `premises`
-        (`rule_check`): its cutoff is max(1, k). Raises OutOfFragment."""
+    def property_count(self, premises: List[str], prop: S.Property) -> int:
+        """k of the check of `prop` on a free state with the premises `premises`
+        (`property_check`): its cutoff is max(1, k). Raises OutOfFragment."""
         return (self._premise_count(premises)
-                + Scanner(self.enc.system).skolems(rule.formula, True))
+                + Scanner(self.enc.system).skolems(prop.formula, True))
 
-    def cutoff(self, rules: List[S.Rule]) -> Cutoff:
+    def cutoff(self, properties: List[S.Property]) -> Cutoff:
         """The counts of the checks (`cutoff.py`) with all the candidates as premises: the
-        step of each procedure, and each rule on a free state. They bound those with fewer
+        step of each procedure, and each property on a free state. They bound those with fewer
         premises or candidates: premises add their counts, and the candidates after a call
         count for the largest one. The checks themselves use the counts of their actual
-        premises and candidates (`step_count`, `rule_count`)."""
+        premises and candidates (`step_count`, `property_count`)."""
         names = [n for n in self.candidates if n not in self.axioms]
         checks: Dict[str, int] = {}
         try:
@@ -139,9 +139,9 @@ class Checks:
         except OutOfFragment as e:
             return Cutoff(None, str(e))
         outside: Dict[str, str] = {}
-        for r in rules:
+        for r in properties:
             try:
-                checks[f"rule {r.name}"] = self.rule_count(names, r)
+                checks[f"property {r.name}"] = self.property_count(names, r)
             except OutOfFragment as e:
                 outside[r.name] = str(e)
         steps = max([1] + [v for k, v in checks.items() if k.startswith("step ")])
@@ -178,7 +178,7 @@ class Checks:
         procedure only."""
         conj: S.Expr = S.BoolLit(True)
         for n in names:
-            conj = S.BinOp("&&", conj, self.program.rule(n).formula)
+            conj = S.BinOp("&&", conj, self.program.prop(n).formula)
         s = L.Var("s")
         premise = L.conj([self._conj(self.axioms + names, s), self.defaults(s),
                           self.sum_axioms(self.axioms + names, s)])
@@ -233,7 +233,7 @@ class Checks:
                 continue
             for n in names:
                 try:
-                    if not ev.holds(self.program.rule(n).formula, [post]):
+                    if not ev.holds(self.program.prop(n).formula, [post]):
                         out.add(n)
                 except (ZeroDivisionError, KeyError, TypeError):
                     pass
@@ -266,7 +266,7 @@ class Checks:
                 continue
             for n in names:
                 prop = f"step_{n}__{c.name}_{p.name}"
-                guarded = self._guard(self.program.rule(n).formula)
+                guarded = self._guard(self.program.prop(n).formula)
                 after = self.fenc.state_formula(self._after(c, p, guarded), s)
                 props.append((prop, L.op("=>", premise, after)))
                 about[prop] = n
@@ -288,23 +288,24 @@ class Checks:
             body = S.Quant("forall", v.name, v.type, body)
         return body
 
-    def premises(self, rule: S.Rule, invariants: List[str]) -> List[List[str]]:
-        """The sets of invariants to assume when checking `rule`, to be tried in turn: those
-        that share state variables with the rule, then also those connected to them
+    def premises(self, prop: S.Property, invariants: List[str]) -> List[List[str]]:
+        """The sets of invariants to assume when checking `prop`, to be tried in turn: those
+        that share state variables with the property, then also those connected to them
         (transitively), if different. Irrelevant invariants can make the query much harder:
         the balance lemma over int, in a query over nonlinear reals, made z3 time out (the
         mix of int and real keeps it from using nlsat); in the AMM, the invariant on the
         liquidity shares, connected to the swap only through `supply`, turned a 1 s proof
         of Swap_reversibility into a timeout. Fewer premises are always sound."""
-        prop = self._property(rule, L.Var("s"))
-        direct = self.relevant(prop, invariants, transitive=False)
-        closure = self.relevant(prop, invariants, transitive=True)
+        goal = self._property(prop, L.Var("s"))
+        direct = self.relevant(goal, invariants, transitive=False)
+        closure = self.relevant(goal, invariants, transitive=True)
         return [direct] + ([closure] if closure != direct else [])
 
-    def rule_check(self, rule: S.Rule, invariants: List[str],
+    def property_check(self, prop: S.Property, invariants: List[str],
                    split: bool = False) -> Tuple[str, List[str]]:
-        """The rule on a free state satisfying the given invariants, as one property or, with
-        `split`, as one property per case. Returns the program and the property names.
+        """The property on a free state satisfying the given invariants, as one Kind 2
+        property or, with `split`, as one property per case. Returns the program and the
+        property names.
 
         The invariants are the premise of the property, not Lustre assertions: with
         assertions, Kind 2 did not prove Swap_reversibility of the swap pool in 30 s; as a
@@ -316,34 +317,34 @@ class Checks:
         proved in 1 s as one property, and its 2 cases are unknown after 20 s in one run
         (0.6 s each in separate runs)."""
         prog, s = self._program(), L.Var("s")
-        prop = L.op("=>", L.conj([self._conj(invariants, s), self.sum_axioms(invariants, s)]),
-                    self._property(rule, s))
-        parts = cases(prop) if split else [prop]
-        names = [rule.name] if len(parts) == 1 else [f"{rule.name}__{i}"
+        goal = L.op("=>", L.conj([self._conj(invariants, s), self.sum_axioms(invariants, s)]),
+                    self._property(prop, s))
+        parts = cases(goal) if split else [goal]
+        names = [prop.name] if len(parts) == 1 else [f"{prop.name}__{i}"
                                                       for i in range(len(parts))]
         node = L.Function(
             "main", [("s", ST)], [], properties=list(zip(names, parts)),
-            comment=f"{rule.name} on every state satisfying the invariants"
+            comment=f"{prop.name} on every state satisfying the invariants"
                     f" {', '.join(invariants) or '(none)'}")
         return self._render(prog, node), names
 
-    def concrete_check(self, rule: S.Rule, state: L.LExpr) -> str:
-        """The rule at a concrete state (a record literal): exact, unlike the bounded
-        evaluation of `fuzz.py`. A Kind 2 counterexample means that the rule is false there."""
+    def concrete_check(self, prop: S.Property, state: L.LExpr) -> str:
+        """The property at a concrete state (a record literal): exact, unlike the bounded
+        evaluation of `fuzz.py`. A Kind 2 counterexample means that the property is false there."""
         prog = self._program()
         node = L.Function("main", [("dummy", "bool")], [],
-                          properties=[(rule.name, self._property(rule, state))],
-                          comment=f"{rule.name} at a concrete state")
+                          properties=[(prop.name, self._property(prop, state))],
+                          comment=f"{prop.name} at a concrete state")
         return self._render(prog, node)
 
-    def _property(self, rule: S.Rule, s: L.LExpr) -> L.LExpr:
-        return self.fenc.rule(rule, s)
+    def _property(self, prop: S.Property, s: L.LExpr) -> L.LExpr:
+        return self.fenc.prop(prop, s)
 
     def relevant(self, prop: L.LExpr, invariants: List[str],
                  transitive: bool = True) -> List[str]:
         """The invariants sharing fields of the state s with `prop` (transitively, through
         the fields of the invariants chosen, if `transitive`). The construction flags do not
-        count: every rule and every invariant reads them."""
+        count: every property and every invariant reads them."""
         s = L.Var("s")
         flags = {constructed_var(c.name) for c in self.enc.system.contracts}
         fields = {n: state_fields(self.candidates[n](s)) - flags for n in invariants}

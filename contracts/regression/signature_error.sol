@@ -30,7 +30,7 @@ contract TwoDonatee {
 
 }
 
-rule P5_true {
+property P5_true {
     (started && balance[p2] == 1 && balance[this] == 1) ->
     (
         << p2 : TwoDonatee . donate(1) $ 1 >>

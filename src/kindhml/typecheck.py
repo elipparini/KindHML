@@ -41,8 +41,8 @@ class _Ctx:
     """Where an expression occurs."""
     contract: Optional[S.Contract] = None       # contract context: enclosing contract
     proc: Optional[S.Procedure] = None
-    in_rule: bool = False
-    depth: int = 0                              # modal depth (rules only)
+    in_property: bool = False
+    depth: int = 0                              # modal depth (properties only)
     env: Dict[str, S.Type] = field(default_factory=dict)   # quantified variables
 
     def at(self, depth: int) -> "_Ctx":
@@ -57,7 +57,7 @@ class Checker:
         self.program = program
         self.amount = program.balance_type      # type of balances, values and amounts
         self.warnings: List[str] = []
-        # Per rule: quantified names (unique within a rule, so a name identifies its
+        # Per property: quantified names (unique within a property, so a name identifies its
         # binder) and the number of modalities using each `args` variable (A7).
         self._bound: set = set()
         self._args_uses: Dict[str, int] = {}
@@ -67,10 +67,10 @@ class Checker:
     def check(self) -> S.Program:
         p = self.program
         self._unique([c.name for c in p.contracts], p.contracts, "contract")
-        self._unique([r.name for r in p.rules], p.rules, "rule")
+        self._unique([r.name for r in p.properties], p.properties, "property")
         contracts = tuple(self._contract(c) for c in p.contracts)
-        rules = tuple(self._rule(r) for r in p.rules)
-        return S.Program(contracts, rules, p.balance_type)
+        properties = tuple(self._property(r) for r in p.properties)
+        return S.Program(contracts, properties, p.balance_type)
 
     @staticmethod
     def _unique(names, nodes, what):
@@ -147,11 +147,11 @@ class Checker:
                        f" but {len(args)} are given", node)
         return tuple(self._expect(a, x.type, ctx) for a, x in zip(args, proc.params))
 
-    # ------------------------------------------------------------ rules
+    # ------------------------------------------------------------ properties
 
-    def _rule(self, r: S.Rule) -> S.Rule:
+    def _property(self, r: S.Property) -> S.Property:
         self._bound, self._args_uses = set(), {}
-        formula = self._expect(r.formula, S.BOOL, _Ctx(in_rule=True))
+        formula = self._expect(r.formula, S.BOOL, _Ctx(in_property=True))
         if r.invariant:
             modal = _find(formula, S.Modal)
             if modal is not None:
@@ -193,18 +193,18 @@ class Checker:
         if isinstance(e, S.Member):
             return self._member(e, ctx)
         if isinstance(e, (S.Sender, S.Value)):
-            if ctx.in_rule:
-                raise _err("msg.sender and msg.value cannot occur in rules (A6)", e)
+            if ctx.in_property:
+                raise _err("msg.sender and msg.value cannot occur in properties (A6)", e)
             return e, (S.ADDRESS if isinstance(e, S.Sender) else self.amount)
         if isinstance(e, S.BlockNum):
             return e, S.INT
         if isinstance(e, S.Reverted):
-            if not ctx.in_rule:
-                raise _err("lastReverted can only occur in rules", e)
+            if not ctx.in_property:
+                raise _err("lastReverted can only occur in properties", e)
             return e, S.BOOL
         if isinstance(e, S.Old):
-            if not ctx.in_rule:
-                raise _err("old(...) can only occur in rules", e)
+            if not ctx.in_property:
+                raise _err("old(...) can only occur in properties", e)
             if ctx.depth == 0:
                 raise _err("old(...) must occur within the scope of a modality", e)
             arg, t = self._expr(e.arg, ctx.at(ctx.depth - 1))
@@ -241,9 +241,9 @@ class Checker:
 
     def _name(self, e: S.Name, ctx: _Ctx) -> Tuple[S.Expr, S.AnyType]:
         n = e.name
-        if ctx.in_rule and n in ctx.env:
+        if ctx.in_property and n in ctx.env:
             return S.QVar(n, ctx.env[n], e.pos), ctx.env[n]
-        if not ctx.in_rule:
+        if not ctx.in_property:
             c, p = ctx.contract, ctx.proc
             decl = next((x for x in p.params if x.name == n), None)
             if decl:
@@ -266,8 +266,8 @@ class Checker:
         if with_field:
             c = with_field[0]
             return S.Field(c.name, n, e.pos), c.field_decl(n).type
-        # procedure constants (type method), in rules only
-        if ctx.in_rule:
+        # procedure constants (type method), in properties only
+        if ctx.in_property:
             with_proc = [c for c in self.program.contracts if c.proc(n)]
             if len(with_proc) > 1:
                 raise _err(f"procedure '{n}' is ambiguous; qualify it with the contract name", e)
@@ -287,7 +287,7 @@ class Checker:
                 if ctx.contract and ctx.contract.name != c.name:
                     raise _err("a contract cannot read the fields of another contract", e)
                 return S.Field(c.name, e.name, e.pos), decl.type
-            if ctx.in_rule and c.proc(e.name):
+            if ctx.in_property and c.proc(e.name):
                 return S.ProcConst(c.name, e.name, e.pos), S.METHOD
         raise _err(f"unknown member '{e.name}'", e)
 
@@ -306,9 +306,9 @@ class Checker:
             return replace(e, left=self._expect(e.left, S.BOOL, ctx),
                            right=self._expect(e.right, S.BOOL, ctx)), S.BOOL
         if op in ("+", "-", "*", "/", "%", "<", "<=", ">", ">="):
-            if op in ("/", "%") and ctx.in_rule and not (
+            if op in ("/", "%") and ctx.in_property and not (
                     isinstance(e.right, (S.IntLit, S.RealLit)) and e.right.value != 0):
-                self.warnings.append(f"{e.pos}: divisions in rules must be guarded (A3)")
+                self.warnings.append(f"{e.pos}: divisions in properties must be guarded (A3)")
             (left, lt), (right, rt) = self._number(e.left, ctx), self._number(e.right, ctx)
             real = S.REAL in (lt, rt)
             if real and op == "%":
@@ -340,7 +340,7 @@ class Checker:
                 c.field_decl(e.var) or c.proc(e.var) or c.name == e.var
                 for c in self.program.contracts):
             raise _err(f"quantified variable '{e.var}' clashes with another name"
-                       " (quantified names must be unique within a rule)", e)
+                       " (quantified names must be unique within a property)", e)
         self._bound.add(e.var)
         body = self._expect(e.body, S.BOOL, ctx.bind(e.var, e.type))
         if e.type == S.ARGS and self._args_uses.get(e.var, 0) == 0:
@@ -348,8 +348,8 @@ class Checker:
         return replace(e, body=body), S.BOOL
 
     def _modal(self, e: S.Modal, ctx: _Ctx) -> Tuple[S.Expr, S.AnyType]:
-        if not ctx.in_rule:
-            raise _err("modalities can only occur in rules", e)
+        if not ctx.in_property:
+            raise _err("modalities can only occur in properties", e)
         c = self.program.contract(e.contract)
         if c is None:
             raise _err(f"unknown contract '{e.contract}'", e)
@@ -401,10 +401,10 @@ def _find(e, cls):
     return None
 
 
-def check_rule(program: S.Program, rule: S.Rule) -> S.Rule:
-    """Resolve and type-check a raw rule against an already resolved program (e.g. a
+def check_property(program: S.Program, prop: S.Property) -> S.Property:
+    """Resolve and type-check a raw property against an already resolved program (e.g. a
     generated invariant). Raises KindHMLError."""
-    return Checker(program)._rule(rule)
+    return Checker(program)._property(prop)
 
 
 def check(program: S.Program) -> Tuple[S.Program, List[str]]:
