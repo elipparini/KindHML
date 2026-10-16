@@ -15,6 +15,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from kindhml import verify as V                     # noqa: E402
+from kindhml.colors import palette                  # noqa: E402
 from kindhml.encode_formula import METHOD_COPIES, MODES, parse_expand   # noqa: E402
 from kindhml.errors import KindHMLError             # noqa: E402
 from kindhml.kind2 import SOLVERS, format_counterexample   # noqa: E402
@@ -61,24 +62,28 @@ def main() -> int:
                          f"{','.join(V.DEFAULT_EXPAND)}); method:N expands the method "
                          "quantifiers while their nested copies are at most N (default "
                          f"{METHOD_COPIES})")
+    ap.add_argument("--color", choices=("auto", "always", "never"), default="auto",
+                    help="colors in the messages (default: auto, on a terminal unless"
+                         " $NO_COLOR is set)")
     ap.add_argument("--out_lus", default="out_lus", help="directory for the Lustre files")
     ap.add_argument("--out_results", default="out_results", help="directory for the verdicts")
     args = ap.parse_args()
+    c, ce = palette(args.color), palette(args.color, sys.stderr)
 
     try:
         program, warnings = V.load(args.contract, lemmas=not args.no_lemmas)
         rules = V.select_rules(program, args.property)
     except KindHMLError as e:
-        print(f"{args.contract}: error: {e}", file=sys.stderr)
+        print(f"{args.contract}: {ce.red('error:')} {e}", file=sys.stderr)
         return 2
     for w in warnings:
-        print(f"{args.contract}: warning: {w}", file=sys.stderr)
+        print(f"{args.contract}: {ce.yellow('warning:')} {w}", file=sys.stderr)
 
     expand = () if args.expand == "none" else tuple(x for x in args.expand.split(",") if x)
     try:
         parse_expand(expand)
     except ValueError as e:
-        print(f"{args.contract}: error: --expand: {e}", file=sys.stderr)
+        print(f"{args.contract}: {ce.red('error:')} --expand: {e}", file=sys.stderr)
         return 2
     name = V.stem(args.contract)
     timeout = int(args.timeout) if args.timeout == int(args.timeout) else args.timeout
@@ -93,7 +98,8 @@ def main() -> int:
                                   invgen=not args.no_invgen,
                                   user_invariants=not args.no_user_invariants,
                                   parameterized=args.parameterized)
-        print(f"{name} - {V.invariant_summary(invs)} [{time.time() - start:.1f}s]", flush=True)
+        print(f"{name} - {V.invariant_summary(invs, c)}"
+              f" {c.dim(f'[{time.time() - start:.1f}s]')}", flush=True)
     code = 0
     for rule in rules:
         tag = f"{name}_{rule.name}_{args.n_of_participants}_{timeout}"
@@ -115,13 +121,12 @@ def main() -> int:
                            context=context, invgen=not args.no_invgen,
                            user_invariants=not args.no_user_invariants,
                            parameterized=args.parameterized)
-        line = f"{name} - {outcome.describe()}"
-        print(line, flush=True)
+        print(f"{name} - {outcome.describe(c)}", flush=True)
         if args.cex and outcome.status == "invalid" and outcome.result.counterexample:
-            print(format_counterexample(outcome.result.counterexample), flush=True)
+            print(format_counterexample(outcome.result.counterexample, c=c), flush=True)
         os.makedirs(args.out_results, exist_ok=True)
         with open(os.path.join(args.out_results, tag + ".out"), "w") as f:
-            f.write(line + "\n")
+            f.write(f"{name} - {outcome.describe()}\n")      # without colors
         if outcome.status == "error":
             code = 1
     if args.print_invariants:

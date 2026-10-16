@@ -52,6 +52,9 @@ Options:
   lemmas of a benchmark family) as candidates for the proofs; they are still verified.
 - `--no_lemmas`: do not load the lemmas file of a benchmark family.
 - `--print_invariants`: print the invariants proved (declared and generated).
+- `--color auto|always|never`: colors in the messages (valid in green, invalid in red,
+  unknown and timeout in yellow, errors in magenta). `auto` (default) uses colors only on a
+  terminal, and not when `NO_COLOR` is set. The files in `out_results` never contain colors.
 - `--invariants_timeout`: time limit of the invariant phase, which runs once before the
   rules (default: 3 times `timeout`).
 - `--parameterized`: run each check with its own cutoff (a number of users at most

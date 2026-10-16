@@ -41,15 +41,17 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 
 from kindhml import kind2                            # noqa: E402
 from kindhml import verify as V                     # noqa: E402
+from kindhml.colors import PLAIN, palette           # noqa: E402
 from kindhml.errors import KindHMLError             # noqa: E402
 
 LOG = None                                          # the log file of --out, if any
+C = PLAIN                                           # the colors on the screen (--color)
 
 
-def say(line: str, screen: bool = True):
-    """Print a line, and write it to the log of the run."""
+def say(line: str, screen: bool = True, colored: str = ""):
+    """Print a line (`colored`, if given, on the screen), and write it to the log of the run."""
     if screen:
-        print(line, flush=True)
+        print(colored or line, flush=True)
     if LOG:
         LOG.write(line + "\n")
         LOG.flush()
@@ -211,11 +213,15 @@ def main():
                     help="print the invariants proved for each file")
     ap.add_argument("--invariants_timeout", type=float, default=None,
                     help="time limit of the invariant phase of a file (default: 3 x timeout)")
+    ap.add_argument("--color", choices=("auto", "always", "never"), default="auto",
+                    help="colors on the screen (default: auto, on a terminal unless"
+                         " $NO_COLOR is set); the log is never colored")
     ap.add_argument("--csv", default="")
     ap.add_argument("--out", default="",
                     help="directory where the run is saved (results.csv, run.log, info.txt)")
     args = ap.parse_args()
-    global LOG
+    global LOG, C
+    C = palette(args.color)
     expand = () if args.expand == "none" else tuple(args.expand.split(","))
     if args.list:
         selected = select(args)
@@ -252,7 +258,9 @@ def main():
                                       invgen=not args.no_invgen,
                                       user_invariants=not args.no_user_invariants,
                                       parameterized=args.parameterized)
-            say(f"{V.stem(f):>18}   {V.invariant_summary(invs)} [{time.time()-start:.1f}s]")
+            elapsed = f"[{time.time()-start:.1f}s]"
+            say(f"{V.stem(f):>18}   {V.invariant_summary(invs)} {elapsed}",
+                colored=f"{V.stem(f):>18}   {V.invariant_summary(invs, C)} {C.dim(elapsed)}")
         for rule in rules:
             start = time.time()
             try:
@@ -262,13 +270,15 @@ def main():
                                invgen=not args.no_invgen,
                                user_invariants=not args.no_user_invariants,
                                parameterized=args.parameterized)
-                gt, desc = out.groundtruth_check(), out.describe()
+                gt, desc, colored = out.groundtruth_check(), out.describe(), out.describe(C)
                 status, method = out.status, out.method
             except KindHMLError as e:
                 gt, desc, status, method = "error", f"{rule.name}: error: {e}", "error", ""
+                colored = f"{C.bold(rule.name)}: {C.magenta('error:')} {e}"
             wall = time.time() - start
             tally[gt] = tally.get(gt, 0) + 1
-            say(f"{V.stem(f):>18} - {desc} [{wall:.1f}s]")
+            say(f"{V.stem(f):>18} - {desc} [{wall:.1f}s]",
+                colored=f"{V.stem(f):>18} - {colored} {C.dim(f'[{wall:.1f}s]')}")
             if writer:
                 writer.writerow({"file": os.path.relpath(f, ROOT), "rule": rule.name,
                                  "status": status, "method": method,
@@ -279,7 +289,9 @@ def main():
             # always in the log; on the screen with --print_invariants
             for line in V.invariant_report(context):
                 say(f"{V.stem(f):>18}   {line}", screen=args.print_invariants)
-    say("summary: " + ", ".join(f"{k}: {v}" for k, v in sorted(tally.items())))
+    say("summary: " + ", ".join(f"{k}: {v}" for k, v in sorted(tally.items())),
+        colored="summary: " + ", ".join(f"{C.groundtruth(k)}: {v}"
+                                        for k, v in sorted(tally.items())))
     if out_csv:
         out_csv.close()
     if LOG:

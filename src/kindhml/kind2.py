@@ -15,6 +15,8 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .colors import PLAIN, Palette
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -49,16 +51,17 @@ class PropertyResult:
     true_up_to: Optional[int] = None
     counterexample: Optional[list] = None
 
-    def describe(self) -> str:
+    def describe(self, c: Palette = PLAIN) -> str:
         t = f", {self.time:.3f}s" if self.time is not None else ""
+        status = c.status(self.status)
         if self.status == "valid":
             k = f" (k={self.k})" if self.k is not None else ""
-            return f"valid{k} by {self.engine}{t}"
+            return f"{status}{k} by {self.engine}{t}"
         if self.status == "invalid":
-            return f"invalid after {self.k} steps{t}"
+            return f"{status} after {self.k} steps{t}"
         if self.true_up_to is not None:
-            return f"{self.status}, true up to {self.true_up_to} steps{t}"
-        return f"{self.status}{t}"
+            return f"{status}, true up to {self.true_up_to} steps{t}"
+        return f"{status}{t}"
 
 
 @dataclass
@@ -351,7 +354,7 @@ def _property(o: dict) -> PropertyResult:
                           o.get("trueFor"), o.get("counterExample"))
 
 
-def format_counterexample(cex: list, main: str = "main") -> str:
+def format_counterexample(cex: list, main: str = "main", c: Palette = PLAIN) -> str:
     """The streams of the main node, one column per step (inputs t, ib and the state s)."""
     rows, steps = [], 0
     for block in cex:
@@ -364,7 +367,7 @@ def format_counterexample(cex: list, main: str = "main") -> str:
     if not rows:
         return ""
     width = max(len(n) for n, _ in rows)
-    lines = [" " * width + "".join(f" | step {k:<6}" for k in range(steps))]
+    lines = [c.bold(" " * width + "".join(f" | step {k:<6}" for k in range(steps)))]
     for name, values in sorted(rows, key=lambda r: (not r[0].startswith("t."), r[0])):
         lines.append(name.ljust(width) + "".join(f" | {_value(values.get(k, '')):<11}"
                                                  for k in range(steps)))

@@ -10,6 +10,7 @@ from fractions import Fraction
 from typing import Dict, List, Optional, Tuple
 
 from . import kind2
+from .colors import PLAIN, Palette
 from . import lustre as L
 from . import pretty
 from .builder import parse, parse_spec
@@ -156,20 +157,22 @@ class Outcome:
             return f"OK-up to {self.result.true_up_to}"
         return "unknown"
 
-    def describe(self) -> str:
-        what = self.result.describe() if self.result else "; ".join(self.errors) or "no result"
+    def describe(self, c: Palette = PLAIN) -> str:
+        """One line on the verdict (and its traces); `c` colors it for a terminal."""
+        what = (self.result.describe(c) if self.result
+                else c.magenta("; ".join(self.errors) or "no result"))
         if self.true_for:
             what += f", true {self.true_for}"
         how = "/".join(x for x in (self.method, self.solver) if x)
-        how = f" [{how}]" if how else ""
+        how = c.dim(f" [{how}]") if how else ""
         scope = f" ({self.scope})" if self.scope else ""
-        line = (f"{self.rule.name}: {what}{how}{scope} (ground truth:"
-                f" {self.groundtruth_check()})")
+        line = (f"{c.bold(self.rule.name)}: {what}{how}{scope} (ground truth:"
+                f" {c.groundtruth(self.groundtruth_check())})")
         if self.trace:
-            line += f"\n    counterexample reached by: {self.trace}"
+            line += f"\n    {c.cyan('counterexample reached by:')} {self.trace}"
         if self.cti and self.status not in ("valid", "invalid"):
-            line += (f"\n    counterexample to induction (possibly unreachable; consider"
-                     f" stronger invariants): {self.cti}")
+            line += (f"\n    {c.cyan('counterexample to induction')} (possibly unreachable;"
+                     f" consider stronger invariants): {self.cti}")
         return line
 
 
@@ -889,7 +892,7 @@ class _Invariants:
             return
 
 
-def invariant_summary(invs: "_Invariants") -> str:
+def invariant_summary(invs: "_Invariants", c: Palette = PLAIN) -> str:
     """One line: how many candidates (declared, generated) were proved, and dropped; in
     parameterized mode, also the cutoff and the number of users of the checks."""
     users = ""
@@ -898,11 +901,12 @@ def invariant_summary(invs: "_Invariants") -> str:
         if invs.parameterized and invs.proved is not None:
             users += f"; invariants for every n >= {_n(invs.users)}"
     if invs.proved is None:
-        return (f"invariants: not proved within the time ({len(invs.candidates)} candidates"
+        return (f"invariants: {c.yellow('not proved within the time')}"
+                f" ({len(invs.candidates)} candidates"
                 f" left, {len(invs.dropped)} dropped){users}")
     proved = [n for n in invs.proved if n not in invs.checks.axioms]
     gen = sum(1 for n in proved if n in invs.generated)
-    return (f"invariants: {len(proved)} proved ({len(proved) - gen} declared, {gen}"
+    return (f"invariants: {c.green(f'{len(proved)} proved')} ({len(proved) - gen} declared, {gen}"
             f" generated), {len(invs.dropped)} dropped{users}")
 
 
