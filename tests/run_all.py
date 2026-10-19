@@ -185,11 +185,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--timeout", type=float, default=10)
-    ap.add_argument("--participants", type=int, default=2)
-    ap.add_argument("--parameterized", action="store_true",
-                    help="check with the cutoff of the checks on free values, if it is at"
-                         " most --participants; proofs then hold for every number of users"
-                         " from the cutoff on (DESIGN.md, Sect. 7)")
+    ap.add_argument("--participants", type=V.parse_users, default=2,
+                    help=f"number of users (default 2), or {V.ANY} (every number of users)")
+    ap.add_argument("--users_mode", choices=V.USERS_MODES, default=None,
+                    help="combined (default): the checks with the cutoff of the checks on free"
+                         " values, if it is at most --participants, and with --participants"
+                         " users, in turn; exact: --participants users only; parameterized:"
+                         " the cutoff only (DESIGN.md, Sect. 7)")
+    ap.add_argument("--parameterized", dest="users_mode", action="store_const",
+                    const="parameterized", help="the same as --users_mode parameterized")
     ap.add_argument("--mode", default=V.DEFAULT_MODE)
     ap.add_argument("--solver", default="auto")
     ap.add_argument("--expand", default=",".join(V.DEFAULT_EXPAND))
@@ -221,6 +225,10 @@ def main():
     ap.add_argument("--out", default="",
                     help="directory where the run is saved (results.csv, run.log, info.txt)")
     args = ap.parse_args()
+    args.users_mode = V.users_mode_of(args.users_mode)
+    if args.participants == V.ANY and (args.strategy == "kind2"
+                                       or args.users_mode == "parameterized"):
+        ap.error(f"{V.ANY} needs --strategy portfolio and --users_mode combined or exact")
     global LOG, C
     C = palette(args.color)
     expand = () if args.expand == "none" else tuple(args.expand.split(","))
@@ -240,7 +248,7 @@ def main():
     say(f"{sum(len(rs) for _, _, rs in selected)} tasks in {len(selected)} files")
 
     # The CSV is written row by row, so that an interrupted run keeps its partial results.
-    fields = ["file", "property", "status", "method", "groundtruth", "check", "wall"]
+    fields = ["file", "property", "status", "method", "groundtruth", "check", "wall", "scope"]
     out_csv = open(args.csv, "w", newline="") if args.csv else None
     writer = csv.DictWriter(out_csv, fieldnames=fields) if out_csv else None
     if writer:
@@ -254,14 +262,17 @@ def main():
             start = time.time()
             limit = (args.invariants_timeout if args.invariants_timeout is not None
                      else 3 * args.timeout)
-            invs = V.prove_invariants(program, args.participants, limit, context,
-                                      mode=args.mode, expand=expand,
-                                      invgen=not args.no_invgen,
-                                      user_invariants=not args.no_user_invariants,
-                                      parameterized=args.parameterized)
+            entries = V.prove_invariants(program, args.participants, limit, context,
+                                         mode=args.mode, expand=expand,
+                                         invgen=not args.no_invgen,
+                                         user_invariants=not args.no_user_invariants,
+                                         users_mode=args.users_mode)
             elapsed = f"[{time.time()-start:.1f}s]"
-            say(f"{V.stem(f):>18}   {V.invariant_summary(invs)} {elapsed}",
-                colored=f"{V.stem(f):>18}   {V.invariant_summary(invs, C)} {C.dim(elapsed)}")
+            for invs in entries:
+                head = f"({V.invariant_label(invs)}) " if len(entries) > 1 else ""
+                say(f"{V.stem(f):>18}   {head}{V.invariant_summary(invs)} {elapsed}",
+                    colored=f"{V.stem(f):>18}   {head}{V.invariant_summary(invs, C)}"
+                            f" {C.dim(elapsed)}")
         for prop in properties:
             start = time.time()
             try:
@@ -270,11 +281,12 @@ def main():
                                strategy=args.strategy, context=context,
                                invgen=not args.no_invgen,
                                user_invariants=not args.no_user_invariants,
-                               parameterized=args.parameterized)
+                               users_mode=args.users_mode)
                 gt, desc, colored = out.groundtruth_check(), out.describe(), out.describe(C)
-                status, method = out.status, out.method
+                status, method, scope = out.status, out.method, out.scope
             except KindHMLError as e:
                 gt, desc, status, method = "error", f"{prop.name}: error: {e}", "error", ""
+                scope = ""
                 colored = f"{C.bold(prop.name)}: {C.magenta('error:')} {e}"
             wall = time.time() - start
             tally[gt] = tally.get(gt, 0) + 1
@@ -284,7 +296,7 @@ def main():
                 writer.writerow({"file": os.path.relpath(f, ROOT), "property": prop.name,
                                  "status": status, "method": method,
                                  "groundtruth": prop.groundtruth, "check": gt,
-                                 "wall": round(wall, 2)})
+                                 "wall": round(wall, 2), "scope": scope})
                 out_csv.flush()
         if args.print_invariants or LOG:
             # always in the log; on the screen with --print_invariants

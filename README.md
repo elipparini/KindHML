@@ -16,10 +16,11 @@ paper's definitions to the modules and lists the deviations.
 ## Usage
 
 ```
-python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants> <timeout> [options]
+python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants|any> <timeout> [options]
 ```
 
-- `n_participants`: number of user addresses (EOAs) besides `null` and the contracts.
+- `n_participants`: number of user addresses (EOAs) besides `null` and the contracts, or
+  `any`: a verdict for every number of users (see `--users_mode`).
 - `timeout`: time limit per property, in seconds; 0 for no limit (the search then goes on until
   there is a verdict).
 
@@ -57,9 +58,17 @@ Options:
   terminal, and not when `NO_COLOR` is set. The files in `out_results` never contain colors.
 - `--invariants_timeout`: time limit of the invariant phase, which runs once before the
   properties (default: 3 times `timeout`).
-- `--parameterized`: run each check with its own cutoff (a number of users at most
-  `n_participants`), and report for which numbers of users each verdict holds (a proof by
-  invariants: every n from a cutoff on). See `DESIGN.md`, Sect. 7.
+- `--users_mode combined|exact|parameterized`: the numbers of users of the checks (`DESIGN.md`,
+  Sect. 7). `parameterized` runs each check with its own cutoff (a number of users at most
+  `n_participants`), and reports for which numbers of users each verdict holds (a proof by
+  invariants: every n from a cutoff on); `exact` runs the checks with `n_participants` users;
+  `combined` (default) runs both in turn, and stops at the first verdict for
+  `n_participants` users. With `any` users, a property is valid if it is proved for every n
+  from a cutoff on (parameterized) and with each smaller number of users (exact); a
+  counterexample with any number of users refutes it; without a cutoff, the property is
+  checked with 1, 2, 3, ... users in turn, and the verdict is "true up to m users" if no
+  counterexample is found. `any` needs `combined` or `exact` (the latter checks 1, 2, 3, ...
+  users only). `--parameterized` is `--users_mode parameterized`.
 
 Each property's Lustre file is saved in `out_lus/<contract>_<Property>_<n>_<timeout>.lus`, and its
 verdict in `out_results/<contract>_<Property>_<n>_<timeout>.out`. The verdict is compared with the

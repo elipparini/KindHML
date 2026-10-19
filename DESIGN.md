@@ -351,7 +351,7 @@ experiment.
 * **Counterexamples.** In JSON, Kind 2 writes a real as `{"num": n, "den": d}`; the
   formatter prints `n/d`.
 
-## 7. Parameterized mode: cutoffs on the number of users (`cutoff.py`, `--parameterized`)
+## 7. Parameterized mode: cutoffs on the number of users (`cutoff.py`, `--users_mode`)
 
 A verdict obtained with n users says nothing, in general, about other numbers of users.
 This section shows that no cutoff exists for the problem as a whole (Prop. 7.1), and that
@@ -359,7 +359,9 @@ each check on free values of Sect. 6 has a cutoff, computed syntactically, when 
 fragment (Thm. 7.3). Sums over the addresses are outside the fragment; they are replaced by
 state variables, which keeps the checks sound (Lemma 7.4). Counterexamples found with few
 users extend to more users under a syntactic condition (Lemma 7.5). The parameterized mode
-uses these results (Sect. 7.5).
+uses these results (Sect. 7.5); the combined mode, the default, runs it together with the
+checks with n users, and the tool can also check a property for every number of users
+(Sect. 7.6).
 
 **Setting.** For n ≥ 1, S_n is the system with the addresses A_n = F ∪ U_n, where
 F = {null, C_1, ..., C_m} (null and the contracts) and U_n = {u1, ..., un}. Addresses are
@@ -621,3 +623,59 @@ asked for; the normal mode with 100 users does not finish. With one number of us
 task, the verdicts on the regressions are unchanged, and most of their checks use 1 user;
 on vault_v2, the counterexample of `Two_steps_drainability` is found with 5 users in 17 s
 (75 s with 10 users, the former cutoff of the file).
+
+### 7.6 The combined mode, and every number of users
+
+The parameterized mode decides fewer properties than the exact checks with n users in three
+cases (limits above): ghost sums are weaker than exact sums, a proof by Kind 2 with N users
+says nothing about n > N users, and a counterexample with N users may not extend to n.
+The users mode (`--users_mode`, `verify.users_mode_of`) chooses the numbers of users:
+`exact` (n users), `parameterized` (Sect. 7.5) or `combined` (the default).
+
+A *side* is the check of a property with one number of users m (`_Side`, `_rounds`): the
+tasks of Sect. 6, in rounds with doubling budgets, with ghost sums and the cutoffs of
+Sect. 7.5 on the parameterized side. A side has a *goal*, the users its verdict is about
+(n, or none for every n ≥ 1). On the parameterized side, a counterexample that does not
+extend to the goal gives an unknown outcome, as in Sect. 7.5. The sides of a check advance
+one round each in turn, in a fixed order, so Kind 2 runs one job at a time; each side has
+its own budgets, so no time is split by a constant.
+
+**Combined mode, n users** (`_drive_combined`). If the property has a cutoff N ≤ n, the
+parameterized side P (N users) and the exact side E (n users), in this order; otherwise E
+only. The first valid or invalid outcome is the verdict. P only proves: Houdini and the
+check on a free state (tasks 1 and 2); it ends when that check is refuted under its
+strongest premises. E searches for counterexamples with n users, and runs Kind 2 on the
+transition system: on P, a proof by Kind 2 with N < n users would not decide n, and a
+counterexample with N users decides n only if it extends. Kind 2 of E gets all the time
+left (the rule of Sect. 6) only once P has ended. On the regressions (3 users, 10 s per
+property), P with all the tasks took the first 7 s of owner `P2_true` (the search for its
+counterexample to induction, and fuzzing), and E did not reach Kind 2, which proves it in
+8 s in exact mode.
+
+**Proposition 7.9.** Every verdict of the combined mode holds for n users.
+
+*Proof.* A verdict of E is one with n users. A proof of P holds for every n' ≥ max(c_H, u)
+(Prop. 7.7), and max(c_H, u) ≤ N ≤ n, since the cutoffs of the checks are bounded by those
+of `Checks.cutoff`. A counterexample of P is a verdict only if it extends to every n' ≥ m
+for its number of users m ≤ N ≤ n (Lemmas 7.5, 7.6). ∎
+
+**Every number of users** (`n_participants` = `any`, `_drive_any`): the claim is that φ holds
+in S_n for every n ≥ 1. With a cutoff c of the property, the sides are P (c users, no goal)
+and the exact sides E_m for m = 1, ..., c − 1; without one, E_1. When P has not proved φ and
+all the exact sides have ended, the exact side with one more user starts (best effort: a
+counterexample may need more users than the cutoff, e.g. registry `At_most_two`). Kind 2
+gets all the time left only on a side alone.
+
+**Lemma 7.10.** If φ fails in S_m for some m ≥ 1, it does not hold for every n ≥ 1.
+*Proof.* Immediate. ∎
+
+So any counterexample is a verdict, also one of P that does not extend.
+
+**Lemma 7.11.** If φ holds in S_n for every n ≥ L, and in S_m for every m < L, it holds for
+every n ≥ 1. *Proof.* Immediate. ∎
+
+P gives the first premise with L = max(c_H, u) (Prop. 7.7), and the exact sides E_1, ...,
+E_{L−1} the second; a proof by Kind 2 on E_m also covers every m' ≤ m if need(¬φ) = 0
+(Cor. 7.8). Otherwise the outcome is unknown, with what is proved: "true up to k users" (the
+exact sides E_1, ..., E_k), "for every n ≥ L users" (P), or both. In exact mode with `any`,
+only the exact sides run.

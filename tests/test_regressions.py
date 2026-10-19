@@ -31,6 +31,10 @@ OPEN = {
     ("calls", "Report_sees_balance_after_transfer"): "invalid; found in 25-30 s (by the search "
                                                      "of the counterexample to induction): at "
                                                      "the edge of the timeout",
+    ("calls", "Buy_mints"): "valid by invariants in about 24 s, or unknown, depending on the "
+                            "run (Houdini ends at about 29 s in the rounds of the property): at "
+                            "the edge of the timeout, in exact mode too (2026-10-19)",
+    ("calls", "Report_sees_balance_at_call_point"): "as Buy_mints",
 }
 
 

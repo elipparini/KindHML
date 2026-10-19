@@ -533,6 +533,39 @@ Results (5 users, parameterized, 120 s per property and per invariant phase;
 are valid (Nonnegative and Shares inductive, LP_exit by invariants in under 1 s); the
 invariant phase takes 44-71 s per file.
 
+## Done (2026-10-19): the combined mode (default), and every number of users (with the user)
+
+Decided with the user: `--users_mode combined|exact|parameterized`, default `combined`
+(`--parameterized` is `--users_mode parameterized`); the number of users also accepts `any`,
+a verdict for every n >= 1 (DESIGN.md, Sect. 7.6).
+- `verify.py`: the body of `verify` is the generator `_rounds` of a side (one number of
+  users), which yields after each round; the drivers `_drive_one`, `_drive_combined`,
+  `_drive_any` advance the sides one round each in turn (one Kind 2 job at a time). In
+  combined mode the parameterized side only proves (Houdini, the check on a free state);
+  the exact side searches for counterexamples and runs Kind 2, with all the time left once
+  the other side has ended. `prove_invariants` returns the Houdini of each number of users
+  of the mode, in alternating passes. `kind2_target` gives the Lustre of `--only_lus`.
+- `kindHML.py`, `run_all.py`: `any`, `--users_mode`; a column `scope` in the CSV;
+  `run_experiments.sh` uses `--users_mode exact` (the tables of the paper).
+- Tests: `tests/test_users_modes.py` (the drivers with scripted sides), Kind 2 tests in
+  `tests/test_cutoff.py` (combined mode and `any` on the registries, `any` without a cutoff).
+
+Results (one job at a time, 1 GB):
+- regressions (64 properties, 3 users, 10 s per property; `runs/users_mode_reg_n3_*`): exact
+  55 correct, combined 54 (two-donatees `P3b_false`, refuted by Kind 2 in 10.2 s in exact
+  mode, is unknown), and 24 of the proofs hold for every n from the cutoff on. A first
+  version, whose parameterized side also searched for counterexamples, took the first 7 s
+  of owner `P2_true`, and lost it.
+- amm_simple and bank (5 users, 120 s per property; `runs/combined_n5_amm_simple_bank`):
+  10 of 13 correct, all proofs for every n from the cutoff on (amm_simple Sandwich in 3.9 s,
+  Swap_additivity and No_money_pump in 0.7 s; unknown after 600 s in results/n5.csv). The 3
+  unknown are the properties with an existential witness (Sandwich_slippage,
+  Swap_reversibility, Arbitrage_exists), as in n5.csv.
+- `tests/test_regressions.py` (default mode, 2 users, 30 s): 80 passed, 7 xfailed, 1 xpassed,
+  2 failed: calls `Buy_mints` and `Report_sees_balance_at_call_point`, valid in about 24 s or
+  unknown depending on the run, also in exact mode and at the previous commit 5312cdd (Houdini
+  ends at about 29 s in the rounds of the property); added to OPEN.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

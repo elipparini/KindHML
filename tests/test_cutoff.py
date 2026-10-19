@@ -268,8 +268,61 @@ def test_parameterized_registry():
     prop = program.prop("At_most_two")
     for n, status in ((2, "valid"), (3, "invalid")):
         context = {}
-        V.prove_invariants(program, n, 30, context)
-        assert V.verify(program, prop, n, 20, context=context).status == status
+        V.prove_invariants(program, n, 30, context, users_mode="exact")
+        assert V.verify(program, prop, n, 20, context=context,
+                        users_mode="exact").status == status
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_combined_registry():
+    """Combined mode (the default), 3 users: the properties true for every number of users
+    are proved with the cutoff 2, for every n >= 2; At_most_two is refuted with 3 users, and
+    proved with 2 users asked for, by the exact side."""
+    program, _ = V.load(REGISTRY)
+    context: dict = {}
+    V.prove_invariants(program, 3, 30, context)
+    out = {r.name: V.verify(program, r, 3, 30, context=context) for r in V.tasks(program)}
+    for name in ("Flags", "Count_nonnegative", "Registered_bounded"):
+        assert out[name].status == "valid", out[name].describe()
+        assert out[name].scope.startswith("for every n >= 2 users"), out[name].scope
+    assert out["At_most_two"].status == "invalid", out["At_most_two"].describe()
+    assert out["At_most_two"].scope == "with 3 users"
+    context = {}
+    V.prove_invariants(program, 2, 30, context)
+    o = V.verify(program, program.prop("At_most_two"), 2, 30, context=context)
+    assert (o.status, o.scope) == ("valid", "with 2 users"), o.describe()
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_any_number_of_users():
+    """Every number of users: Registered_bounded is proved for every n >= 2 by invariants and
+    with 1 user; At_most_two, true with at most 2 users, is refuted with 3 (the exact sides go
+    on with more users); capped registry, Someone_unregistered is refuted with 2 users (its
+    counterexample does not extend, but it is one for n = 2)."""
+    program, _ = V.load(REGISTRY)
+    context: dict = {}
+    V.prove_invariants(program, V.ANY, 30, context)
+    o = V.verify(program, program.prop("Registered_bounded"), V.ANY, 60, context=context)
+    assert o.status == "valid" and o.scope.startswith("for every n >= 1"), o.describe()
+    o = V.verify(program, program.prop("At_most_two"), V.ANY, 120, context=context)
+    assert (o.status, o.scope) == ("invalid", "counterexample with 3 users"), o.describe()
+    program, _ = V.load(CAPPED)
+    context = {}
+    V.prove_invariants(program, V.ANY, 30, context)
+    o = V.verify(program, program.prop("Someone_unregistered"), V.ANY, 60, context=context)
+    assert o.status == "invalid", o.describe()
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_any_number_of_users_without_cutoff():
+    """A property outside the fragment, for every number of users: proved with 1, 2, ...
+    users, one after the other, until the time limit."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "regression", "additivity.sol"))
+    o = V.verify(program, program.prop("P1_true"), V.ANY, 20)
+    assert o.status == "unknown" and o.true_for.startswith("up to"), o.describe()
 
 
 @pytest.mark.kind2
@@ -279,7 +332,7 @@ def test_sum_of_all_entries_bounds_the_shares():
     redeem needs the bound of the sum of all the entries by sum(minted)."""
     program, _ = V.load(SHARES)
     context: dict = {}
-    invs = V.prove_invariants(program, 5, 60, context, parameterized=True, invgen=False)
+    [invs] = V.prove_invariants(program, 5, 60, context, parameterized=True, invgen=False)
     assert sorted(n for n in invs.proved or [] if not n.startswith("_")) == [
         "Nonnegative", "Pairs", "Total"], invs.dropped
 

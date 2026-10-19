@@ -1,7 +1,7 @@
 """KindHML: verification of CHML properties of contracts with Kind 2.
 
 Usage:
-    python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants> <timeout> [--only_lus]
+    python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants|any> <timeout> [--only_lus]
 
 For each property, the Lustre encoding is saved in
 out_lus/<contract>_<Property>_<n>_<timeout>.lus and the verdict in
@@ -26,7 +26,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Verify CHML properties of a contract with Kind 2.")
     ap.add_argument("contract", help="path of the contract file")
     ap.add_argument("property", help="property name, or ALL")
-    ap.add_argument("n_of_participants", type=int, help="number of user addresses")
+    ap.add_argument("n_of_participants", type=V.parse_users,
+                    help=f"number of user addresses, or {V.ANY} (every number of users)")
     ap.add_argument("timeout", type=float,
                     help="time limit per property, in seconds (0: no limit, the search goes on"
                          " until there is a verdict)")
@@ -46,10 +47,14 @@ def main() -> int:
     ap.add_argument("--invariants_timeout", type=float, default=None,
                     help="time limit of the invariant phase, before the properties (default: 3 x"
                          " timeout; 0: no limit)")
-    ap.add_argument("--parameterized", action="store_true",
-                    help="check with the cutoff of the checks on free values, if it is at"
-                         " most n_participants; proofs then hold for every number of users"
-                         " from the cutoff on (DESIGN.md, Sect. 7)")
+    ap.add_argument("--users_mode", choices=V.USERS_MODES, default=None,
+                    help="combined (default): the checks with the cutoff of the checks on free"
+                         " values, if it is at most n_participants (proofs then hold for every"
+                         " number of users from the cutoff on), and with n_participants users,"
+                         " in turn; exact: n_participants users only; parameterized: the"
+                         " cutoff only (DESIGN.md, Sect. 7)")
+    ap.add_argument("--parameterized", dest="users_mode", action="store_const",
+                    const="parameterized", help="the same as --users_mode parameterized")
     ap.add_argument("--only_lus", action="store_true", help="only generate the Lustre files")
     ap.add_argument("--cex", action="store_true", help="print counterexamples")
     ap.add_argument("--solver", choices=("auto",) + SOLVERS, default="auto",
@@ -69,6 +74,10 @@ def main() -> int:
     ap.add_argument("--out_lus", default="out_lus", help="directory for the Lustre files")
     ap.add_argument("--out_results", default="out_results", help="directory for the verdicts")
     args = ap.parse_args()
+    args.users_mode = V.users_mode_of(args.users_mode)
+    if args.n_of_participants == V.ANY and (args.strategy == "kind2"
+                                            or args.users_mode == "parameterized"):
+        ap.error(f"{V.ANY} needs --strategy portfolio and --users_mode combined or exact")
     c, ce = palette(args.color), palette(args.color, sys.stderr)
 
     try:
@@ -94,23 +103,23 @@ def main() -> int:
         start = time.time()
         limit = (args.invariants_timeout if args.invariants_timeout is not None
                  else 3 * args.timeout)
-        invs = V.prove_invariants(program, args.n_of_participants, limit or None,
-                                  context, mode=args.mode, expand=expand,
-                                  invgen=not args.no_invgen,
-                                  user_invariants=not args.no_user_invariants,
-                                  parameterized=args.parameterized)
-        print(f"{name} - {V.invariant_summary(invs, c)}"
-              f" {c.dim(f'[{time.time() - start:.1f}s]')}", flush=True)
+        entries = V.prove_invariants(program, args.n_of_participants, limit or None,
+                                     context, mode=args.mode, expand=expand,
+                                     invgen=not args.no_invgen,
+                                     user_invariants=not args.no_user_invariants,
+                                     users_mode=args.users_mode)
+        elapsed = c.dim(f"[{time.time() - start:.1f}s]")
+        for invs in entries:
+            head = f"({V.invariant_label(invs)}) " if len(entries) > 1 else ""
+            print(f"{name} - {head}{V.invariant_summary(invs, c)} {elapsed}", flush=True)
     code = 0
     for prop in properties:
         tag = f"{name}_{prop.name}_{args.n_of_participants}_{timeout}"
         lus_path = os.path.join(args.out_lus, tag + ".lus")
         if args.only_lus:
-            users, ghost = args.n_of_participants, False
-            if args.parameterized:
-                users, ghost, _ = V.effective_users(context, program, users, args.mode, expand,
-                                                    not args.no_invgen,
-                                                    not args.no_user_invariants, prop)
+            users, ghost = V.kind2_target(context, program, prop, args.n_of_participants,
+                                          args.users_mode, args.mode, expand,
+                                          not args.no_invgen, not args.no_user_invariants)
             with open(lus_path, "w") as f:
                 f.write(V.lustre_for(program, prop, users, args.mode, expand,
                                      ghost_sums=ghost))
@@ -121,7 +130,7 @@ def main() -> int:
                            solver=args.solver, cex=args.cex, strategy=args.strategy,
                            context=context, invgen=not args.no_invgen,
                            user_invariants=not args.no_user_invariants,
-                           parameterized=args.parameterized)
+                           users_mode=args.users_mode)
         print(f"{name} - {outcome.describe(c)}", flush=True)
         if args.cex and outcome.status == "invalid" and outcome.result.counterexample:
             print(format_counterexample(outcome.result.counterexample, c=c), flush=True)

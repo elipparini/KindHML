@@ -7,7 +7,7 @@ import os
 import time
 from dataclasses import dataclass, replace
 from fractions import Fraction
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
 
 from . import kind2
 from .colors import PLAIN, Palette
@@ -19,7 +19,7 @@ from .encode_trans import BALANCE, Encoder, param_var, proc_const, summed_maps
 from .errors import KindHMLError
 from .concrete import (describe_tx, python_value, state_from_values, state_literal,
                        state_paths)
-from .cutoff import Cutoff, Scanner, idle_users
+from .cutoff import Cutoff, OutOfFragment, Scanner, idle_users
 from .fuzz import Fuzzer
 from .invariants import Checks, describe_state, final_values, python_constant, state_values
 from .invgen import (candidates as invariant_templates, generate as generate_invariants,
@@ -138,6 +138,8 @@ class Outcome:
     scope: str = ""                  # parameterized mode: the numbers of users of the verdict
     true_for: str = ""               # parameterized mode, unknown outcome: the numbers of
                                      # users of a proof by Kind 2 ("up to 2 users")
+    users_from: Optional[int] = None    # parameterized mode: the verdict holds for every
+                                        # number of users from this one on
 
     @property
     def status(self) -> str:
@@ -188,17 +190,264 @@ FREE_SOLVERS = ("z3", "cvc5")       # z3 first: nlsat for nonlinear real queries
 CONFIRM_SECONDS = 10.0
 
 
-def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional[float],
+# The numbers of users of a check (DESIGN.md, Sect. 7.6): "exact", the number n asked for;
+# "parameterized", the cutoff of each check if it is at most n (the verdicts then hold for
+# every number of users from the cutoff on); "combined" (default), both, in alternating rounds,
+# until a verdict for n. The number of users ANY asks for a verdict for every n >= 1.
+USERS_MODES = ("combined", "exact", "parameterized")
+DEFAULT_USERS_MODE = "combined"
+ANY = "any"
+Users = Union[int, str]
+
+
+def parse_users(text: str) -> Users:
+    """A number of users (at least 1) or ANY. Raises ValueError."""
+    if text == ANY:
+        return ANY
+    n = int(text)
+    if n < 1:
+        raise ValueError(f"the number of users must be at least 1, or {ANY}")
+    return n
+
+
+def users_mode_of(users_mode: Optional[str], parameterized: bool = False) -> str:
+    """The users mode asked for: `users_mode`, else "parameterized" if `parameterized` (the
+    former option), else the default."""
+    mode = users_mode or ("parameterized" if parameterized else DEFAULT_USERS_MODE)
+    if mode not in USERS_MODES:
+        raise KindHMLError(f"unknown users mode '{mode}' (one of {', '.join(USERS_MODES)})")
+    return mode
+
+
+@dataclass
+class _Side:
+    """One number of users of the check of a property (DESIGN.md, Sect. 7.6), run in rounds
+    by the generator `_rounds`."""
+    users: int                       # the users of the check (the cutoff, with ghost sums)
+    ghost: bool                      # sums as state variables (parameterized mode)
+    goal: Optional[int]              # the users the verdict is about; None: every n >= 1
+    climb: bool = False              # after a proof by Kind 2 with fewer users than goal, Kind 2
+                                     # goes on with one more user (parameterized mode only)
+    kind2: bool = True               # whether the side runs Kind 2 on the transition system
+    search: bool = True              # whether it searches for counterexamples (reach, fuzz)
+    alone: Callable[[], bool] = lambda: True    # whether Kind 2 may get all the time left
+    gen: Optional[Generator] = None
+    outcome: Optional[Outcome] = None
+
+
+def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Optional[float],
            mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND, lus_path: Optional[str] = None,
            extra_args: Optional[List[str]] = None, solver: str = "auto",
            cex: bool = False, strategy: str = "portfolio",
            context: Optional[dict] = None, invgen: bool = True,
-           user_invariants: bool = True, parameterized: bool = False) -> Outcome:
+           user_invariants: bool = True, parameterized: bool = False,
+           users_mode: Optional[str] = None) -> Outcome:
     """Check one property within `timeout` seconds (None or 0: no limit, the search goes on until
-    there is a verdict). With `cex`, an invalid property comes with a counterexample (slower).
+    there is a verdict), for `n_users` users, or for every number of users if `n_users` is
+    ANY. With `cex`, an invalid property comes with a counterexample (slower).
 
-    Strategy "kind2": Kind 2 on (Init, Trans) and Φ(φ) (`kind2_search`).
-    Strategy "portfolio" (default): rounds of the following tasks, one Kind 2 job at a time,
+    Strategy "kind2": Kind 2 on (Init, Trans) and Φ(φ) with n_users users (`kind2_search`).
+    Strategy "portfolio" (default): the sides of the users mode (`users_mode_of`), each one
+    number of users run by `_rounds`, advanced one round at a time in turn (`_drive_one`,
+    `_drive_combined`, `_drive_any`)."""
+    if context is None:
+        context = {}
+    users_mode = users_mode_of(users_mode, parameterized)
+    if n_users == ANY and (strategy == "kind2" or users_mode == "parameterized"):
+        raise KindHMLError(f"{ANY} number of users needs strategy portfolio and users mode"
+                           " combined or exact")
+    start = time.time()
+    deadline = start + timeout if timeout else None
+    if lus_path:
+        users, ghost = kind2_target(context, program, prop, n_users, users_mode, mode, expand,
+                                    invgen, user_invariants)
+        with open(lus_path, "w") as f:
+            f.write(lustre_for(program, prop, users, mode, expand, ghost_sums=ghost))
+    if strategy == "kind2":
+        return kind2_search(prop, lustre_for(program, prop, n_users, mode, expand),
+                            timeout or None, extra_args, solver, cex)
+
+    def side(users: int, ghost: bool, goal: Optional[int], cut: Optional[Cutoff],
+             **flags) -> _Side:
+        s = _Side(users, ghost, goal, **flags)
+        s.gen = _rounds(program, prop, s, cut, context, start, deadline, mode, expand,
+                        extra_args, solver, cex, invgen, user_invariants)
+        return s
+
+    if users_mode == "exact" and n_users != ANY:
+        return _drive_one(side(n_users, False, n_users, None))
+    cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
+    c = cut.of_property(prop.name)
+    if users_mode == "parameterized":
+        ghost = c is not None and c <= n_users
+        return _drive_one(side(c if ghost else n_users, ghost, n_users, cut, climb=True))
+    if n_users == ANY:
+        return _drive_any(program, prop, cut, c if users_mode == "combined" else None,
+                          side, deadline)
+    if c is None or c > n_users:
+        return _drive_combined(None, side(n_users, False, n_users, None),
+                               _why_exact(cut, prop, n_users))
+    param = side(c, True, n_users, cut, kind2=False, search=False)
+    exact = side(n_users, False, n_users, None, alone=lambda: param.outcome is not None)
+    return _drive_combined(param, exact, "")
+
+
+def kind2_target(context: dict, program: S.Program, prop: S.Property, n_users: Users,
+                 users_mode: str, mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND,
+                 invgen: bool = True, user_invariants: bool = True) -> Tuple[int, bool]:
+    """The users and the ghost sums of the transition system on which Kind 2 runs first: n
+    users, or the cutoff in parameterized mode, or 1 user for ANY."""
+    if n_users == ANY:
+        return 1, False
+    if users_mode == "parameterized":
+        return effective_users(context, program, n_users, mode, expand, invgen,
+                               user_invariants, prop)[:2]
+    return n_users, False
+
+
+def _why_exact(cut: Cutoff, prop: S.Property, n_users: int) -> str:
+    """Why a property is checked with n_users users only (parameterized mode not applicable)."""
+    c = cut.of_property(prop.name)
+    why = (f"cutoff {c} > {n_users}" if c is not None
+           else f"no cutoff: {cut.outside.get(prop.name) or cut.reason}")
+    return f"with {_n(n_users)}; {why}"
+
+
+def _step(side: _Side) -> bool:
+    """One round of a side; whether it has ended (its outcome is then set)."""
+    try:
+        next(side.gen)
+        return False
+    except StopIteration as e:
+        side.outcome = e.value
+        return True
+
+
+def _decided(o: Outcome) -> bool:
+    return o.status in ("valid", "invalid")
+
+
+def _drive_one(side: _Side) -> Outcome:
+    while not _step(side):
+        pass
+    return side.outcome
+
+
+def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
+    """Combined mode, n users: the parameterized side (if the property has a cutoff at most n)
+    and the exact side, one round each in turn, until a verdict for n users. The
+    parameterized side only proves (Houdini and the check on a free state): it ends when that
+    check is refuted, and the exact side, which searches for counterexamples with n users, then
+    runs alone. A proof of the parameterized side holds for n (Prop. 7.9); without a verdict,
+    the outcome of the exact side, with the notes of the other one."""
+    sides = [s for s in (param, exact) if s is not None]
+    while any(s.outcome is None for s in sides):
+        for s in sides:
+            if s.outcome is None and _step(s) and _decided(s.outcome):
+                for t in sides:
+                    if t.outcome is None:
+                        t.gen.close()
+                if s is exact:
+                    s.outcome.scope = why or f"with {_n(exact.users)}"
+                return s.outcome
+    o = exact.outcome
+    o.scope = why or f"with {_n(exact.users)}"
+    if param is not None:
+        if param.outcome.scope:
+            o.scope += f"; parameterized: {param.outcome.scope}"
+        o.cti = o.cti or param.outcome.cti
+    return o
+
+
+def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[int],
+               side: Callable[..., _Side], deadline: Optional[float]) -> Outcome:
+    """Every number of users n >= 1 (DESIGN.md, Sect. 7.6). The sides: with a cutoff c, the
+    parameterized side (a proof holds for every n >= L, its number of users) and the exact
+    sides for m = 1, ..., c - 1; then, or without a cutoff, exact sides for m = c, c + 1, ...,
+    each started when the previous ones have ended (best effort, for counterexamples with
+    more users). A counterexample with any m users refutes the property; the property is
+    valid if the parameterized side proves it for every n >= L and the exact sides prove it
+    for each m < L. A proof by Kind 2 with m users holds for every m' <= m if no address
+    variable is universal in the negation of the property (Cor. 7.8)."""
+    sides: List[_Side] = []
+    exact: Dict[int, _Side] = {}
+    proved: set = set()                 # the numbers of users proved by the exact sides
+    try:
+        downward = Scanner(System.make(program, 1)).idle_needed(prop.formula) == 0
+    except OutOfFragment:
+        downward = False
+
+    def alone() -> bool:
+        return sum(1 for s in sides if s.outcome is None) == 1
+
+    def add(m: int):
+        exact[m] = side(m, False, None, None, alone=alone)
+        sides.append(exact[m])
+
+    param = side(c, True, None, cut, kind2=False, alone=alone) if c is not None else None
+    if param is not None:
+        sides.append(param)
+    for m in range(1, c if c is not None else 2):
+        add(m)
+    low = None                          # the parameterized side proved every n >= low
+
+    def close() -> None:
+        for s in sides:
+            if s.outcome is None:
+                s.gen.close()
+
+    while True:
+        for s in [s for s in sides if s.outcome is None]:
+            if s.outcome is not None or not _step(s):
+                continue
+            o = s.outcome
+            if o.status == "invalid":
+                close()
+                if s is not param:
+                    o.scope = f"counterexample with {_n(s.users)}"
+                return o
+            if o.status != "valid":
+                continue
+            if s is param:
+                low = o.users_from or s.users
+            else:
+                below = range(1, s.users + 1) if downward and o.method == "kind2" else [s.users]
+                proved.update(below)
+                for m in below:
+                    if exact.get(m) is not None and exact[m].outcome is None:
+                        exact[m].gen.close()
+                        exact[m].outcome = o
+            if low is not None and all(m in proved for m in range(1, low)):
+                close()
+                o.scope = ("for every n >= 1" if low == 1 else
+                           f"for every n >= 1: n >= {low} by invariants, n < {low} one by one")
+                return o
+        if (low is None and all(s.outcome is not None for s in exact.values())
+                and (deadline is None or time.time() < deadline)):
+            # the next number of users (best effort, for counterexamples with more users)
+            add(max(exact, default=(c or 1) - 1) + 1)
+        elif all(s.outcome is not None for s in sides):
+            break
+    k = 0
+    while k + 1 in proved:
+        k += 1
+    parts = ([f"up to {_n(k)}"] if k else []) + ([f"for every n >= {_n(low)}"] if low else [])
+    o = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [],
+                true_for=" and ".join(parts))
+    o.cti = next((s.outcome.cti for s in sides if s.outcome and s.outcome.cti), "")
+    o.scope = "every n >= 1" + (f"; parameterized: {param.outcome.scope}"
+                                if param and param.outcome and param.outcome.scope else "")
+    return o
+
+
+def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cutoff],
+            context: dict, start: float, deadline: Optional[float], mode: str, expand,
+            extra_args: Optional[List[str]], solver: str, cex: bool, invgen: bool,
+            user_invariants: bool) -> Generator[None, None, Outcome]:
+    """The check of a property with the users of `side`, in rounds: a generator that yields
+    after each round and returns the outcome.
+
+    Rounds of the following tasks, one Kind 2 job at a time,
     each with the round's budget (FIRST_BUDGET, doubled at each round; task 5 gets
     KIND2_SHARE budgets, or, with a time limit and linear arithmetic, all the time left):
       1. prove the invariants (`invariants.py`; shared by the properties of a run through
@@ -210,36 +459,26 @@ def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional
       4. "fuzz": random testing, confirmed exactly (`fuzz.py`);
       5. "kind2": `kind2_search`, with BMC and k-induction only after the memory limit
          killed a solver.
-    An invariant proved inductive (task 1) is valid ("inductive").
+    An invariant proved inductive (task 1) is valid ("inductive"). Task 5 runs only if
+    `side.kind2`; it gets all the time left only if `side.alone()`.
 
-    With `parameterized` (strategy "portfolio"; DESIGN.md, Sect. 7), if the property has a
-    cutoff N = max(c_H, c_R) <= n_users (`effective_users`), sums are state variables and
-    each task uses its own number of users: each step of Houdini its cutoff (the invariants
-    then hold for every n >= c_H, the largest of them, `_Invariants.users`); the check of
-    the property on a free state the cutoff u of its premises (the property then holds for every
-    n >= max(c_H, u)); the searches for counterexamples and Kind 2, N users. A
-    counterexample holds for every n >= its number of users if the property has no address
-    variable universal in its negation (`Scanner.dual`; the other users stay idle);
-    otherwise it says nothing about more users, and the outcome is unknown. A proof of task
-    5 holds for its number of users m, and for every n <= m if the property has no such
-    variable (Cor. 7.8). If m < n_users, Kind 2 goes on with m + 1 users, up to n_users,
-    and the outcome is unknown, true for the numbers of users proved, until a verdict for
-    n_users; the other searches for counterexamples stop, since none found would extend to
-    n_users, and the check stops when only Kind 2 is left and it stops. A counterexample of
-    a property with such a variable holds for every n >= its number of users if its final state
-    has enough idle users (Lemma 7.6, `Scanner.idle_needed`, `idle_users`)."""
-    if context is None:
-        context = {}
-    users, ghost, cut = (effective_users(context, program, n_users, mode, expand, invgen,
-                                         user_invariants, prop)
-                         if parameterized and strategy == "portfolio" else (n_users, False, None))
-    lustre = lustre_for(program, prop, users, mode, expand, ghost_sums=ghost)
-    if lus_path:
-        with open(lus_path, "w") as f:
-            f.write(lustre)
-    deadline = time.time() + timeout if timeout else None
-    if strategy == "kind2":
-        return kind2_search(prop, lustre, timeout or None, extra_args, solver, cex)
+    With ghost sums (parameterized mode; DESIGN.md, Sect. 7), the side has N = max(c_H, c_R)
+    users, the cutoff of the property (`effective_users`), and each task uses its own
+    number of users: each step of Houdini its cutoff (the invariants then hold for every
+    n >= c_H, the largest of them, `_Invariants.users`); the check of the property on a free
+    state the cutoff u of its premises (the property then holds for every n >= max(c_H, u));
+    the searches for counterexamples and Kind 2, N users. A counterexample holds for every
+    n >= its number of users if the property has no address variable universal in its
+    negation (`Scanner.dual`; the other users stay idle), or if its final state has enough
+    idle users (Lemma 7.6, `Scanner.idle_needed`, `idle_users`); otherwise it says nothing
+    about the `side.goal` users, and the outcome is unknown (with goal None, every n >= 1,
+    any counterexample is a verdict). A proof of task 5 holds for its number of users m, and
+    for every n <= m if the property has no such variable (Cor. 7.8). With `side.climb`, if
+    m < goal, Kind 2 goes on with m + 1 users, up to goal, and the outcome is unknown, true
+    for the numbers of users proved, until a verdict for goal; the other searches for
+    counterexamples stop, since none found would extend to goal, and the check stops when
+    only Kind 2 is left and it stops."""
+    users, ghost, goal = side.users, side.ghost, side.goal
     # parameterized mode: the idle users a counterexample needs to extend to more users
     need = Scanner(System.make(program, users)).idle_needed(prop.formula) if ghost else 0
     dual = need > 0
@@ -317,20 +556,22 @@ def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional
         if cut is None:
             return o
         if not ghost:
-            c = cut.of_property(prop.name)
-            why = (f"cutoff {c} > {n_users}" if c is not None
-                   else f"no cutoff: {cut.outside.get(prop.name) or cut.reason}")
-            o.scope = f"with {_n(users)}; {why}"
+            o.scope = _why_exact(cut, prop, users)
             return o
         if o.status == "valid":
-            o.scope = (f"for every n >= {_n(low)}" if o.method in ("inductive", "invariants")
-                       else proved_for(low))
+            if o.method in ("inductive", "invariants"):
+                o.scope, o.users_from = f"for every n >= {_n(low)}", low
+            else:
+                o.scope = proved_for(low)
             if checked is not None and checked != low:
                 o.scope += f"; property checked with {_n(checked)}"
         elif o.status == "invalid" and (why := extends(final, participants, low)) is not None:
             o.scope = f"counterexample with {_n(low)}, for every n >= {low}{why}"
-        elif o.status == "invalid" and low < n_users:
-            notes.append(f"a counterexample with {_n(low)} does not extend to {_n(n_users)}:"
+            o.users_from = low
+        elif o.status == "invalid" and goal is None:
+            o.scope = f"counterexample with {_n(low)}"      # every n >= 1: a verdict
+        elif o.status == "invalid" and low < goal:
+            notes.append(f"a counterexample with {_n(low)} does not extend to {_n(goal)}:"
                          f" {idle(final, low)} idle users, {need} needed")
             o = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), o.errors, o.solver,
                         o.method, o.cti, trace=o.trace, scope=notes[-1])
@@ -344,10 +585,11 @@ def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional
     invs = _entry(context, program, cut.steps if ghost else users, mode, expand, invgen,
                   user_invariants, ghost)
     nonlinear = is_nonlinear(program)
-    start, budget = time.time(), FIRST_BUDGET
-    proof_open, target, engines, kind2_open = True, None, extra_args, True
-    searching = True                    # false after a proof by Kind 2 with users < n_users
-    k2_users, k2_lustre = users, lustre     # Kind 2: one more user after each such proof
+    budget = FIRST_BUDGET
+    proof_open, target, engines, kind2_open = True, None, extra_args, side.kind2
+    searching = side.search             # false after a proof by Kind 2 with users < goal
+    k2_users = users                    # Kind 2: one more user after each such proof
+    k2_lustre: Optional[str] = None     # its program, made at its first run
     k2_note = ""                        # the last run of Kind 2 after such a proof, if undecided
     target_users = users                # the users of the counterexample to induction
     premises: List[List[str]] = []
@@ -358,7 +600,7 @@ def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional
             # the conditions are evaluated in turn: a counterexample found by "proof" is
             # searched for by "reach" in the same round
             if not (searching or kind2_open) and invs.proved is not None and not proof_open:
-                return scoped(last, users)          # no task can decide for n_users
+                return scoped(last, users)          # no task can decide for goal
             if task == "invariants" and invs.proved is not None:
                 if prop.invariant and prop.name in invs.proved:
                     return scoped(_valid(prop, "inductive", time.time() - start), invs.users)
@@ -379,10 +621,10 @@ def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional
                 # With a time limit and linear arithmetic, Kind 2 gets all the time left: it
                 # restarts from scratch at each run, and the other tasks succeed in seconds
                 # or not at all. With nonlinear arithmetic, Kind 2 rarely concludes, and the
-                # rounds go on.
+                # rounds go on; so do they if other sides have their rounds.
                 b = KIND2_SHARE * budget
                 if left is not None:
-                    b = min(b, left) if nonlinear else left
+                    b = min(b, left) if nonlinear or not side.alone() else left
             if task == "invariants":
                 invs.attempt(b)
                 if invs.proved is not None and prop.invariant and prop.name in invs.proved:
@@ -466,11 +708,14 @@ def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional
                         return o
                     target, last = None, o              # it does not extend: go on
             else:
+                if k2_lustre is None:
+                    k2_lustre = lustre_for(program, prop, k2_users, mode, expand,
+                                           ghost_sums=ghost)
                 o = kind2_search(prop, k2_lustre, b, engines, solver, cex)
-                if o.status == "valid" and k2_users < n_users:
-                    # a proof for k2_users users, not for n_users (Kind 2's invariants name
+                if o.status == "valid" and side.climb and k2_users < goal:
+                    # a proof for k2_users users, not for goal (Kind 2's invariants name
                     # the users): Kind 2 goes on with one more user. No counterexample with
-                    # at most k2_users users extends to n_users (it would extend to
+                    # at most k2_users users extends to goal (it would extend to
                     # k2_users), so the other searches stop
                     searching, k2_note = False, ""
                     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"),
@@ -509,6 +754,7 @@ def verify(program: S.Program, prop: S.Property, n_users: int, timeout: Optional
                     continue
                 o.method, o.cti = "kind2", last.cti
                 last = o
+        yield                               # the end of a round: the other sides go on
         budget *= 2
 
 
@@ -576,6 +822,17 @@ def effective_users(context: dict, program: S.Program, n_users: int, mode: str, 
     c is the cutoff of the steps of Houdini c_H or, for `prop`, max(c_H, its cutoff c_R).
     If c <= n_users: c, with sums as state variables; otherwise (or without a cutoff):
     n_users, as without parameterized mode."""
+    cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
+    c = cut.steps if prop is None else cut.of_property(prop.name)
+    if c is None or n_users < c:
+        return n_users, False, cut
+    return c, True, cut
+
+
+def cutoff_of(context: dict, program: S.Program, mode: str, expand, invgen: bool,
+              user_invariants: bool) -> Cutoff:
+    """The cutoffs of the checks of `program` on free values (`effective_users`), computed once
+    per run (in `context`)."""
     key = ("cutoff", id(program), invgen, user_invariants)
     if key not in context:
         properties = [r for r in program.properties if user_invariants or not r.invariant]
@@ -583,39 +840,59 @@ def effective_users(context: dict, program: S.Program, n_users: int, mode: str, 
         extended = S.Program(program.contracts, tuple(properties) + tuple(templates),
                              program.balance_type)
         context[key] = Checks(extended, 1, mode, expand, ghost_sums=True).cutoff(tasks(program))
-    cut = context[key]
-    c = cut.steps if prop is None else cut.of_property(prop.name)
-    if c is None or n_users < c:
-        return n_users, False, cut
-    return c, True, cut
+    return context[key]
 
 
-def prove_invariants(program: S.Program, n_users: int, timeout: Optional[float],
+def prove_invariants(program: S.Program, n_users: Users, timeout: Optional[float],
                      context: dict, mode: str = DEFAULT_MODE, expand=DEFAULT_EXPAND,
                      invgen: bool = True, user_invariants: bool = True,
-                     parameterized: bool = False) -> "_Invariants":
+                     parameterized: bool = False,
+                     users_mode: Optional[str] = None) -> List["_Invariants"]:
     """The invariant phase of a file, before its properties, with its own time limit (None: no
     limit): candidates (declared and generated) and Houdini, in passes with doubling
     budgets, until the inductive subset is found. The properties of the file then use it through
     `context`; if the phase does not finish, `verify` goes on with it in its rounds. Without
     a separate phase, Houdini shared the time of each property with the other tasks, and on the
-    lending protocol it did not finish within the 11 properties of 60 s. With `parameterized`,
-    with the number of users of `effective_users`."""
-    cut, ghost = None, False
-    if parameterized:
-        n_users, ghost, cut = effective_users(context, program, n_users, mode, expand, invgen,
-                                              user_invariants)
-    invs = _entry(context, program, n_users, mode, expand, invgen, user_invariants, ghost)
-    invs.cutoff = cut
+    lending protocol it did not finish within the 11 properties of 60 s.
+
+    One Houdini for each number of users of the users mode (`users_mode_of`), its passes in
+    turn, parameterized first: exact, n users; parameterized, the cutoff of the steps c_H if
+    at most n (`effective_users`), else n; combined, both (the cutoff if at most n); ANY, the
+    cutoff and 1, ..., c_H - 1 users (1 without a cutoff; `verify` makes the others)."""
+    users_mode = users_mode_of(users_mode, parameterized)
+    entries: List[_Invariants] = []
+
+    def add(users: int, ghost: bool, cut: Optional[Cutoff] = None):
+        invs = _entry(context, program, users, mode, expand, invgen, user_invariants, ghost)
+        invs.cutoff = cut
+        entries.append(invs)
+
+    if users_mode == "exact" and n_users != ANY:
+        add(n_users, False)
+    else:
+        cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
+        c = cut.steps
+        ghost = (c is not None and users_mode != "exact"
+                 and (n_users == ANY or c <= n_users))
+        if ghost:
+            add(c, True, cut)
+        if n_users == ANY:
+            for m in range(1, c if ghost else 2):
+                add(m, False)
+        elif users_mode == "combined" or not ghost:
+            add(n_users, False, None if ghost or users_mode == "combined" else cut)
     deadline = time.time() + timeout if timeout else None
     b = FIRST_BUDGET
-    while invs.proved is None:
-        left = None if deadline is None else deadline - time.time()
-        if left is not None and left <= 1:
-            break
-        invs.attempt(b if left is None else min(b, left))
+    pending = list(entries)
+    while pending:
+        for invs in pending:
+            left = None if deadline is None else deadline - time.time()
+            if left is not None and left <= 1:
+                return entries
+            invs.attempt(b if left is None else min(b, left))
+        pending = [invs for invs in pending if invs.proved is None]
         b *= 2
-    return invs
+    return entries
 
 
 def kind2_search(prop: S.Property, lustre: str, timeout: Optional[float],
@@ -911,22 +1188,27 @@ def invariant_summary(invs: "_Invariants", c: Palette = PLAIN) -> str:
             f" generated), {len(invs.dropped)} dropped{users}")
 
 
+def invariant_label(invs: "_Invariants") -> str:
+    """The numbers of users of a Houdini: "parameterized" (from its cutoff on), or n users."""
+    return "parameterized" if invs.parameterized else f"with {_n(invs.checks.enc.system.n_users)}"
+
+
 def invariant_report(context: dict) -> List[str]:
     """The invariants proved for the programs of a run (generated or declared), and the
-    number of candidates dropped."""
+    number of candidates dropped; with several numbers of users, each line is labelled."""
+    entries = [invs for invs in context.values() if isinstance(invs, _Invariants)]
     lines = []
-    for invs in context.values():
-        if not isinstance(invs, _Invariants):
-            continue                        # a cutoff (`effective_users`)
+    for invs in entries:
+        head = f"({invariant_label(invs)}) " if len(entries) > 1 else ""
         if invs.proved is None:
-            lines.append("invariants: not proved within the time")
+            lines.append(f"{head}invariants: not proved within the time")
             continue
         for n in invs.proved:
             if n not in invs.checks.axioms:
                 kind = "generated" if n in invs.generated else "declared"
-                lines.append(f"{kind} invariant {n}: "
+                lines.append(f"{head}{kind} invariant {n}: "
                              f"{pretty.expr(invs.checks.program.prop(n).formula)}")
-        lines.append(f"candidates dropped by Houdini: {len(invs.dropped)}")
+        lines.append(f"{head}candidates dropped by Houdini: {len(invs.dropped)}")
     return lines
 
 
