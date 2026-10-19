@@ -71,11 +71,16 @@ class Checks:
 
     def sum_axioms(self, names: List[str], st: L.LExpr) -> L.LExpr:
         """Parameterized mode, where sum(m) is a free state variable σ in a free state: for
-        each map m whose entries are all nonnegative by the premises `names`, each entry,
-        and each sum of two entries at distinct addresses, is at most σ (when all contracts
-        are constructed, as the candidates; for balance, always). These hold in every state
-        that satisfies `names` and where σ is the sum, so assuming them is sound; they are
-        universal over the addresses, so they do not change the cutoff (DESIGN.md, Sect. 7)."""
+        each map m whose entries are all nonnegative by the premises `names`, the sum of the
+        entries at all the addresses of the system is at most σ (when all contracts are
+        constructed, as the candidates; for balance, always). It holds in every state that
+        satisfies `names` and where σ is the sum, so assuming it is sound. It stands for the
+        universal formulas ∀ distinct a_1..a_k. m[a_1] + ... + m[a_k] <= σ (k >= 1), which
+        are equivalent to it, with nonnegative entries, on the addresses of the system; so it
+        does not change the cutoff (DESIGN.md, Sect. 7.3). The bounds on single entries and
+        on pairs of entries are too weak: with 3 users, the step of `redeem` of the AMM
+        refuted `minted[u] + minted[v] <= supply` from a state whose 3 entries summed to
+        more than σ."""
         if not self.enc.ghosts:
             return L.TRUE
         formulas = [self.program.prop(n).formula for n in names if n not in self.axioms]
@@ -93,12 +98,11 @@ class Checks:
                 m, guard = L.proj(st, field_var(*key)), constructed
             else:
                 continue
-            sigma = L.proj(st, ghost_var(key))
-            entry = [L.proj(m, key_field(a)) for a in addrs]
-            bounds = [L.op("<=", x, sigma) for x in entry]
-            bounds += [L.op("<=", L.op("+", x, y), sigma)
-                       for i, x in enumerate(entry) for y in entry[i + 1:]]
-            out.append(L.op("=>", guard, L.conj(bounds)))
+            total = None
+            for a in addrs:
+                x = L.proj(m, key_field(a))
+                total = x if total is None else L.op("+", total, x)
+            out.append(L.op("=>", guard, L.op("<=", total, L.proj(st, ghost_var(key)))))
         return L.conj(out)
 
     def _premise_count(self, names: List[str]) -> int:
@@ -201,7 +205,10 @@ class Checks:
         (inputs after `hoist`), for every sender (the sender is expanded, not an input). An
         address argument that is not an input (expanded, A1) takes every address in turn;
         any other argument missing from the counterexample takes the default of its type.
-        Every choice is sound: a candidate false after a concrete call from s is refuted."""
+        Every choice is sound: a candidate false after a concrete call from s is refuted.
+        In parameterized mode, each sum(m) of s is the state variable σ_m, which also counts
+        users outside the system: the interpreter keeps σ_m minus the sum of the entries
+        (a call changes both by the same amount), as the encoding does."""
         values: Dict[str, object] = {}
         for block in counterexample or []:
             for stream in block.get("streams", []):
@@ -209,7 +216,7 @@ class Checks:
                 if 0 in vals:
                     values[stream["name"]] = vals[0]
         system = self.enc.system
-        st = state_from_values(values, system, self.enc)
+        st = state_from_values(values, system, self.enc, free_sums=True)
         inputs = {}
         for name, v in values.items():
             if name.startswith("q___") and "_" in name[4:]:

@@ -435,20 +435,35 @@ makes claims for n ≥ c.
 free in the free state; σ_m := σ_m − m[k] + v at each assignment `m[k] = v` (a transfer
 keeps σ_balance); 0 for an unconstructed contract; the sum of the initial balances in the
 initial states. For each map m whose entries are all nonnegative by the premises
-(`forall u. m[u] >= 0` and `m[null] >= 0`, or the balance lemma), the premises of χ# also
-contain m[a] ≤ σ_m and m[a] + m[b] ≤ σ_m for all a ≠ b (`Checks.sum_axioms`, with the guard
-on construction of the candidates). If χ# is valid with n users, then χ is valid with n
-users.
+(`forall u. m[u] >= 0` and `m[null] >= 0`, also as conjuncts of the premises, or the balance
+lemma), the premises of χ# also contain the set E_m of the universal formulas
+∀ a_1 … a_k distinct. m[a_1] + … + m[a_k] ≤ σ_m, for k ≥ 1 (`Checks.sum_axioms`, with the
+guard on construction of the candidates). With d addresses and nonnegative entries, E_m is
+equivalent to the single formula Σ_a m[a] ≤ σ_m over the d addresses, which the tool emits.
+If χ# is valid with n users, then χ is valid with n users.
 
 *Proof.* An instance of χ with n users is an instance of χ# with σ_m := Σ_a m[a]. The
 updates keep σ_m equal to the sum of the entries, at every level of a call (by induction on
 the levels; a revert restores both). The added premises hold when the entries are
-nonnegative, which the premises of the instance give. ∎
+nonnegative, which the premises of the instance give: a sum of entries at distinct addresses
+is at most the sum of all of them. ∎
 
-χ# satisfies (F2), and the added premises are universal, so they do not change k. They
-matter: with the invariant `sum(funds) <= balance[Bank]` (declared, or generated as a
-reserve, Sect. 6), bank `Liquidity` is proved for every n ≥ 2; without them, nothing relates σ_funds to the entries, and the
-counterexample to induction has `funds[u2] = 3 > balance[Bank] = 1`.
+χ# satisfies (F2), and the added premises are universal, so they hold in every substructure
+and do not change k. They matter:
+* with the invariant `sum(funds) <= balance[Bank]` (declared, or generated as a reserve,
+  Sect. 6), bank `Liquidity` is proved for every n ≥ 2; without them, nothing relates σ_funds
+  to the entries, and the counterexample to induction has `funds[u2] = 3 > balance[Bank] = 1`;
+* the bounds of single entries and of pairs of entries (k ≤ 2, the first version) are too
+  weak: the step of `redeem` of the AMM shares (`tests/contracts/parameterized/shares.sol`,
+  amm-real `Shares`, `forall u v . u != v -> minted[u] + minted[v] <= supply`) needs 3 users,
+  and with k ≤ 2 its counterexample to induction has `minted[u] = 2` for three users and
+  σ_minted = supply = 4. On amm-real and amm-int (5 users), Houdini then dropped the declared
+  invariants Nonnegative and Shares, and LP_exit was unknown.
+
+When Houdini replays the counterexample of a step with the reference interpreter
+(`Checks.refuted_after`), a sum of the free state is σ_m, not the sum of the visible entries:
+the interpreter keeps the difference (`State.sum_offsets`), which a call does not change. Before
+this, the replay could refute a true candidate such as `sum(minted) == supply`.
 
 ### 7.4 Counterexamples
 

@@ -23,6 +23,7 @@ import test_trans as T
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "tests", "contracts", "parameterized", "registry.sol")
 CAPPED = os.path.join(ROOT, "tests", "contracts", "parameterized", "capped_registry.sol")
+SHARES = os.path.join(ROOT, "tests", "contracts", "parameterized", "shares.sol")
 
 try:
     kind2.find_kind2()
@@ -208,7 +209,45 @@ def test_sum_axioms_need_nonnegative_entries():
     s = L.Var("s")
     assert checks.sum_axioms(["Every", "Total"], s) == L.TRUE
     assert checks.sum_axioms(["Null", "Total"], s) == L.TRUE
-    assert "sum_Registry_registered" in L.render(checks.sum_axioms(["Every", "Null"], s))
+    axiom = L.render(checks.sum_axioms(["Every", "Null"], s))
+    # one bound: the sum of the entries at all the addresses is at most the sum variable
+    assert axiom.count("<= s.sum_Registry_registered") == 1
+    assert all(f"s.Registry_registered.k_{a}" in axiom for a in checks.enc.system.addresses)
+
+
+def registry_with(*invariants) -> S.Program:
+    """The registry with the given invariants (name, text) added."""
+    program, _ = V.load(REGISTRY)
+    extra = [check_property(program, S.Property(name, parse_expr(text), invariant=True))
+             for name, text in invariants]
+    return S.Program(program.contracts, program.properties + tuple(extra),
+                     program.balance_type)
+
+
+def test_nonnegative_maps_in_conjunctions():
+    """The entries of a map are nonnegative also by conjuncts of the premises, as in the
+    declared invariants of the use cases."""
+    program = registry_with(
+        ("Both", "(forall u : address . registered[u] >= 0 && registered[u] <= 1)"
+                 " && count >= 0"),
+        ("Null", "count >= 0 && registered[null] == 0"),
+        ("Total", "sum(registered) == count"))
+    checks = Checks(program, 2, V.DEFAULT_MODE, V.DEFAULT_EXPAND, ghost_sums=True)
+    assert "sum_Registry_registered" in L.render(checks.sum_axioms(["Both", "Null"], L.Var("s")))
+    assert checks.sum_axioms(["Both"], L.Var("s")) == L.TRUE
+
+
+def test_replay_keeps_the_sums_of_a_free_state():
+    """Parameterized mode: in a free state, sum(registered) also counts users outside the
+    system; replaying `register` from it keeps `sum(registered) == count`."""
+    program = registry_with(("Total", "sum(registered) == count"))
+    checks = Checks(program, 2, V.DEFAULT_MODE, V.DEFAULT_EXPAND, ghost_sums=True)
+    values = {"s.constructed_Registry": True, "s.Registry_count": 5,
+              "s.sum_Registry_registered": 5}
+    values.update({f"s.Registry_registered.k_{a}": 0 for a in checks.enc.system.addresses})
+    cex = [{"streams": [{"name": n, "instantValues": [[0, v]]} for n, v in values.items()]}]
+    registry = program.contracts[0]
+    assert checks.refuted_after(cex, ["Total"], registry, registry.proc("register")) == set()
 
 
 @pytest.mark.kind2
@@ -231,6 +270,18 @@ def test_parameterized_registry():
         context = {}
         V.prove_invariants(program, n, 30, context)
         assert V.verify(program, prop, n, 20, context=context).status == status
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_sum_of_all_entries_bounds_the_shares():
+    """Houdini in parameterized mode proves the invariants of the shares, whose step for
+    redeem needs the bound of the sum of all the entries by sum(minted)."""
+    program, _ = V.load(SHARES)
+    context: dict = {}
+    invs = V.prove_invariants(program, 5, 60, context, parameterized=True, invgen=False)
+    assert sorted(n for n in invs.proved or [] if not n.startswith("_")) == [
+        "Nonnegative", "Pairs", "Total"], invs.dropped
 
 
 @pytest.mark.kind2

@@ -504,6 +504,35 @@ Results (100 users asked for; data in `runs/local-20261014-1532-idle2` and
   runs pass with it, 2 of 7 without): Kind 2 proves it (ind2) in its first run of 16 s or
   not, depending on the processes killed by the memory limit.
 
+## Done (2026-10-19): the bound of the sum of all the entries (with the user)
+
+Analysis of `results/n5.csv` (5 users) and `results/parameterized_n100.csv` (100 users,
+parameterized), both run on the server.
+- Without parameterized mode, the universal properties of the AMM (amm_simple Sandwich,
+  No_money_pump, Swap_additivity, ...) are unknown with 5 users: the check on a free state
+  expands the address quantifiers into one query (36 nonlinear cases for Sandwich); z3 and
+  cvc5 give no answer in 60-90 s, while each case alone is valid in at most 1.4 s, and the
+  whole check with 2 users in 2 s. Parameterized mode checks them with 1 or 2 users: valid in
+  under 6 s, for every n >= 3.
+- With parameterized mode, amm-real and amm-int lost Nonnegative, Shares (inductive in
+  n5.csv) and LP_exit: the sum axioms bounded single entries and pairs only, and the step of
+  `redeem` for Shares needs 3 users (DESIGN.md, Sect. 7.3).
+
+Changes:
+- `Checks.sum_axioms`: the sum of the entries at all the addresses is at most σ_m (it
+  replaces the bounds of single entries and of pairs);
+- `nonnegative_maps`: also conjuncts of the premises, at the top and under the `forall`;
+- `Checks.refuted_after`: the replay keeps the sums of the free state (`State.sum_offsets`,
+  `state_from_values(..., free_sums=True)`); before, it could refute a true candidate such as
+  `sum(minted) == supply`.
+- Tests (`tests/test_cutoff.py`): the axiom, the conjuncts, the replay;
+  `tests/contracts/parameterized/shares.sol` with Kind 2 (the test fails with the old axioms).
+
+Results (5 users, parameterized, 120 s per property and per invariant phase;
+`runs/axiom_amm`): the 15 properties of amm-real and amm-int lost in parameterized_n100.csv
+are valid (Nonnegative and Shares inductive, LP_exit by invariants in under 1 s); the
+invariant phase takes 44-71 s per file.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

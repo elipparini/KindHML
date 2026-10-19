@@ -258,20 +258,27 @@ def check_program(system: System) -> int:
 def nonnegative_maps(formulas: List[S.Expr]) -> set:
     """The maps (contract, field) all of whose entries are nonnegative by `formulas`:
     `forall u : address . m[u] >= 0` (which excludes null) and `m[null] >= 0` or
-    `m[null] == 0`, as the generated candidates write them."""
+    `m[null] == 0`, as the generated candidates write them, or as conjuncts of a formula
+    (also under the `forall`, e.g. `forall u : address . t0[u] >= 0 && t1[u] >= 0`)."""
     def zero(e):
         return isinstance(e, (S.IntLit, S.RealLit)) and e.value == 0
 
     def entry(e, key):
         return (isinstance(e, S.Index) and isinstance(e.map, S.Field) and key(e.key))
 
+    def conjuncts(e):
+        if isinstance(e, S.BinOp) and e.op == "&&":
+            return conjuncts(e.left) + conjuncts(e.right)
+        return [e]
+
     every, null = set(), set()
-    for f in formulas:
+    for f in (c for g in formulas for c in conjuncts(g)):
         if isinstance(f, S.Quant) and f.kind == "forall" and f.type == S.ADDRESS:
-            b = f.body
-            if (isinstance(b, S.BinOp) and b.op == ">=" and zero(b.right)
-                    and entry(b.left, lambda k: isinstance(k, S.QVar) and k.name == f.var)):
-                every.add((b.left.map.contract, b.left.map.name))
+            for b in conjuncts(f.body):
+                if (isinstance(b, S.BinOp) and b.op == ">=" and zero(b.right)
+                        and entry(b.left,
+                                  lambda k: isinstance(k, S.QVar) and k.name == f.var)):
+                    every.add((b.left.map.contract, b.left.map.name))
         elif (isinstance(f, S.BinOp) and f.op in (">=", "==") and zero(f.right)
               and entry(f.left, lambda k: isinstance(k, S.NullLit))):
             null.add((f.left.map.contract, f.left.map.name))

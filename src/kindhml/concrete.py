@@ -32,9 +32,10 @@ def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
         for f in c.fields:
             values[field_var(c.name, f.name)] = value_literal(st.fields[(c.name, f.name)],
                                                               f.type, system)
-    for key, t in enc.ghosts.items():           # parameterized mode: the exact sums
-        m = st.balance if key == BALANCE else st.fields[key]
-        values[ghost_var(key)] = value_literal(sum(m.values()), t, system)
+    for key, t in enc.ghosts.items():           # parameterized mode: the sums (exact without
+        m = st.balance if key == BALANCE else st.fields[key]    # offsets)
+        offset = st.sum_offsets.get(None if key == BALANCE else key, 0)
+        values[ghost_var(key)] = value_literal(sum(m.values()) + offset, t, system)
     return L.record("St", [(n, values[n]) for n, _ in enc.state_fields()])
 
 
@@ -74,9 +75,13 @@ def python_value(v):
     return v
 
 
-def state_from_values(values: Dict[str, object], system: System, enc: Encoder) -> State:
+def state_from_values(values: Dict[str, object], system: System, enc: Encoder,
+                      free_sums: bool = False) -> State:
     """The reference state with the values of the record `s` of a Kind 2 counterexample,
-    given by path (`s.f` or `s.f.k_a`), e.g. a free state of a check of `invariants.py`."""
+    given by path (`s.f` or `s.f.k_a`), e.g. a free state of a check of `invariants.py`.
+    With `free_sums` (parameterized mode, a free state), the sums of the state variables of
+    `enc.ghosts` are kept, as offsets from the sums of the entries; otherwise the sums are
+    those of the entries."""
     fields = {}
     for c in system.contracts:
         for f in c.fields:
@@ -103,6 +108,13 @@ def state_from_values(values: Dict[str, object], system: System, enc: Encoder) -
                 st.fields[(c, f)] = v
             else:
                 st.fields[(c, f)][key] = v
+    # parameterized mode: a sum of the free state also counts the users outside the system
+    for k in (enc.ghosts if free_sums else ()):
+        path = f"s.{ghost_var(k)}"
+        if path in values:
+            m = st.balance if k == BALANCE else st.fields[k]
+            st.sum_offsets[None if k == BALANCE else k] = (python_value(values[path])
+                                                           - sum(m.values()))
     return st
 
 

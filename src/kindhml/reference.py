@@ -48,8 +48,9 @@ def smt_mod(a: int, b: int) -> int:
 
 
 def sum_map(e: S.SumMap, st: "State"):
-    m = st.balance if isinstance(e.map, S.Balance) else st.fields[(e.map.contract, e.map.name)]
-    return sum(m.values())
+    key = None if isinstance(e.map, S.Balance) else (e.map.contract, e.map.name)
+    m = st.balance if key is None else st.fields[key]
+    return sum(m.values()) + st.sum_offsets.get(key, 0)
 
 
 def divide(e: S.BinOp, a, b):
@@ -66,11 +67,14 @@ class State:
     fields: Dict[Tuple[str, str], object]        # map fields are dicts address -> value
     block_num: int = 0
     revert: bool = False
+    # parameterized mode: sum(m) minus the sum of the entries of m (None: the balances), for
+    # a free state whose sums count users outside the system; the transactions keep it
+    sum_offsets: Dict[object, object] = field(default_factory=dict)
 
     def copy(self) -> "State":
         return State(dict(self.balance), dict(self.constructed),
                      {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.fields.items()},
-                     self.block_num, self.revert)
+                     self.block_num, self.revert, dict(self.sum_offsets))
 
 
 @dataclass(frozen=True)
