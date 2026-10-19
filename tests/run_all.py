@@ -185,8 +185,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--timeout", type=float, default=10)
-    ap.add_argument("--participants", type=V.parse_users, default=2,
-                    help=f"number of users (default 2), or {V.ANY} (every number of users)")
+    ap.add_argument("--participants", type=V.parse_users, default=None,
+                    help=f"number of users, or {V.ANY} (every number of users; the default)")
     ap.add_argument("--users_mode", choices=V.USERS_MODES, default=None,
                     help="combined (default): the checks with the cutoff of the checks on free"
                          " values, if it is at most --participants, and with --participants"
@@ -226,6 +226,10 @@ def main():
                     help="directory where the run is saved (results.csv, run.log, info.txt)")
     args = ap.parse_args()
     args.users_mode = V.users_mode_of(args.users_mode)
+    if args.participants is None:
+        if args.strategy == "kind2" or args.users_mode == "parameterized":
+            ap.error("--strategy kind2 and --users_mode parameterized need --participants N")
+        args.participants = V.ANY
     if args.participants == V.ANY and (args.strategy == "kind2"
                                        or args.users_mode == "parameterized"):
         ap.error(f"{V.ANY} needs --strategy portfolio and --users_mode combined or exact")

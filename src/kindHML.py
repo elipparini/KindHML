@@ -1,7 +1,9 @@
 """KindHML: verification of CHML properties of contracts with Kind 2.
 
 Usage:
-    python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants|any> <timeout> [--only_lus]
+    python3 src/kindHML.py <contract.sol> <Property|ALL> [n_participants|any] <timeout> [--only_lus]
+
+Without n_participants, the verdicts are for every number of users (the same as any).
 
 For each property, the Lustre encoding is saved in
 out_lus/<contract>_<Property>_<n>_<timeout>.lus and the verdict in
@@ -26,8 +28,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Verify CHML properties of a contract with Kind 2.")
     ap.add_argument("contract", help="path of the contract file")
     ap.add_argument("property", help="property name, or ALL")
-    ap.add_argument("n_of_participants", type=V.parse_users,
-                    help=f"number of user addresses, or {V.ANY} (every number of users)")
+    ap.add_argument("n_of_participants", type=V.parse_users, nargs="?", default=None,
+                    help=f"number of user addresses, or {V.ANY} (every number of users; the"
+                         " default)")
     ap.add_argument("timeout", type=float,
                     help="time limit per property, in seconds (0: no limit, the search goes on"
                          " until there is a verdict)")
@@ -75,6 +78,10 @@ def main() -> int:
     ap.add_argument("--out_results", default="out_results", help="directory for the verdicts")
     args = ap.parse_args()
     args.users_mode = V.users_mode_of(args.users_mode)
+    if args.n_of_participants is None:
+        if args.strategy == "kind2" or args.users_mode == "parameterized":
+            ap.error("--strategy kind2 and --users_mode parameterized need n_participants")
+        args.n_of_participants = V.ANY
     if args.n_of_participants == V.ANY and (args.strategy == "kind2"
                                             or args.users_mode == "parameterized"):
         ap.error(f"{V.ANY} needs --strategy portfolio and --users_mode combined or exact")

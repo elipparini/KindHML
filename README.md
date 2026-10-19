@@ -16,11 +16,12 @@ paper's definitions to the modules and lists the deviations.
 ## Usage
 
 ```
-python3 src/kindHML.py <contract.sol> <Property|ALL> <n_participants|any> <timeout> [options]
+python3 src/kindHML.py <contract.sol> <Property|ALL> [n_participants|any] <timeout> [options]
 ```
 
 - `n_participants`: number of user addresses (EOAs) besides `null` and the contracts, or
-  `any`: a verdict for every number of users (see `--users_mode`).
+  `any`: a verdict for every number of users (see `--users_mode`). Without it, the default is
+  `any`.
 - `timeout`: time limit per property, in seconds; 0 for no limit (the search then goes on until
   there is a verdict).
 
@@ -146,7 +147,8 @@ Without files, `tests/run_all.py` runs every task (a property of a contract file
 `--families bank,vault`, `--versions 1,3` (`<name>_vN.sol` is version N, `<name>.sol` version
 1), `--properties Liquidity,...` and `--tasks FILE.csv` (columns `file` and `property`, as in the
 `results.csv` of a run, or `contract` and `property`, as in a `groundtruth.csv`); the
-restrictions combine. `--list` prints the selected tasks without running them.
+restrictions combine. Without `--participants`, the tasks are checked for every number of
+users (`--participants any`). `--list` prints the selected tasks without running them.
 `tests/run_all.py --out DIR` saves the run in `DIR`: `results.csv` (one row per task),
 `run.log` (the output, with the invariants proved for each file) and `info.txt` (the command,
 the date, the git commit and the versions of Kind 2, Z3 and cvc5).
