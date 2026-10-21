@@ -113,7 +113,7 @@ def test_invariant_templates():
 
 def test_invariant_definitions():
     """An assignment f = e / d under the conditions G gives G && d != 0 -> f * d == e."""
-    program, _ = V.load(os.path.join(ROOT, "contracts", "lending", "lending.sol"))
+    program, _ = V.load(os.path.join(ROOT, "contracts", "lending-real", "lending_real.sol"))
     texts = invgen.templates(program)
     assert ("((Lending.sc0 > (0)) && Lending.sc0 != 0) -> Lending.xr0 * Lending.sc0 == "
             "(Lending.res0 + (Lending.ssdebt * Lending.idx))") in texts

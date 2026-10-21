@@ -44,10 +44,10 @@ tasks of the family.
 
 | family | contracts | notes |
 |---|---|---|
-| `amm-real`, `amm-simple` | constant-product AMM, with and without liquidity tokens | real amounts |
+| `amm-real`, `amm-simple-real` | constant-product AMM, with and without liquidity tokens | real amounts |
 | `amm-int`, `amm-simple-int` | the same, with integer amounts | divisions round down |
-| `lending`, `lending-simple` | lending protocol | real amounts |
-| `lending-int` | `lending` with integer amounts | fixed point |
+| `lending-real`, `lending-simple-real` | lending protocol | real amounts |
+| `lending-int` | `lending-real` with integer amounts | fixed point |
 | `bank`, `vault`, `price-bet` | small contracts | |
 
 A variant whose properties must be stated differently (e.g. with other types, as the

@@ -3,7 +3,7 @@
 // Lending protocol in the style of Aave and Compound, after the model of
 // M. Bartoletti, E. Lipparini, "A theory of Lending Protocols in DeFi" (arXiv 2506.15295),
 // and the use case of https://github.com/bitbart/contracts-verification-benchmark (FC26).
-// See ../lending/lending.sol for the description; here a is healthy if
+// See ../lending-real/lending_real.sol for the description; here a is healthy if
 // (c0[a] * xr0 / 1000 + c1[a] * p1) * 4 >= sdebt[a] * idx / 1000 * 5.
 
 contract Lending {

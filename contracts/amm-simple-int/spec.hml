@@ -61,7 +61,7 @@ property No_money_pump {
          && !(t0[a] >= old(old(t0[a])) && t1[a] > old(old(t1[a]))))
 }
 
-// Arbitrage, with an explicit strategy (as in amm_simple.sol; amounts rounded down).
+// Arbitrage, with an explicit strategy (as in amm_simple_real.sol; amounts rounded down).
 property Arbitrage {
     forall a : address . forall p : int .
     (is_EOA(a) && p > 0 && r0 > 0 && t0[a] > 0 && r1 > p * r0) ->

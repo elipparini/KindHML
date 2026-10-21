@@ -1,6 +1,6 @@
 // Invariants, proved inductive by the tool and assumed when checking the properties. The pool is
 // empty before the first deposit and after the redemption of the whole supply, so the
-// reserves are only nonnegative (unlike amm-simple, where they are always positive).
+// reserves are only nonnegative (unlike amm-simple-int, where they are always positive).
 invariant Nonnegative {
     (forall u : address . t0[u] >= 0 && t1[u] >= 0 && minted[u] >= 0)
     && r0 >= 0 && r1 >= 0 && supply >= 0

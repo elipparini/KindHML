@@ -1,8 +1,8 @@
-// mutation: borrow checks the health of the borrower before adding the debt
-// Simplified lending protocol: contracts/lending/lending.sol without interest (the exchange
+// version: anyone can set the price (a manipulable on-chain oracle, e.g. the price of an AMM)
+// Simplified lending protocol: contracts/lending-real/lending_real.sol without interest (the exchange
 // rate of the credits and the interest index are 1, so credits are deposits and debts are
 // not scaled). a is healthy if (c0[a] + c1[a] * p1) * 0.8 >= debt[a]. The existential properties
-// of lending.sol are stated with an explicit strategy, which the tool checks.
+// of lending_real.sol are stated with an explicit strategy, which the tool checks.
 pragma balance real;
 
 contract Lending {
@@ -66,10 +66,10 @@ contract Lending {
 
     function borrow(real v) {
         require(v > 0 && res0 >= v);
-        require((c0[msg.sender] + c1[msg.sender] * p1) * 0.8 >= debt[msg.sender]);
         res0 -= v;
         debt[msg.sender] += v;
-        w0[msg.sender] += v
+        w0[msg.sender] += v;
+        require((c0[msg.sender] + c1[msg.sender] * p1) * 0.8 >= debt[msg.sender])
     }
 
     function repay(real v) {
@@ -94,7 +94,7 @@ contract Lending {
     }
 
     function setPrice(real p) {
-        require(msg.sender == oracle && p > 0);
+        require(p > 0);
         p1 = p
     }
 }

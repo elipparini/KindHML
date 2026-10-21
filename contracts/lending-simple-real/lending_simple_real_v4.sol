@@ -1,8 +1,8 @@
-// version: anyone can set the price (a manipulable on-chain oracle, e.g. the price of an AMM)
-// Simplified lending protocol: contracts/lending/lending.sol without interest (the exchange
+// mutation: liquidate does not check the health of the borrower
+// Simplified lending protocol: contracts/lending-real/lending_real.sol without interest (the exchange
 // rate of the credits and the interest index are 1, so credits are deposits and debts are
 // not scaled). a is healthy if (c0[a] + c1[a] * p1) * 0.8 >= debt[a]. The existential properties
-// of lending.sol are stated with an explicit strategy, which the tool checks.
+// of lending_real.sol are stated with an explicit strategy, which the tool checks.
 pragma balance real;
 
 contract Lending {
@@ -82,19 +82,17 @@ contract Lending {
     // repays v of the debt of b, and seizes collateral of b worth 1.1 * v
     function liquidate(address b, real v) {
         require(msg.sender != b && v > 0 && w0[msg.sender] >= v && debt[b] >= v);
-        require((c0[b] + c1[b] * p1) * 0.8 < debt[b]);
         amt = 1.1 * v / p1;
         require(c1[b] >= amt);
         w0[msg.sender] -= v;
         res0 += v;
         debt[b] -= v;
         c1[b] -= amt;
-        c1[msg.sender] += amt;
-        require((c0[b] + c1[b] * p1) * 0.8 <= debt[b])
+        c1[msg.sender] += amt
     }
 
     function setPrice(real p) {
-        require(p > 0);
+        require(msg.sender == oracle && p > 0);
         p1 = p
     }
 }
