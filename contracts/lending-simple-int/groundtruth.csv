@@ -1,0 +1,12 @@
+contract,property,expected,note
+lending_simple_int.sol,Nonnegative,true,
+lending_simple_int.sol,Health_non_interference,true,
+lending_simple_int.sol,Liquidation_defence,true,
+lending_simple_int.sol,Liquidation_defence_exists,true,repay the whole debt.
+lending_simple_int.sol,Liquidation_attack,false,only the oracle sets the price.
+lending_simple_int.sol,Liquidation_attack_exists,false,"only the oracle sets the price, and b stays healthy."
+lending_simple_int.sol,Liquidation_attack_any,false,"every user can be healthy, and then no call of a increases its net worth."
+lending_simple_int.sol,Net_worth_preserved,true,
+lending_simple_int.sol,Deposit_reversibility,true,
+lending_simple_int.sol,Borrow_safe,true,
+lending_simple_int.sol,Liquidation_only_unhealthy,true,

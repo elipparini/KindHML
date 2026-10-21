@@ -47,7 +47,7 @@ tasks of the family.
 | `amm-real`, `amm-simple-real` | constant-product AMM, with and without liquidity tokens | real amounts |
 | `amm-int`, `amm-simple-int` | the same, with integer amounts | divisions round down |
 | `lending-real`, `lending-simple-real` | lending protocol | real amounts |
-| `lending-int` | `lending-real` with integer amounts | fixed point |
+| `lending-int`, `lending-simple-int` | the same, with integer amounts | fixed point in `lending-int` |
 | `bank`, `vault`, `price-bet` | small contracts | |
 
 A variant whose properties must be stated differently (e.g. with other types, as the
