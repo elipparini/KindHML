@@ -9,7 +9,8 @@ Usage:
 
 Without files, runs every task of contracts/regression and of the benchmark families. The
 selection options restrict the tasks; they combine (a task must satisfy all of them):
-    --families bank,vault     the directory of the file (e.g. contracts/bank)
+    --families bank,vault     the directory of the file (e.g. contracts/bank); the families
+                              run in the order given
     --versions 1,3            the version of the file: N for <name>_vN.sol, 1 for <name>.sol
     --properties Liquidity,...  the property names
     --tasks FILE.csv          the pairs (file, property) of a CSV file, with columns file (or
@@ -139,7 +140,7 @@ def select(args):
     else:
         paths = [os.path.join(ROOT, "contracts", "regression"),
                  *sorted(glob.glob(os.path.join(ROOT, "contracts", "*", "")))]
-    families = set(args.families.split(",")) if args.families else None
+    families = args.families.split(",") if args.families else None
     versions = {int(v) for v in args.versions.split(",")} if args.versions else None
     names = set(args.properties.split(",")) if args.properties else None
     wanted = None                     # file -> property names (None: all) of the CSV
@@ -150,14 +151,16 @@ def select(args):
                 wanted[f] = None
             else:
                 wanted.setdefault(f, set()).add(r)
+    files = files_of(paths)
+    if families is not None:          # the order of --families; stable within a family
+        rank = {name: i for i, name in reversed(list(enumerate(families)))}
+        files = sorted((f for f in files if family(f) in rank), key=lambda f: rank[family(f)])
     seen, out, matched = set(), [], set()
-    for f in files_of(paths):
+    for f in files:
         real = os.path.realpath(f)
         if real in seen:
             continue
         seen.add(real)
-        if families is not None and family(f) not in families:
-            continue
         if versions is not None and version(f) not in versions:
             continue
         if wanted is not None and real not in wanted:
@@ -200,7 +203,8 @@ def main():
     ap.add_argument("--properties", default="",
                     help="comma-separated property names to run (default all)")
     ap.add_argument("--families", default="",
-                    help="comma-separated families (directories, e.g. bank,amm-real) to run")
+                    help="comma-separated families (directories, e.g. bank,amm-real) to run,"
+                         " in this order")
     ap.add_argument("--versions", default="",
                     help="comma-separated versions to run (N for <name>_vN.sol, 1 for <name>.sol)")
     ap.add_argument("--tasks", default="",
