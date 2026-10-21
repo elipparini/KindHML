@@ -104,6 +104,23 @@ def test_text_output():
                           'Invalid_argument("Ltree.fold : quantified term")', "Wallclock timeout."]
 
 
+def test_timeout_before_the_analysis():
+    """When the time limit expires before the analysis (e.g. while parsing a large
+    program), Kind 2 reports its timeout exception as an error, with no summary
+    (outputs of Kind 2 v2.3.0)."""
+    text = (" kind2 v2.3.0-467-gc2817d4\n\n<Error> Error opening input file '/tmp/task.lus':\n"
+            "        Lib.TimeoutWall\n")
+    out = parse_text(text)
+    assert out.properties == [] and out.timed_out
+    raw = ('[\n{\n  "objectType" : "log",\n  "level" : "fatal",\n  "source" : "parse",\n'
+           '  "value" : "Error opening input file \'/tmp/task.lus\':\\nLib.TimeoutWall"\n}\n]\n')
+    out = parse_output(raw)
+    assert out.properties == [] and out.timed_out
+    assert parse_text(TEXT).timed_out                  # the timeout after the summary
+    assert not parse_text(TEXT.replace("<Timeout> Wallclock timeout.\n", "")).timed_out
+    assert not parse_output(RAW).timed_out
+
+
 def test_text_output_of_a_killed_run():
     """Answers are printed when found, before the summary."""
     out = parse_text(TEXT[:TEXT.index("----")])

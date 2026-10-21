@@ -701,7 +701,10 @@ alone gives every n ≥ 1. Once P has proved φ for every n ≥ L, the exact sid
 m ≥ L stop: they cannot change the verdict. Otherwise the outcome is unknown, with what is
 proved: "true up to k users" (E_1, ..., E_k), "for m users" (proofs after the first gap),
 "for every n ≥ L users" (P). If a side ended with an error (of Kind 2), the outcome is that
-error, as with n users. In exact mode with `any`, only the exact sides run.
+error, as with n users. A run of Kind 2 stopped at its time or memory limit before reporting
+on the property (e.g. at the time limit while parsing the program of many users, where Kind 2
+reports its timeout as an error) gives no verdict, not an error. In exact mode with `any`,
+only the exact sides run.
 
 The *scope* of an outcome (`Outcome.scope`) says what the run established, not what was
 asked:

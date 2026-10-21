@@ -70,6 +70,10 @@ class Kind2Output:
     errors: List[str] = field(default_factory=list)
     raw: str = ""
     memory_killed: bool = False
+    # Kind 2 stopped at its time limit: its timeout message, its timeout exception (raised
+    # when the limit expires before the analysis, e.g. while parsing a large program, and
+    # reported as an error), or killed by `run` after the limit
+    timed_out: bool = False
 
 
 MEMORY_LIMIT_GB = 3     # for Kind 2 and its solvers together (per process as a fallback)
@@ -247,6 +251,7 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
     out = parse_output(raw, err) if cex else parse_text(raw, err)
     if killed:
         out.errors.append("Kind 2 did not stop in time and was killed")
+        out.timed_out = True
     if watcher.oom_kills:
         out.memory_killed = True
         out.errors.append(f"the memory limit ({memory_limit_mb()} MB) killed"
@@ -288,13 +293,16 @@ def parse_output(raw: str, stderr: str = "") -> Kind2Output:
         return _no_output(raw, stderr)
     props: dict = {}
     errors: List[str] = []
+    timed_out = False
     for o in objects:
         kind = o.get("objectType")
         if kind == "log" and o.get("level") in ("error", "fatal"):
             errors.append(str(o.get("value")))
         elif kind == "property" and o.get("isCandidate") != "true":
             props[o["name"]] = _property(o)
-    return Kind2Output(list(props.values()), errors, raw)
+        if kind == "log" and _TIMEOUT.search(str(o.get("value"))):
+            timed_out = True
+    return Kind2Output(list(props.values()), errors, raw, timed_out=timed_out)
 
 
 # Engine names of the plain-text output, abbreviated as in the JSON output.
@@ -305,6 +313,8 @@ _ANSWER = re.compile(r"<(?:Success|Failure)> Property (\S+) is (valid|invalid) b
                      r"(?: for k=(\d+))? after ([0-9.]+)s\.$")
 _SUMMARY = re.compile(r"(\S+): (valid|invalid|true up to|unknown)"
                       r"(?: \(k=(\d+)\)| after (\d+) steps| (\d+) steps)?$")
+# Kind 2's timeout: its message, and its exception when the limit expires before the analysis
+_TIMEOUT = re.compile(r"Wallclock timeout|Lib\.TimeoutWall")
 
 
 def parse_text(raw: str, stderr: str = "") -> Kind2Output:
@@ -316,6 +326,7 @@ def parse_text(raw: str, stderr: str = "") -> Kind2Output:
     props: dict = {}
     errors: List[str] = []
     summary = False
+    timed_out = _TIMEOUT.search(raw) is not None
     for line in raw.splitlines():
         answer = _ANSWER.match(line)
         final = summary and _SUMMARY.match(line)
@@ -335,7 +346,7 @@ def parse_text(raw: str, stderr: str = "") -> Kind2Output:
             errors.append(line.split("> ", 1)[1])
         elif line.startswith("Summary of properties:"):
             summary = True
-    return Kind2Output(list(props.values()), errors, raw)
+    return Kind2Output(list(props.values()), errors, raw, timed_out=timed_out)
 
 
 def _property(o: dict) -> PropertyResult:

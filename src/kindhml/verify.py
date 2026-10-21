@@ -1004,6 +1004,10 @@ def kind2_search(prop: S.Property, lustre: str, timeout: Optional[float],
         out = kind2.run(lustre, budget, extra_args=extra_args, solver=s, cex=cex)
         killed = killed or out.memory_killed
         result = next((p for p in out.properties if p.name == prop.name), None)
+        if result is None and (out.timed_out or out.memory_killed):
+            # Kind 2 stopped at a limit before reporting on the property (e.g. at its time
+            # limit while parsing a large program): no verdict, not an error
+            result = kind2.PropertyResult(prop.name, "unknown")
         outcome = Outcome(prop, result, out.errors, s, "kind2")
         if outcome.status in ("valid", "invalid"):
             break

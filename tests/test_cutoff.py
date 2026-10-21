@@ -430,6 +430,18 @@ def test_kind2_with_more_users():
 
 @pytest.mark.kind2
 @pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_kind2_timeout_before_the_analysis_is_unknown():
+    """With 2 users, Kind 2 needs more than 1 s to reach the analysis of the vault (on the
+    development machine): it stops at its time limit before reporting on the property, which
+    is no verdict, not an error."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "vault", "vault.sol"))
+    prop = program.prop("Two_steps_drainability_non_inflation")
+    out = V.kind2_search(prop, V.lustre_for(program, prop, 2), 1)
+    assert out.status == "unknown", out.describe()
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
 def test_counterexamples_extend_with_idle_users():
     """With 3 users asked for, the checks use at most 2. The counterexample of
     Someone_registered leaves idle users and holds for every larger number of users
