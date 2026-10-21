@@ -20,7 +20,7 @@ from .errors import KindHMLError
 from .concrete import (describe_tx, python_value, state_from_values, state_literal,
                        state_paths)
 from .cutoff import Cutoff, OutOfFragment, Scanner, idle_users
-from .fuzz import Fuzzer
+from .fuzz import Fuzzer, locations
 from .invariants import Checks, describe_state, final_values, python_constant, state_values
 from .invgen import (candidates as invariant_templates, generate as generate_invariants,
                      minimize as minimize_invariants)
@@ -517,7 +517,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
       2. "invariants": check the property on a free state satisfying them; a counterexample s*
          ends this task and starts task 3;
       3. "reach": BMC search for s* in the transition system (a counterexample of the property);
-      4. "fuzz": random testing, confirmed exactly (`fuzz.py`);
+      4. "fuzz": random testing, guided by s* if any, then unguided, confirmed exactly
+         (`fuzz.py`);
       5. "kind2": `kind2_search`, with BMC and k-induction only after the memory limit
          killed a solver.
     An invariant proved inductive (task 1) is valid ("inductive"). Task 5 runs only if
@@ -656,6 +657,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     k2_lustre: Optional[str] = None     # its program, made at its first run
     k2_note = ""                        # the last run of Kind 2 after such a proof, if undecided
     target_users = users                # the users of the counterexample to induction
+    guide: Optional[Dict[tuple, object]] = None     # its known values, for the fuzzer
     premises: List[List[str]] = []
     attempts: Optional[List[tuple]] = None
     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
@@ -728,29 +730,42 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                             target = state_values(res.counterexample) if res else {}
                             target_users = u
                             last.cti = describe_state(target)
+                            known: set = set()
+                            enc = invs.checks_for(u).enc
+                            st = state_from_values({p: python_constant(v)
+                                                    for p, v in target.items()},
+                                                   enc.system, enc, known=known)
+                            have = locations(st)
+                            guide = {loc: have[loc] for loc in known if loc in have} or None
                             break
             elif task == "fuzz":
                 deadline_fuzz = time.time() + b
-                checks = invs.checks_for(users)
-                for txs, st in invs.fuzzer_for(users).candidates(prop, b / 2):
-                    left = deadline_fuzz - time.time()
-                    if left <= 1:
-                        break
-                    lus = checks.concrete_check(
-                        prop, state_literal(st, checks.enc.system, checks.enc))
-                    status, _, s = _free_run(lus, [prop.name], left)
-                    if status == "invalid":
-                        res = kind2.PropertyResult(prop.name, "invalid", len(txs), "fuzz",
-                                                   time.time() - start)
-                        named = {x for tx in txs for x in [tx.sender, tx.contract]
-                                 + [v for v in tx.args.values() if isinstance(v, str)]}
-                        o = scoped(Outcome(prop, res, [], s, "fuzz",
-                                           trace="; ".join(describe_tx(tx) for tx in txs)),
-                                   users, final=state_paths(st, checks.enc.system),
-                                   participants=named)
-                        if o.status == "invalid":
-                            return o
-                        o.cti, last = last.cti, o       # it does not extend: go on
+                # first towards the counterexample to induction, if any, then at random; each
+                # search gets half of the time left, its confirmations the rest
+                searches = ([(target_users, lambda f, t: f.guided(prop, guide, t))]
+                            if guide else []) + [(users, lambda f, t: f.candidates(prop, t))]
+                for m, search in searches:
+                    checks = invs.checks_for(m)
+                    share = (deadline_fuzz - time.time()) / 2
+                    for txs, st in search(invs.fuzzer_for(m), share):
+                        left = deadline_fuzz - time.time()
+                        if left <= 1:
+                            break
+                        lus = checks.concrete_check(
+                            prop, state_literal(st, checks.enc.system, checks.enc))
+                        status, _, s = _free_run(lus, [prop.name], left)
+                        if status == "invalid":
+                            res = kind2.PropertyResult(prop.name, "invalid", len(txs), "fuzz",
+                                                       time.time() - start)
+                            named = {x for tx in txs for x in [tx.sender, tx.contract]
+                                     + [v for v in tx.args.values() if isinstance(v, str)]}
+                            o = scoped(Outcome(prop, res, [], s, "fuzz",
+                                               trace="; ".join(describe_tx(tx) for tx in txs)),
+                                       m, final=state_paths(st, checks.enc.system),
+                                       participants=named)
+                            if o.status == "invalid":
+                                return o
+                            o.cti, last = last.cti, o       # it does not extend: go on
             elif task == "reach":
                 lus = invs.checks_for(target_users).reach_check(target)
                 # a property that needs idle users needs the whole final state (the target may

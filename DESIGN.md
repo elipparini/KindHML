@@ -296,6 +296,19 @@ or quarter), and the sender, with probability 0.2, among the users stored in add
 fields (an owner, an oracle): otherwise the procedures restricted to them almost never
 succeed (on the lending protocol, `accrue` was not called, and false candidate invariants
 such as `xr0 == 1` survived the filter).
+A counterexample to induction s* guides the search (`Fuzzer.guided`): after the constructors,
+at each step, of 20 random transactions that do not revert, the one whose state is closest to
+s* is taken (with probability 0.2 a random one). The distance is the sum of the differences of
+the numbers of s*, plus a constant for each other value that differs. The property is
+evaluated as above, only at the states closer to s* than the earlier ones of their trace (the
+evaluation takes most of the time). For a property with a witness, the candidate of a trace is
+its closest state to s* where the bounded evaluation is false. s* is often unreachable, so the
+BMC search for s* (task 3) fails, but reachable states near s* often violate the property. On
+lending-simple-int (2 users), the counterexamples to induction of Liquidation_attack and
+Liquidation_attack_exists violate the conservation of T0, and 1 random state in 64,776 has
+a borrower and an attacker as in the premise of these attacks. The guided search finds a counterexample of
+Liquidation_attack within 1 s (20 seeds out of 20; 2.2 s when the property is evaluated at
+every state), and one of Liquidation_attack_exists within 8 s for 10 seeds out of 20.
 
 **Portfolio** (default; `--strategy kind2` gives the previous behaviour). The tool does not
 give up: it runs rounds of the tasks below, one Kind 2 job at a time, each with the round's
@@ -309,7 +322,8 @@ product of two variables, a division by a variable) the rounds go on.
    the budget, then cvc5: z3 decides nonlinear real queries with nlsat, and Kind 2 cannot
    read cvc5's models of such queries).
 3. The BMC search for s*, once 2 has found it.
-4. Random testing, with exact confirmation.
+4. Random testing, with exact confirmation: first guided by s*, once 2 has found it, then
+   unguided.
 5. Kind 2 on the transition system (as before; with BMC and k-induction only, after the
    memory limit of a run killed a solver: the invariant generators and IC3 run in parallel
    and each has its own solver, which exceeds the memory on nonlinear problems).

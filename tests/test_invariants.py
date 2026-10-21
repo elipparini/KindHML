@@ -12,7 +12,8 @@ from kindhml import invgen, pretty
 from kindhml import syntax as S
 from kindhml.builder import parse
 from kindhml.errors import KindHMLError
-from kindhml.fuzz import Fuzzer, has_witness
+from kindhml.concrete import state_from_values
+from kindhml.fuzz import Fuzzer, distance, has_witness, locations
 from kindhml.model import System
 from kindhml.reference import FormulaEvaluator, initial_state
 from kindhml.typecheck import check
@@ -169,6 +170,28 @@ def test_fuzzer_candidates_and_witnesses():
     assert has_witness(amm.prop("Swap_additivity").formula)        # exists v12, v3
     assert has_witness(amm.prop("Arbitrage_exists").formula)       # exists x
     assert not has_witness(amm.prop("Slippage").formula)
+
+
+def test_fuzzer_guided_by_a_counterexample_to_induction():
+    """The counterexample to induction of Liquidation_attack (lending-simple-int, 2 users) is
+    unreachable (no T0 in the wallets and reserves), but the search guided by it reaches a
+    state that violates the property; random traces almost never satisfy its premise."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "lending-simple-int",
+                                      "lending_simple_int.sol"))
+    c = Checks(program, 2, "inline", ("address", "method"))
+    values = {"s.Lending_oracle": "A_u1", "s.Lending_p1": 2, "s.Lending_res0": 0,
+              "s.Lending_c0.k_u2": 1, "s.Lending_c1.k_u1": 1, "s.Lending_debt.k_u1": 1,
+              "s.constructed_Lending": True}
+    known: set = set()
+    st = state_from_values(values, c.enc.system, c.enc, known=known)
+    target = {loc: v for loc, v in locations(st).items() if loc in known}
+    assert target[("Lending", "debt", "u1")] == 1 and target[("Lending", "oracle")] == "u1"
+    assert ("Lending", "w0", "u1") not in target and distance(st, target) == 0
+    f = Fuzzer(c.enc.system, seed="test")
+    found = f.guided(program.prop("Liquidation_attack"), target, 5, limit=1)
+    assert found
+    txs, end = found[0]
+    assert all(end.constructed.values()) and any(tx.method[1] == "borrow" for tx in txs)
 
 
 def test_state_values_of_a_counterexample():

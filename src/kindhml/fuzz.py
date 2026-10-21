@@ -12,6 +12,13 @@ transactions that reach it, is a counterexample.
 Kind 2 alone rarely finds such counterexamples when the transitions are nonlinear: on the
 integer AMM, BMC reaches depth 1 in 60 s, while a counterexample needs a constructor, a
 deposit and a swap.
+
+A counterexample to induction s* (a free state that satisfies the proved invariants and
+violates the property) guides the search (`guided`): at each step, of a few random
+transactions, the one whose state is closest to s* is taken. s* itself may be unreachable,
+but the reachable states near it often violate the property too: on lending-simple-int,
+1 random state in 64,776 satisfies the premise of the liquidation attacks, and the guided
+search finds a counterexample of Liquidation_attack within 1 s (DESIGN.md, Sect. 6).
 """
 
 from __future__ import annotations
@@ -20,7 +27,7 @@ import random
 import signal
 import time
 from fractions import Fraction
-from typing import Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from . import syntax as S
 from .model import NULL, System
@@ -28,6 +35,10 @@ from .reference import FormulaEvaluator, Interpreter, State, Tx, initial_state
 
 INT_DOMAIN = range(-1, 4)       # bounded quantifiers of the evaluation (candidates only)
 MAX_RECORDS = 20                # sampled assignments of the arguments of all procedures
+MAX_STEPS = 12                  # transactions of a trace after the constructors
+GUIDED_TRIES = 20               # random transactions compared at each step of `guided`
+GUIDED_RANDOM = 0.2             # probability of a random step instead of the closest one
+MISMATCH = 5                    # distance between two different addresses or booleans
 
 
 class _TooSlow(Exception):
@@ -138,7 +149,7 @@ class Fuzzer:
                     yield list(txs), st
                     break
         methods = [(c, p) for c, p in self.system.methods if p.name != S.CONSTRUCTOR]
-        for _ in range(self.rnd.randint(1, 12)):
+        for _ in range(self.rnd.randint(1, MAX_STEPS)):
             if not methods:
                 return
             tx = self.transaction(*self.rnd.choice(methods), st)
@@ -170,20 +181,94 @@ class Fuzzer:
                         break
                     if not all(st.constructed.values()):
                         continue
-                    signal.setitimer(signal.ITIMER_REAL, left)
                     try:
-                        if not self.ev.holds(prop.formula, [st]):
+                        if self._violates(prop, st, left):
                             out.append((txs, st))
                     except _TooSlow:
                         break
-                    except (ZeroDivisionError, KeyError, TypeError):
-                        pass          # unspecified values (unguarded division) in a property
-                    finally:
-                        signal.setitimer(signal.ITIMER_REAL, 0)
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, old)
         return out
+
+    def _violates(self, prop: S.Property, st: State, seconds: float) -> bool:
+        """Whether the bounded evaluation of the property is false at st; _TooSlow if it
+        takes more than `seconds` (the caller installs `_alarm`)."""
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            return not self.ev.holds(prop.formula, [st])
+        except (ZeroDivisionError, KeyError, TypeError):
+            return False        # unspecified values (unguarded division) in a property
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+
+    def guided(self, prop: S.Property, target: Dict[tuple, object], seconds: float,
+               limit: int = 3) -> List[Tuple[List[Tx], State]]:
+        """The candidates of `candidates`, on traces that go towards `target` (values by
+        location, `locations`; e.g. a counterexample to induction): after the constructors,
+        at each step, of GUIDED_TRIES random transactions that do not revert, the one whose
+        state is closest to the target (`distance`), or, with probability GUIDED_RANDOM, a
+        random one. The property is evaluated only at the states closer to the target than
+        the earlier ones of their trace (the evaluation takes most of the time: on
+        lending-simple-int, this halves the time to a candidate). For a property with a
+        witness (see `candidates`), the candidate of a trace is its closest state to the
+        target where the bounded evaluation is false, if not returned before: near the
+        target, the bounded evaluation is a useful filter (on lending-simple-int,
+        Liquidation_attack_exists holds wherever its premise fails)."""
+        methods = [(c, p) for c, p in self.system.methods if p.name != S.CONSTRUCTOR]
+        witness = has_witness(prop.formula)
+        seen = self.seen.setdefault(prop.name, set())
+        out: List[Tuple[List[Tx], State]] = []
+        deadline = time.time() + seconds
+        old = signal.signal(signal.SIGALRM, _alarm)
+        try:
+            while methods and time.time() < deadline and len(out) < limit:
+                start = self.constructed()
+                if start is None:
+                    continue
+                txs, st = start
+                best = (distance(st, target), txs, st)
+                closest = None          # a property with a witness: the candidate of the trace
+                for _ in range(MAX_STEPS):
+                    left = deadline - time.time()
+                    if left <= 0:
+                        break
+                    steps = []
+                    for _ in range(GUIDED_TRIES):
+                        tx = self.transaction(*self.rnd.choice(methods), st)
+                        nxt = self.interp.step(st, tx)
+                        if not nxt.revert:
+                            steps.append((distance(nxt, target), tx, nxt))
+                    if not steps:
+                        break
+                    d, tx, st = (self.rnd.choice(steps) if self.rnd.random() < GUIDED_RANDOM
+                                 else min(steps, key=lambda s: s[0]))
+                    txs = txs + [tx]
+                    if d >= best[0]:
+                        continue
+                    best = (d, txs, st)
+                    if self._violates(prop, st, left):
+                        if not witness:
+                            out.append((txs, st))
+                            break
+                        closest = (txs, st)
+                if closest is not None and _key(closest[1]) not in seen:
+                    seen.add(_key(closest[1]))
+                    out.append(closest)
+        except _TooSlow:
+            pass
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old)
+        return out
+
+    def constructed(self) -> Optional[Tuple[List[Tx], State]]:
+        """The first state of a random trace where all contracts are constructed, with its
+        transactions, or None."""
+        for txs, st in self.traces():
+            if all(st.constructed.values()):
+                return txs, st
+        return None
 
     def states(self, prop: S.Property, seconds: float,
                limit: int) -> List[Tuple[List[Tx], State]]:
@@ -198,12 +283,45 @@ class Fuzzer:
                     last = (txs, st)
             if last is None:
                 continue
-            key = repr(sorted(last[1].fields.items())) + repr(sorted(last[1].balance.items()))
             seen = self.seen.setdefault(prop.name, set())
-            if key not in seen:
-                seen.add(key)
+            if _key(last[1]) not in seen:
+                seen.add(_key(last[1]))
                 out.append(last)
         return out
+
+
+def _key(st: State) -> str:
+    return repr(sorted(st.fields.items())) + repr(sorted(st.balance.items()))
+
+
+def locations(st: State) -> Dict[tuple, object]:
+    """The values of a state by location: (None, a) for the balance of a, (c, f) for a field
+    of contract c, (c, f, a) for the entry of a in a map field."""
+    out: Dict[tuple, object] = {(None, a): v for a, v in st.balance.items()}
+    for (c, f), v in st.fields.items():
+        if isinstance(v, dict):
+            out.update({(c, f, a): x for a, x in v.items()})
+        else:
+            out[(c, f)] = v
+    return out
+
+
+def distance(st: State, target: Dict[tuple, object]):
+    """The distance from a state to the target values (by location, `locations`): the sum of
+    the differences of the numbers, plus MISMATCH for each other value that differs."""
+    have = locations(st)
+    d = 0
+    for loc, v in target.items():
+        x = have.get(loc)
+        if _number(x) and _number(v):
+            d += abs(x - v)
+        elif x != v:
+            d += MISMATCH
+    return d
+
+
+def _number(x) -> bool:
+    return isinstance(x, (int, Fraction)) and not isinstance(x, bool)
 
 
 def has_witness(e: S.Expr, positive: bool = True) -> bool:

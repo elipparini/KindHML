@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fractions import Fraction
-from typing import Dict
+from typing import Dict, Optional
 
 from . import lustre as L
 from . import syntax as S
@@ -81,12 +81,13 @@ def python_value(v):
 
 
 def state_from_values(values: Dict[str, object], system: System, enc: Encoder,
-                      free_sums: bool = False) -> State:
+                      free_sums: bool = False, known: Optional[set] = None) -> State:
     """The reference state with the values of the record `s` of a Kind 2 counterexample,
     given by path (`s.f` or `s.f.k_a`), e.g. a free state of a check of `invariants.py`.
     With `free_sums` (parameterized mode, a free state), the sums of the state variables of
     `enc.ghosts` are kept, as offsets from the sums of the entries; otherwise the sums are
-    those of the entries."""
+    those of the entries. `known`, if given, receives the locations of the balances and
+    fields given (`fuzz.locations`); the others have their initial values."""
     fields = {}
     for c in system.contracts:
         for f in c.fields:
@@ -101,6 +102,8 @@ def state_from_values(values: Dict[str, object], system: System, enc: Encoder,
         v = python_value(v)
         if name == BALANCE and key is not None:
             st.balance[key] = v
+            if known is not None:
+                known.add((None, key))
         elif name == REVERT:
             st.revert = v
         elif name == BLOCK:
@@ -113,6 +116,8 @@ def state_from_values(values: Dict[str, object], system: System, enc: Encoder,
                 st.fields[(c, f)] = v
             else:
                 st.fields[(c, f)][key] = v
+            if known is not None:
+                known.add((c, f) if key is None else (c, f, key))
     # parameterized mode: a sum of the free state also counts the users outside the system
     for k in (enc.ghosts if free_sums else ()):
         path = f"s.{ghost_var(k)}"
