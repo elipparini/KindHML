@@ -135,9 +135,10 @@ class Outcome:
     cti: str = ""                    # a free state refuting the property, possibly unreachable
     memory_killed: bool = False
     trace: str = ""                  # method fuzz: the transactions reaching the counterexample
-    scope: str = ""                  # parameterized mode: the numbers of users of the verdict
-    true_for: str = ""               # parameterized mode, unknown outcome: the numbers of
-                                     # users of a proof by Kind 2 ("up to 2 users")
+    scope: str = ""                  # the numbers of users of the verdict, or what the run
+                                     # established without one (Sect. 7.6)
+    true_for: str = ""               # no verdict: the numbers of users of the proofs
+                                     # ("up to 2 users and for every n >= 4 users")
     users_from: Optional[int] = None    # parameterized mode: the verdict holds for every
                                         # number of users from this one on
 
@@ -153,7 +154,7 @@ class Outcome:
             return "OK" if gt else "NOT OK"
         if self.status == "invalid":
             return "NOT OK" if gt else "OK"
-        if self.true_for and gt:
+        if self.true_for and gt and self.status != "error":
             return f"OK-{self.true_for}"
         if self.result and self.result.true_up_to is not None and gt:
             return f"OK-up to {self.result.true_up_to}"
@@ -310,14 +311,18 @@ def _why_exact(cut: Cutoff, prop: S.Property, n_users: int) -> str:
     larger, or there is none."""
     c = cut.of_property(prop.name)
     return (f"cutoff {c} > {n_users}" if c is not None
-            else f"no cutoff: {cut.outside.get(prop.name) or cut.reason}")
+            else "no cutoff: " + (cut.outside.get(prop.name) or cut.reason
+                                  or "the property has no count"))
 
 
 def _exact_scope(o: Outcome, n_users: int, why: str) -> str:
-    """The scope of an outcome with n_users users only: a verdict holds for them only (with
-    the reason, if the cutoff was not used); without a verdict, the reason."""
-    if _decided(o):
+    """The scope of an outcome with n_users users only: a proof holds for them only (with
+    the reason, if the cutoff was not used); a counterexample has n_users users; without a
+    verdict, the reason."""
+    if o.status == "valid":
         return f"only for {_n(n_users)}" + (f" ({why})" if why else "")
+    if o.status == "invalid":
+        return f"counterexample with {_n(n_users)}"
     return why
 
 
@@ -347,7 +352,7 @@ def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
     parameterized side only proves (Houdini and the check on a free state): it ends when that
     check is refuted, and the exact side, which searches for counterexamples with n users, then
     runs alone. A proof of the parameterized side holds for n (Prop. 7.9); without a verdict,
-    the outcome of the exact side, with the notes of the other one."""
+    the outcome of the exact side."""
     sides = [s for s in (param, exact) if s is not None]
     while any(s.outcome is None for s in sides):
         for s in sides:
@@ -361,7 +366,7 @@ def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
     o = exact.outcome
     o.scope = why
     if param is not None:
-        o.scope = param.outcome.scope
+        o.scope = f"no verdict with {_n(exact.users)}, nor with the cutoff {param.users}"
         o.cti = o.cti or param.outcome.cti
     return o
 
@@ -369,16 +374,19 @@ def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
 def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[int],
                side: Callable[..., _Side], deadline: Optional[float]) -> Outcome:
     """Every number of users n >= 1 (DESIGN.md, Sect. 7.6). The sides: with a cutoff c, the
-    parameterized side (a proof holds for every n >= L, its number of users) and the exact
-    sides for m = 1, ..., c - 1, and for m < L after a proof for every n >= L > c; then, or
-    without a cutoff, exact sides for m = c, c + 1, ..., each started when the previous ones
-    have ended (best effort, for counterexamples with more users). A counterexample with any m users refutes the property; the property is
-    valid if the parameterized side proves it for every n >= L and the exact sides prove it
-    for each m < L. A proof by Kind 2 with m users holds for every m' <= m if no address
-    variable is universal in the negation of the property (Cor. 7.8)."""
+    parameterized side P (its proofs hold for every n >= L, with L <= c) and the exact sides
+    for m = 1, ..., c - 1; without a cutoff, the exact side for 1 user. While P has not proved
+    the property, when all the exact sides have ended before the deadline, the exact side
+    with one more user starts (best effort, for counterexamples with more users). A
+    counterexample with any m users refutes the property. The property is valid if P proves
+    it for every n >= L and each m < L is proved: by the exact side with m users, or, if no
+    address variable is universal in the negation of the property, by any proof with M >= m
+    users, P's included (Cor. 7.8). After P's proof, the exact sides with m >= L stop."""
     sides: List[_Side] = []
     exact: Dict[int, _Side] = {}
-    proved: set = set()                 # the numbers of users proved by the exact sides
+    # the numbers of users m proved, each with the users M of its proof: M = m, or M > m by
+    # Cor. 7.8 (for m >= L, covered by the proof of P, M = m)
+    proved: Dict[int, int] = {}
     try:
         downward = Scanner(System.make(program, 1)).idle_needed(prop.formula) == 0
     except OutOfFragment:
@@ -391,12 +399,21 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
         exact[m] = side(m, False, None, None, alone=alone)
         sides.append(exact[m])
 
+    def cover(ms, users: Optional[int], o: Outcome) -> None:
+        """The numbers of users ms are proved by `o`, a proof with `users` users (None: each
+        with its own number); their exact sides stop."""
+        for m in ms:
+            proved.setdefault(m, m if users is None else users)
+            if exact.get(m) is not None and exact[m].outcome is None:
+                exact[m].gen.close()
+                exact[m].outcome = o
+
     param = side(c, True, None, cut, kind2=False, alone=alone) if c is not None else None
     if param is not None:
         sides.append(param)
     for m in range(1, c if c is not None else 2):
         add(m)
-    low = None                          # the parameterized side proved every n >= low
+    low = None                          # P proved every n >= low
 
     def close() -> None:
         for s in sides:
@@ -416,24 +433,27 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
             if o.status != "valid":
                 continue
             if s is param:
-                low = o.users_from or s.users
-                # the proof may hold from more users than the cutoff of the property (that of
-                # the steps of Houdini): the exact sides for the numbers of users below it
-                for m in range(1, low):
-                    if m not in exact and m not in proved:
-                        add(m)
+                # P runs without Kind 2: its proofs, by invariants, hold from users_from on
+                assert o.users_from is not None, o.describe()
+                low = o.users_from
+                cover([m for m in exact if m >= low], None, o)
+                if downward:
+                    cover(range(1, low), low, o)
             else:
-                below = range(1, s.users + 1) if downward and o.method == "kind2" else [s.users]
-                proved.update(below)
-                for m in below:
-                    if exact.get(m) is not None and exact[m].outcome is None:
-                        exact[m].gen.close()
-                        exact[m].outcome = o
+                cover(range(1, s.users + 1) if downward else [s.users], s.users, o)
             if low is not None and all(m in proved for m in range(1, low)):
                 close()
-                o.scope = f"n >= {low} by invariants" + (f", n < {low} one by one"
-                                                          if low > 1 else "")
-                return o
+                v = param.outcome
+                v.scope = f"n >= {low} by invariants"
+                more = sorted({proved[m] for m in range(1, low) if proved[m] != m})
+                own = [m for m in range(1, low) if proved[m] == m and m not in more]
+                if not more:
+                    v.scope += f", n < {low} one by one" if low > 1 else ""
+                else:
+                    v.scope += (f", n < {low} by " + (f"{_proofs(own)}, and by " if own else "")
+                                + _proofs(more) + (", which holds" if len(more) == 1
+                                                   else ", which hold") + " for fewer users")
+                return v
         if (low is None and all(s.outcome is not None for s in exact.values())
                 and (deadline is None or time.time() < deadline)):
             # the next number of users (best effort, for counterexamples with more users)
@@ -443,16 +463,30 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
     k = 0
     while k + 1 in proved:
         k += 1
-    parts = ([f"up to {_n(k)}"] if k else []) + ([f"for every n >= {_n(low)}"] if low else [])
-    o = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [],
+    others = [m for m in sorted(proved) if m > k and (low is None or m < low)]
+    parts = (([f"up to {_n(k)}"] if k else [])
+             + ([f"for {_users_list(others)}"] if others else [])
+             + ([f"for every n >= {_n(low)}"] if low else []))
+    # an error (of Kind 2) of a side still needed is the outcome, as with n users; not one of
+    # a side covered by another proof, or of a side from the cutoff on (only best effort)
+    bound = low or c
+    failed = [s.outcome for m, s in exact.items() if s.outcome.status == "error"
+              and m not in proved and (bound is None or m < bound)]
+    errors = list(dict.fromkeys(e for f in failed for e in f.errors))
+    o = Outcome(prop, None if failed else kind2.PropertyResult(prop.name, "unknown"), errors,
                 true_for=" and ".join(parts))
-    o.cti = next((s.outcome.cti for s in sides if s.outcome and s.outcome.cti), "")
+    o.cti = next((s.outcome.cti for s in sides if s.outcome.cti), "")
     unproved = [m for m in sorted(exact) if m not in proved]
     open_ = ([f"with {_users_list(unproved)}"] if unproved else []) + \
         ([f"with the cutoff {c}"] if param is not None and low is None else [])
     o.scope = "; ".join(([f"true {o.true_for}"] if o.true_for else [])
                         + ([f"no verdict {', nor '.join(open_)}"] if open_ else []))
     return o
+
+
+def _proofs(ms: List[int]) -> str:
+    """"the proof with 1 user", "the proofs with 1, 3 users"."""
+    return f"the proof{'' if len(ms) == 1 else 's'} with {_users_list(ms)}"
 
 
 def _users_list(ms: List[int]) -> str:
@@ -602,6 +636,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                          f" {idle(final, low)} idle users, {need} needed")
             o = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), o.errors, o.solver,
                         o.method, o.cti, trace=o.trace, scope=notes[-1])
+        elif o.status == "invalid":
+            o.scope = f"counterexample with {_n(low)}"      # low == goal: a verdict for goal
         else:
             # an outcome true for fewer users (Kind 2): what the run with more users gave
             head = (([k2_note] if k2_note else []) if o.true_for
@@ -863,12 +899,22 @@ def cutoff_of(context: dict, program: S.Program, mode: str, expand, invgen: bool
     per run (in `context`)."""
     key = ("cutoff", id(program), invgen, user_invariants)
     if key not in context:
-        properties = [r for r in program.properties if user_invariants or not r.invariant]
         templates = invariant_templates(program) if invgen else []
-        extended = S.Program(program.contracts, tuple(properties) + tuple(templates),
+        extended = S.Program(program.contracts,
+                             _with_candidates(program, user_invariants) + tuple(templates),
                              program.balance_type)
-        context[key] = Checks(extended, 1, mode, expand, ghost_sums=True).cutoff(tasks(program))
+        # every property, also the lemmas and the invariants, which can be checked by name
+        context[key] = Checks(extended, 1, mode, expand,
+                              ghost_sums=True).cutoff(list(program.properties))
     return context[key]
+
+
+def _with_candidates(program: S.Program, user_invariants: bool) -> Tuple[S.Property, ...]:
+    """The properties of `program`; without `user_invariants`, its invariants as properties,
+    which are then no candidates of Houdini, but still in the program of the encoder (their
+    sums have state variables, in parameterized mode)."""
+    return tuple(r if user_invariants or not r.invariant else replace(r, invariant=False)
+                 for r in program.properties)
 
 
 def prove_invariants(program: S.Program, n_users: Users, timeout: Optional[float],
@@ -1096,13 +1142,13 @@ class _Invariants:
              user_invariants: bool = True, ghost_sums: bool = False) -> "_Invariants":
         """The candidates: the invariants of the file (if `user_invariants`) and, with
         `invgen`, the generated ones that hold in the reachable states of the fuzzer."""
-        properties = [r for r in program.properties if user_invariants or not r.invariant]
         generated: List[S.Property] = []
         keys: Dict[str, tuple] = {}
         if invgen:
             generated, _, keys = generate_invariants(
                 program, Fuzzer(System.make(program, n_users)), INVGEN_SECONDS)
-        extended = S.Program(program.contracts, tuple(properties) + tuple(generated),
+        extended = S.Program(program.contracts,
+                             _with_candidates(program, user_invariants) + tuple(generated),
                              program.balance_type)
         invs = _Invariants(Checks(extended, n_users, mode, expand, ghost_sums),
                            {r.name for r in generated})

@@ -65,8 +65,9 @@ Options:
   invariants: every n from a cutoff on); `exact` runs the checks with `n_participants` users;
   `combined` (default) runs both in turn, and stops at the first verdict for
   `n_participants` users. With `any` users, a property is valid if it is proved for every n
-  from a cutoff on (parameterized) and with each smaller number of users (exact); a
-  counterexample with any number of users refutes it; without a cutoff, the property is
+  from a cutoff on (parameterized) and with each smaller number of users (exact; or, if no
+  address variable is universal in the negation of the property, by a proof with more users,
+  `DESIGN.md`, Cor. 7.8); a counterexample with any number of users refutes it; without a cutoff, the property is
   checked with 1, 2, 3, ... users in turn, and the verdict is "true up to m users" if no
   counterexample is found. `any` needs `combined` or `exact` (the latter checks 1, 2, 3, ...
   users only). `--parameterized` is `--users_mode parameterized`.
@@ -125,7 +126,8 @@ Besides properties, a file may declare invariants, `invariant Name { φ }`, with
 modalities, required where all contracts are constructed. The tool also generates
 candidate invariants from templates (signs, bounds, totals such as `sum(m) == total`, ...).
 It proves those that are inductive and assumes them when it checks the other properties (see
-`tests/contracts/swap_pool.sol`); this helps much with nonlinear arithmetic.
+`tests/contracts/swap_pool.sol`); this helps much with nonlinear arithmetic. The names of
+properties and invariants that start with `_` are reserved for the tool.
 
 A file may contain several contracts, which can call each other (no cycles):
 `Token.mint(msg.sender, n) $ msg.value` calls `mint` of contract `Token`, transferring

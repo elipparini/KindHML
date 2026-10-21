@@ -14,6 +14,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "tests", "contracts", "parameterized", "registry.sol")
 PROGRAM, _ = V.load(REGISTRY)
 UNIVERSAL = PROGRAM.prop("Registered_bounded")       # no address variable universal in ¬φ
+CAPPED, _ = V.load(os.path.join(ROOT, "tests", "contracts", "parameterized",
+                                "capped_registry.sol"))
+EXISTENTIAL = CAPPED.prop("Someone_unregistered")    # need(¬φ) = 1: no Cor. 7.8
 PAST = time.time() - 1                               # a deadline already passed
 
 
@@ -60,17 +63,16 @@ def test_combined_first_verdict_wins():
     param = make(2, True, 5, 3, outcome("unknown"))
     exact = make(5, False, 5, 1, outcome("invalid", "fuzz"))
     o = V._drive_combined(param, exact, "")
-    assert (o.status, o.scope) == ("invalid", "only for 5 users")
+    assert (o.status, o.scope) == ("invalid", "counterexample with 5 users")
 
 
 def test_combined_without_verdict():
-    """Without a verdict: the outcome of the exact side, with the notes of the other one."""
-    note = "a counterexample with 2 users does not extend to 5 users"
-    param = make(2, True, 5, 1, outcome("unknown", scope=note))
+    """Without a verdict: the outcome of the exact side; the scope names both sides."""
+    param = make(2, True, 5, 1, outcome("unknown"))
     exact = make(5, False, 5, 2, outcome("unknown", "kind2"))
     o = V._drive_combined(param, exact, "")
     assert o.status == "unknown" and o.method == "kind2"
-    assert o.scope == note
+    assert o.scope == "no verdict with 5 users, nor with the cutoff 2"
     exact = make(5, False, 5, 0, outcome("unknown", "kind2"))
     assert V._drive_combined(None, exact, "cutoff 7 > 5").scope == "cutoff 7 > 5"
 
@@ -85,6 +87,7 @@ def test_combined_without_the_cutoff():
 def any_mode(script, c, deadline=PAST, prop=UNIVERSAL):
     """`_drive_any` with the sides of `script`: (users, ghost) -> (rounds, outcome); the
     sides made, in order."""
+    program = CAPPED if prop.name == EXISTENTIAL.name else PROGRAM
     made = []
 
     def side(users, ghost, goal, cut, **flags):
@@ -93,7 +96,7 @@ def any_mode(script, c, deadline=PAST, prop=UNIVERSAL):
         made.append((users, ghost))
         return make(users, ghost, goal, rounds, o, **flags)
 
-    return V._drive_any(PROGRAM, prop, None, c, side, deadline), made
+    return V._drive_any(program, prop, None, c, side, deadline), made
 
 
 def test_any_valid():
@@ -101,12 +104,39 @@ def test_any_valid():
     script = {(3, True): (0, outcome("valid", "invariants", 3)),
               (1, False): (1, outcome("valid", "invariants")),
               (2, False): (2, outcome("valid", "invariants"))}
-    o, made = any_mode(script, 3)
+    o, made = any_mode(script, 3, prop=EXISTENTIAL)
     assert o.status == "valid", o.describe()
     assert o.scope == "n >= 3 by invariants, n < 3 one by one"
     assert made == [(3, True), (1, False), (2, False)]
     o, _ = any_mode({(1, True): (0, outcome("valid", "invariants", 1))}, 1)
     assert (o.status, o.scope) == ("valid", "n >= 1 by invariants")
+
+
+def test_any_parameterized_proof_holds_for_fewer_users():
+    """Cor. 7.8: with no address variable universal in ¬φ, the proof for every n >= L holds
+    with L users, hence for every m < L: valid at once, the exact sides stop."""
+    script = {(3, True): (0, outcome("valid", "invariants", 3)),
+              (1, False): (9, outcome("unknown")),
+              (2, False): (9, outcome("unknown"))}
+    o, made = any_mode(script, 3)
+    assert (o.status, o.method) == ("valid", "invariants"), o.describe()
+    assert o.scope == ("n >= 3 by invariants, n < 3 by the proof with 3 users, which holds"
+                       " for fewer users")
+
+
+def test_any_sides_from_the_proof_bound_stop():
+    """P proves every n >= 2 with the cutoff 4: the exact sides for 2 and 3 users are no
+    longer needed, only the one for 1 user."""
+    script = {(4, True): (0, outcome("valid", "invariants", 2)),
+              (1, False): (2, outcome("valid", "invariants")),
+              (2, False): (9, outcome("unknown")),
+              (3, False): (9, outcome("unknown"))}
+    o, _ = any_mode(script, 4, prop=EXISTENTIAL)
+    assert (o.status, o.scope) == ("valid", "n >= 2 by invariants, n < 2 one by one")
+    script[(1, False)] = (2, outcome("unknown"))
+    o, _ = any_mode(script, 4, prop=EXISTENTIAL)
+    assert o.status == "unknown"
+    assert o.scope == "true for every n >= 2 users; no verdict with 1 user"
 
 
 def test_any_counterexample_with_more_users():
@@ -126,7 +156,7 @@ def test_any_without_verdict():
               (1, False): (0, outcome("valid", "invariants")),
               (2, False): (0, outcome("valid", "invariants")),
               (3, False): (1, outcome("unknown"))}
-    o, _ = any_mode(script, 4, prop=replace(UNIVERSAL, groundtruth=True))
+    o, _ = any_mode(script, 4, prop=replace(EXISTENTIAL, groundtruth=True))
     assert o.status == "unknown"
     assert o.true_for == "up to 2 users and for every n >= 4 users"
     assert o.groundtruth_check() == "OK-up to 2 users and for every n >= 4 users"
@@ -136,21 +166,37 @@ def test_any_without_verdict():
               (1, False): (0, outcome("unknown")),
               (2, False): (0, outcome("valid", "invariants")),
               (3, False): (1, outcome("unknown"))}
-    o, _ = any_mode(script, 4)
+    o, _ = any_mode(script, 4, prop=EXISTENTIAL)
     assert o.status == "unknown"
-    assert o.scope == "no verdict with 1, 3 users, nor with the cutoff 4"
+    assert o.true_for == "for 2 users"
+    assert o.scope == "true for 2 users; no verdict with 1, 3 users, nor with the cutoff 4"
 
 
-def test_any_proof_from_more_users_than_the_cutoff():
-    """The parameterized side proves every n >= 4 with the cutoff 2 of the property (4 is
-    that of Houdini): the exact sides for 2 and 3 users start, and the property is valid."""
-    script = {(2, True): (0, outcome("valid", "invariants", 4)),
+def test_any_error_of_a_side():
+    """An error of a side still needed (Kind 2), without a verdict, is the outcome, with its
+    message; not one of a side whose number of users is proved otherwise."""
+    failed = V.Outcome(EXISTENTIAL, None, ["Kind 2 failed"])
+    script = {(2, True): (0, outcome("unknown")), (1, False): (0, failed)}
+    o, _ = any_mode(script, 2, prop=replace(EXISTENTIAL, groundtruth=True))
+    assert (o.status, o.errors) == ("error", ["Kind 2 failed"])
+    assert o.scope == "no verdict with 1 user, nor with the cutoff 2"
+    script = {(3, True): (0, outcome("valid", "invariants", 2)),
+              (1, False): (1, outcome("unknown")), (2, False): (0, failed)}
+    o, _ = any_mode(script, 3, prop=replace(EXISTENTIAL, groundtruth=True))
+    assert o.status == "unknown", o.describe()
+    assert o.groundtruth_check() == "OK-for every n >= 2 users"
+
+
+def test_any_mixed_proofs():
+    """m = 1 by its own proof, m = 2 by the proof with 3 users (Cor. 7.8)."""
+    script = {(4, True): (3, outcome("valid", "invariants", 4)),
               (1, False): (0, outcome("valid", "invariants")),
-              (2, False): (1, outcome("valid", "invariants")),
-              (3, False): (1, outcome("valid", "invariants"))}
-    o, made = any_mode(script, 2)
-    assert (o.status, o.scope) == ("valid", "n >= 4 by invariants, n < 4 one by one")
-    assert made == [(2, True), (1, False), (2, False), (3, False)]
+              (2, False): (9, outcome("unknown")),
+              (3, False): (1, outcome("valid", "kind2"))}
+    o, _ = any_mode(script, 4)
+    assert o.status == "valid", o.describe()
+    assert o.scope == ("n >= 4 by invariants, n < 4 by the proof with 1 user, and by the"
+                       " proof with 3 users, which holds for fewer users")
 
 
 def test_users_list():
@@ -158,14 +204,17 @@ def test_users_list():
     assert V._users_list([1, 2, 3, 5]) == "1-3, 5 users"
 
 
-def test_any_proof_by_kind2_holds_for_fewer_users():
-    """Cor. 7.8: with no address variable universal in ¬φ, a proof by Kind 2 with m users
-    holds for every m' <= m."""
-    script = {(3, True): (0, outcome("valid", "invariants", 3)),
-              (1, False): (9, outcome("unknown")),
-              (2, False): (0, outcome("valid", "kind2"))}
-    o, _ = any_mode(script, 3)
-    assert o.status == "valid", o.describe()
+def test_any_exact_proof_holds_for_fewer_users():
+    """Cor. 7.8: with no address variable universal in ¬φ, a proof with m users, by Kind 2
+    or by invariants, holds for every m' <= m; not otherwise."""
+    for method in ("kind2", "invariants"):
+        script = {(3, True): (9, outcome("unknown")),
+                  (1, False): (9, outcome("unknown")),
+                  (2, False): (0, outcome("valid", method))}
+        o, _ = any_mode(script, 3)
+        assert (o.status, o.true_for) == ("unknown", "up to 2 users"), o.describe()
+        o, _ = any_mode(script, 3, prop=EXISTENTIAL)
+        assert (o.status, o.true_for) == ("unknown", "for 2 users"), o.describe()
 
 
 def test_any_lone_side_gets_the_time_left():

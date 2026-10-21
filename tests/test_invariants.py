@@ -225,7 +225,7 @@ def test_portfolio_on_the_swap_pool():
         ("valid", "invariants")
     assert out["Swap_takes_everything"].status == "invalid"
     assert out["Small_reserves"].status == "invalid"
-    invs = next(iter(context.values()))
+    invs = next(v for v in context.values() if isinstance(v, V._Invariants))
     declared = [n for n in invs.proved if n not in invs.generated]
     assert declared == ["_lemma_balances_nonnegative", "Inv"]
     assert invs.dropped["Small_reserves"].startswith("inductive step")

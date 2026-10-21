@@ -68,6 +68,10 @@ class Checker:
         p = self.program
         self._unique([c.name for c in p.contracts], p.contracts, "contract")
         self._unique([r.name for r in p.properties], p.properties, "property")
+        for r in p.properties:
+            if r.name.startswith("_"):
+                # the generated invariants (_gen_i) and the built-in lemmas (_lemma_...)
+                raise _err(f"'{r.name}': names starting with '_' are reserved", r)
         contracts = tuple(self._contract(c) for c in p.contracts)
         properties = tuple(self._property(r) for r in p.properties)
         return S.Program(contracts, properties, p.balance_type)

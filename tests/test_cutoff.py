@@ -1,6 +1,7 @@
 """Cutoffs and the parameterized mode (`cutoff.py`; DESIGN.md, Sect. 7)."""
 
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -9,13 +10,14 @@ from kindhml import lustre as L
 from kindhml import syntax as S
 from kindhml import verify as V
 from kindhml.builder import parse, parse_expr
-from kindhml.concrete import state_literal
+from kindhml.concrete import state_from_values, state_literal, state_paths
 from kindhml.cutoff import OutOfFragment, Scanner, idle_users
 from kindhml.encode_trans import Encoder
+from kindhml.errors import KindHMLError
 from kindhml.invariants import Checks
 from kindhml.lustre_eval import Evaluator
 from kindhml.model import System
-from kindhml.reference import Interpreter
+from kindhml.reference import Interpreter, Tx, initial_state
 from kindhml.typecheck import check, check_property
 
 import test_trans as T
@@ -136,6 +138,78 @@ def test_cutoffs_of_the_benchmarks():
         (100, False)
     assert V.effective_users({}, additivity, 100, *args, additivity.prop("P3_true"))[:2] == \
         (1, True)
+
+
+LEMMAS = """
+contract C {
+    mapping (address => int) m;
+    int t;
+    constructor () { t = 0 }
+    function put() { require(m[msg.sender] == 0); m[msg.sender] = 1; t = t + 1 }
+}
+property Small { t >= 0 }
+invariant Four {
+    (forall a : address . forall b : address . forall d : address .
+        m[a] + m[b] + m[d] >= 0 || m[a] + m[b] + m[d] < 0)
+    && (exists x1 : address . exists x2 : address . exists x3 : address .
+        exists x4 : address . x1 != x2 && x1 != x3 && x1 != x4 && x2 != x3 && x2 != x4
+        && x3 != x4)
+}
+invariant Max { exists b : address . forall a : address . m[a] <= m[b] }
+"""
+
+
+def test_cutoffs_of_lemmas():
+    """Every property has its cutoff, also a lemma (no task, but it can be checked by
+    name). Without the invariants of the file as candidates, the cutoff of the steps is 1,
+    that of Four 3 (Four is false with 2 users: 4 distinct addresses are needed), and Max is
+    outside the fragment. Before, both had the cutoff of the steps: Four was "valid" with 2
+    users, and the check of Max raised OutOfFragment."""
+    program, _ = check(parse(LEMMAS))
+    program = replace(program, properties=tuple(replace(r, lemma=r.invariant)
+                                                for r in program.properties))
+    cut = V.cutoff_of({}, program, V.DEFAULT_MODE, V.DEFAULT_EXPAND, False, False)
+    assert (cut.steps, cut.of_property("Small"), cut.of_property("Four"),
+            cut.of_property("Max")) == (1, 1, 3, None)
+    assert V.effective_users({}, program, 2, V.DEFAULT_MODE, V.DEFAULT_EXPAND, False, False,
+                             program.prop("Four"))[:2] == (2, False)
+    assert V.Cutoff(1).of_property("Small") is None         # a count not computed
+
+
+def test_names_of_the_tool_are_reserved():
+    """A property named like a built-in lemma or a generated invariant would replace it as a
+    premise: such names are rejected."""
+    for name in ("_lemma_balances_nonnegative", "_gen_0"):
+        with pytest.raises(KindHMLError, match="reserved"):
+            check(parse("contract C { int t; constructor () { t = 0 } }\n"
+                        f"invariant {name} {{ t == 5 }}"))
+
+
+def test_invariants_without_candidates_keep_their_sums():
+    """Without the invariants of the file as candidates (--no_user_invariants), an invariant
+    is still checked, as a property: in parameterized mode, its sums need their state
+    variables (before, "sum(...) of a map without its state variable")."""
+    program, _ = V.load(SHARES)
+    invs = V._Invariants.make(program, 3, V.DEFAULT_MODE, V.DEFAULT_EXPAND, invgen=False,
+                              user_invariants=False, ghost_sums=True)
+    assert invs.candidates == []
+    prop = program.prop("Total")
+    for premises in invs.checks.premises(prop, invs.assumed()):
+        invs.checks.property_check(prop, premises, False)
+
+
+def test_state_paths_keep_the_whole_state():
+    """The final state of a fuzzer's counterexample, by path, gives the same state back:
+    with the construction flags (before, `normalized` rebuilt a state where no contract was
+    constructed, at which the property held)."""
+    program, _ = check(parse(SOURCE))
+    system = System.make(program, 2)
+    st = Interpreter(system).step(initial_state(system, {"u1": 5, "u2": 7}),
+                                  Tx("u1", "C", ("C", "constructor"), args={"o": "u2"}))
+    back = state_from_values(state_paths(st, system), system, Encoder(system))
+    assert st.constructed == {"C": True}
+    assert (back.constructed, back.balance, back.fields, back.revert) == \
+        (st.constructed, st.balance, st.fields, st.revert)
 
 
 def test_steps_of_houdini_have_their_own_cutoffs():
@@ -287,7 +361,7 @@ def test_combined_registry():
         assert out[name].status == "valid", out[name].describe()
         assert out[name].scope.startswith("for every n >= 2 users"), out[name].scope
     assert out["At_most_two"].status == "invalid", out["At_most_two"].describe()
-    assert out["At_most_two"].scope == "only for 3 users"
+    assert out["At_most_two"].scope == "counterexample with 3 users"
     context = {}
     V.prove_invariants(program, 2, 30, context)
     o = V.verify(program, program.prop("At_most_two"), 2, 30, context=context)
@@ -373,5 +447,5 @@ def test_counterexamples_extend_with_idle_users():
     context = {}
     V.prove_invariants(program, 2, 30, context, parameterized=True)
     prop = program.prop("Someone_unregistered")
-    assert V.verify(program, prop, 2, 20, context=context, parameterized=True).status == \
-        "invalid"
+    o = V.verify(program, prop, 2, 20, context=context, parameterized=True)
+    assert (o.status, o.scope) == ("invalid", "counterexample with 2 users"), o.describe()

@@ -47,10 +47,12 @@ class Cutoff:
 
     def of_property(self, name: str) -> Optional[int]:
         """The least number of users for which a verdict on the property `name` can be claimed
-        for every larger number: max(steps, its own cutoff); None outside the fragment."""
-        if self.steps is None or name in self.outside:
+        for every larger number: max(steps, its own cutoff); None outside the fragment, or
+        if its count was not computed (the property is then checked without its cutoff)."""
+        key = f"property {name}"
+        if self.steps is None or name in self.outside or key not in self.checks:
             return None
-        return max(self.steps, self.checks.get(f"property {name}", 1))
+        return max(self.steps, self.checks[key])
 
     def describe(self) -> str:
         if self.steps is None:

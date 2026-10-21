@@ -40,9 +40,14 @@ def state_literal(st: State, system: System, enc: Encoder) -> L.LExpr:
 
 
 def state_paths(st: State, system: System) -> Dict[str, object]:
-    """The values of a state by path (`s.f`, `s.f.k_a`), as in a Kind 2 counterexample."""
+    """The values of a state by path (`s.f`, `s.f.k_a`), as in a Kind 2 counterexample: all of
+    them but the sums (`state_from_values` gives them back)."""
     out: Dict[str, object] = {f"s.{BALANCE}.{key_field(a)}": v for a, v in st.balance.items()}
+    out[f"s.{REVERT}"] = st.revert
+    if system.uses_block_num:
+        out[f"s.{BLOCK}"] = st.block_num
     for c in system.contracts:
+        out[f"s.{constructed_var(c.name)}"] = st.constructed[c.name]
         for f in c.fields:
             v, name = st.fields[(c.name, f.name)], field_var(c.name, f.name)
             if isinstance(f.type, S.MapType):

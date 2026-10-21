@@ -568,7 +568,11 @@ With `--parameterized` (strategy portfolio), for n users asked for:
   candidates after a call count for the largest one). A property is checked in parameterized
   mode if the steps and the property are in the fragment and N = max(c_H, c_R) ≤ n, with these
   bounds c_H (steps) and c_R (property); otherwise it is checked as without the option. The
-  verdict says which;
+  verdict says which. The counts are computed for every property of the file, the lemmas
+  and the invariants included, since any of them can be checked by name; a property without
+  a count has no cutoff. With `--no_user_invariants`, the declared invariants are properties,
+  not candidates: they are still in the program of the encoder, so their sums have state
+  variables;
 * each step of Houdini uses the cutoff of the step for the current candidates
   (`Checks.step_count`); when Houdini ends, the invariants hold for every n' ≥ c_H, the
   largest of the cutoffs of the final steps (`_Invariants.users`);
@@ -661,12 +665,10 @@ for its number of users m ≤ N ≤ n (Lemmas 7.5, 7.6). ∎
 
 **Every number of users** (`n_participants` = `any`, `_drive_any`): the claim is that φ holds
 in S_n for every n ≥ 1. With a cutoff c of the property, the sides are P (c users, no goal)
-and the exact sides E_m for m = 1, ..., c − 1; without one, E_1. When P proves φ for every
-n ≥ L, the exact sides E_m for c ≤ m < L also start (L can exceed c: it is at least the
-cutoff c_H of the steps of Houdini). When P has not proved φ and
-all the exact sides have ended, the exact side with one more user starts (best effort: a
-counterexample may need more users than the cutoff, e.g. registry `At_most_two`). Kind 2
-gets all the time left only on a side alone.
+and the exact sides E_m for m = 1, ..., c − 1; without one, E_1. When P has not proved φ and
+all the exact sides have ended before the deadline, the exact side with one more user
+starts (best effort: a counterexample may need more users than the cutoff, e.g. registry
+`At_most_two`). Kind 2 gets all the time left only on a side alone.
 
 **Lemma 7.10.** If φ fails in S_m for some m ≥ 1, it does not hold for every n ≥ 1.
 *Proof.* Immediate. ∎
@@ -676,8 +678,26 @@ So any counterexample is a verdict, also one of P that does not extend.
 **Lemma 7.11.** If φ holds in S_n for every n ≥ L, and in S_m for every m < L, it holds for
 every n ≥ 1. *Proof.* Immediate. ∎
 
-P gives the first premise with L = max(c_H, u) (Prop. 7.7), and the exact sides E_1, ...,
-E_{L−1} the second; a proof by Kind 2 on E_m also covers every m' ≤ m if need(¬φ) = 0
-(Cor. 7.8). Otherwise the outcome is unknown, with what is proved: "true up to k users" (the
-exact sides E_1, ..., E_k), "for every n ≥ L users" (P), or both. In exact mode with `any`,
-only the exact sides run.
+P gives the first premise with L = max(c_H, u) (Prop. 7.7); L ≤ c, since the counts of
+`Checks.cutoff` bound those of the checks (Sect. 7.5). The exact sides E_1, ..., E_{L−1} give
+the second. If need(¬φ) = 0, Cor. 7.8 applies to every proof with M users, whatever its
+method, since each one is about the reachable states of S_M: a proof on E_M (by Kind 2, or
+by invariants) covers every m ≤ M, and so does the proof of P, with M = L. Then the proof of P
+alone gives every n ≥ 1. Once P has proved φ for every n ≥ L, the exact sides E_m with
+m ≥ L stop: they cannot change the verdict. Otherwise the outcome is unknown, with what is
+proved: "true up to k users" (E_1, ..., E_k), "for m users" (proofs after the first gap),
+"for every n ≥ L users" (P). If a side ended with an error (of Kind 2), the outcome is that
+error, as with n users. In exact mode with `any`, only the exact sides run.
+
+The *scope* of an outcome (`Outcome.scope`) says what the run established, not what was
+asked:
+* n users, a verdict without the cutoff: "only for n users (cutoff c > n)" for a proof (or
+  "(no cutoff: ...)"), "counterexample with n users"; without a verdict, the reason alone;
+* n users, the cutoff c ≤ n: "for every n ≥ L users" for a proof of P (with "; property
+  checked with u users" if u ≠ L); "only for n users" or "counterexample with n users" for
+  a verdict of E; "no verdict with n users, nor with the cutoff c" without a verdict;
+* parameterized mode: as above, and "counterexample with m users, for every n ≥ m (...)"
+  for a counterexample of P that extends (Lemmas 7.5, 7.6);
+* every n: "n ≥ L by invariants, n < L one by one", or "n < L by the proof(s) with M
+  users, which hold(s) for fewer users" (Cor. 7.8); "counterexample with m users"; without a
+  verdict, "true ...; no verdict with m users, ..., nor with the cutoff c".
