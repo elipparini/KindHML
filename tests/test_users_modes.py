@@ -60,7 +60,7 @@ def test_combined_first_verdict_wins():
     param = make(2, True, 5, 3, outcome("unknown"))
     exact = make(5, False, 5, 1, outcome("invalid", "fuzz"))
     o = V._drive_combined(param, exact, "")
-    assert (o.status, o.scope) == ("invalid", "with 5 users")
+    assert (o.status, o.scope) == ("invalid", "only for 5 users")
 
 
 def test_combined_without_verdict():
@@ -70,10 +70,16 @@ def test_combined_without_verdict():
     exact = make(5, False, 5, 2, outcome("unknown", "kind2"))
     o = V._drive_combined(param, exact, "")
     assert o.status == "unknown" and o.method == "kind2"
-    assert o.scope == f"with 5 users; parameterized: {note}"
+    assert o.scope == note
     exact = make(5, False, 5, 0, outcome("unknown", "kind2"))
-    assert V._drive_combined(None, exact, "with 5 users; cutoff 7 > 5").scope == \
-        "with 5 users; cutoff 7 > 5"
+    assert V._drive_combined(None, exact, "cutoff 7 > 5").scope == "cutoff 7 > 5"
+
+
+def test_combined_without_the_cutoff():
+    """A cutoff larger than n: a verdict holds for n users only, with the reason."""
+    exact = make(5, False, 5, 1, outcome("valid", "kind2"))
+    o = V._drive_combined(None, exact, "cutoff 7 > 5")
+    assert (o.status, o.scope) == ("valid", "only for 5 users (cutoff 7 > 5)")
 
 
 def any_mode(script, c, deadline=PAST, prop=UNIVERSAL):
@@ -97,10 +103,10 @@ def test_any_valid():
               (2, False): (2, outcome("valid", "invariants"))}
     o, made = any_mode(script, 3)
     assert o.status == "valid", o.describe()
-    assert o.scope == "for every n >= 1: n >= 3 by invariants, n < 3 one by one"
+    assert o.scope == "n >= 3 by invariants, n < 3 one by one"
     assert made == [(3, True), (1, False), (2, False)]
     o, _ = any_mode({(1, True): (0, outcome("valid", "invariants", 1))}, 1)
-    assert (o.status, o.scope) == ("valid", "for every n >= 1")
+    assert (o.status, o.scope) == ("valid", "n >= 1 by invariants")
 
 
 def test_any_counterexample_with_more_users():
@@ -124,6 +130,32 @@ def test_any_without_verdict():
     assert o.status == "unknown"
     assert o.true_for == "up to 2 users and for every n >= 4 users"
     assert o.groundtruth_check() == "OK-up to 2 users and for every n >= 4 users"
+    assert o.scope == ("true up to 2 users and for every n >= 4 users;"
+                       " no verdict with 3 users")
+    script = {(4, True): (1, outcome("unknown")),
+              (1, False): (0, outcome("unknown")),
+              (2, False): (0, outcome("valid", "invariants")),
+              (3, False): (1, outcome("unknown"))}
+    o, _ = any_mode(script, 4)
+    assert o.status == "unknown"
+    assert o.scope == "no verdict with 1, 3 users, nor with the cutoff 4"
+
+
+def test_any_proof_from_more_users_than_the_cutoff():
+    """The parameterized side proves every n >= 4 with the cutoff 2 of the property (4 is
+    that of Houdini): the exact sides for 2 and 3 users start, and the property is valid."""
+    script = {(2, True): (0, outcome("valid", "invariants", 4)),
+              (1, False): (0, outcome("valid", "invariants")),
+              (2, False): (1, outcome("valid", "invariants")),
+              (3, False): (1, outcome("valid", "invariants"))}
+    o, made = any_mode(script, 2)
+    assert (o.status, o.scope) == ("valid", "n >= 4 by invariants, n < 4 one by one")
+    assert made == [(2, True), (1, False), (2, False), (3, False)]
+
+
+def test_users_list():
+    assert V._users_list([1]) == "1 user"
+    assert V._users_list([1, 2, 3, 5]) == "1-3, 5 users"
 
 
 def test_any_proof_by_kind2_holds_for_fewer_users():

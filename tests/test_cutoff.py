@@ -287,11 +287,11 @@ def test_combined_registry():
         assert out[name].status == "valid", out[name].describe()
         assert out[name].scope.startswith("for every n >= 2 users"), out[name].scope
     assert out["At_most_two"].status == "invalid", out["At_most_two"].describe()
-    assert out["At_most_two"].scope == "with 3 users"
+    assert out["At_most_two"].scope == "only for 3 users"
     context = {}
     V.prove_invariants(program, 2, 30, context)
     o = V.verify(program, program.prop("At_most_two"), 2, 30, context=context)
-    assert (o.status, o.scope) == ("valid", "with 2 users"), o.describe()
+    assert (o.status, o.scope) == ("valid", "only for 2 users"), o.describe()
 
 
 @pytest.mark.kind2
@@ -305,7 +305,7 @@ def test_any_number_of_users():
     context: dict = {}
     V.prove_invariants(program, V.ANY, 30, context)
     o = V.verify(program, program.prop("Registered_bounded"), V.ANY, 60, context=context)
-    assert o.status == "valid" and o.scope.startswith("for every n >= 1"), o.describe()
+    assert o.status == "valid" and "by invariants" in o.scope, o.describe()
     o = V.verify(program, program.prop("At_most_two"), V.ANY, 120, context=context)
     assert (o.status, o.scope) == ("invalid", "counterexample with 3 users"), o.describe()
     program, _ = V.load(CAPPED)

@@ -661,7 +661,9 @@ for its number of users m ≤ N ≤ n (Lemmas 7.5, 7.6). ∎
 
 **Every number of users** (`n_participants` = `any`, `_drive_any`): the claim is that φ holds
 in S_n for every n ≥ 1. With a cutoff c of the property, the sides are P (c users, no goal)
-and the exact sides E_m for m = 1, ..., c − 1; without one, E_1. When P has not proved φ and
+and the exact sides E_m for m = 1, ..., c − 1; without one, E_1. When P proves φ for every
+n ≥ L, the exact sides E_m for c ≤ m < L also start (L can exceed c: it is at least the
+cutoff c_H of the steps of Houdini). When P has not proved φ and
 all the exact sides have ended, the exact side with one more user starts (best effort: a
 counterexample may need more users than the cutoff, e.g. registry `At_most_two`). Kind 2
 gets all the time left only on a side alone.

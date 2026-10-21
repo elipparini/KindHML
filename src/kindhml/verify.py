@@ -163,7 +163,7 @@ class Outcome:
         """One line on the verdict (and its traces); `c` colors it for a terminal."""
         what = (self.result.describe(c) if self.result
                 else c.magenta("; ".join(self.errors) or "no result"))
-        if self.true_for:
+        if self.true_for and f"true {self.true_for}" not in self.scope:
             what += f", true {self.true_for}"
         how = "/".join(x for x in (self.method, self.solver) if x)
         how = c.dim(f" [{how}]") if how else ""
@@ -306,11 +306,19 @@ def kind2_target(context: dict, program: S.Program, prop: S.Property, n_users: U
 
 
 def _why_exact(cut: Cutoff, prop: S.Property, n_users: int) -> str:
-    """Why a property is checked with n_users users only (parameterized mode not applicable)."""
+    """Why a property is checked with n_users users only, without its cutoff: the cutoff is
+    larger, or there is none."""
     c = cut.of_property(prop.name)
-    why = (f"cutoff {c} > {n_users}" if c is not None
-           else f"no cutoff: {cut.outside.get(prop.name) or cut.reason}")
-    return f"with {_n(n_users)}; {why}"
+    return (f"cutoff {c} > {n_users}" if c is not None
+            else f"no cutoff: {cut.outside.get(prop.name) or cut.reason}")
+
+
+def _exact_scope(o: Outcome, n_users: int, why: str) -> str:
+    """The scope of an outcome with n_users users only: a verdict holds for them only (with
+    the reason, if the cutoff was not used); without a verdict, the reason."""
+    if _decided(o):
+        return f"only for {_n(n_users)}" + (f" ({why})" if why else "")
+    return why
 
 
 def _step(side: _Side) -> bool:
@@ -348,13 +356,12 @@ def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
                     if t.outcome is None:
                         t.gen.close()
                 if s is exact:
-                    s.outcome.scope = why or f"with {_n(exact.users)}"
+                    s.outcome.scope = _exact_scope(s.outcome, exact.users, why)
                 return s.outcome
     o = exact.outcome
-    o.scope = why or f"with {_n(exact.users)}"
+    o.scope = why
     if param is not None:
-        if param.outcome.scope:
-            o.scope += f"; parameterized: {param.outcome.scope}"
+        o.scope = param.outcome.scope
         o.cti = o.cti or param.outcome.cti
     return o
 
@@ -363,9 +370,9 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
                side: Callable[..., _Side], deadline: Optional[float]) -> Outcome:
     """Every number of users n >= 1 (DESIGN.md, Sect. 7.6). The sides: with a cutoff c, the
     parameterized side (a proof holds for every n >= L, its number of users) and the exact
-    sides for m = 1, ..., c - 1; then, or without a cutoff, exact sides for m = c, c + 1, ...,
-    each started when the previous ones have ended (best effort, for counterexamples with
-    more users). A counterexample with any m users refutes the property; the property is
+    sides for m = 1, ..., c - 1, and for m < L after a proof for every n >= L > c; then, or
+    without a cutoff, exact sides for m = c, c + 1, ..., each started when the previous ones
+    have ended (best effort, for counterexamples with more users). A counterexample with any m users refutes the property; the property is
     valid if the parameterized side proves it for every n >= L and the exact sides prove it
     for each m < L. A proof by Kind 2 with m users holds for every m' <= m if no address
     variable is universal in the negation of the property (Cor. 7.8)."""
@@ -410,6 +417,11 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
                 continue
             if s is param:
                 low = o.users_from or s.users
+                # the proof may hold from more users than the cutoff of the property (that of
+                # the steps of Houdini): the exact sides for the numbers of users below it
+                for m in range(1, low):
+                    if m not in exact and m not in proved:
+                        add(m)
             else:
                 below = range(1, s.users + 1) if downward and o.method == "kind2" else [s.users]
                 proved.update(below)
@@ -419,8 +431,8 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
                         exact[m].outcome = o
             if low is not None and all(m in proved for m in range(1, low)):
                 close()
-                o.scope = ("for every n >= 1" if low == 1 else
-                           f"for every n >= 1: n >= {low} by invariants, n < {low} one by one")
+                o.scope = f"n >= {low} by invariants" + (f", n < {low} one by one"
+                                                          if low > 1 else "")
                 return o
         if (low is None and all(s.outcome is not None for s in exact.values())
                 and (deadline is None or time.time() < deadline)):
@@ -435,9 +447,24 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
     o = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [],
                 true_for=" and ".join(parts))
     o.cti = next((s.outcome.cti for s in sides if s.outcome and s.outcome.cti), "")
-    o.scope = "every n >= 1" + (f"; parameterized: {param.outcome.scope}"
-                                if param and param.outcome and param.outcome.scope else "")
+    unproved = [m for m in sorted(exact) if m not in proved]
+    open_ = ([f"with {_users_list(unproved)}"] if unproved else []) + \
+        ([f"with the cutoff {c}"] if param is not None and low is None else [])
+    o.scope = "; ".join(([f"true {o.true_for}"] if o.true_for else [])
+                        + ([f"no verdict {', nor '.join(open_)}"] if open_ else []))
     return o
+
+
+def _users_list(ms: List[int]) -> str:
+    """The numbers of users ms (increasing, not empty) as ranges: "1-3, 5 users"."""
+    runs: List[List[int]] = []
+    for m in ms:
+        if runs and m == runs[-1][-1] + 1:
+            runs[-1].append(m)
+        else:
+            runs.append([m])
+    text = ", ".join(str(r[0]) if len(r) == 1 else f"{r[0]}-{r[-1]}" for r in runs)
+    return f"{text} user" if ms == [1] else f"{text} users"
 
 
 def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cutoff],
@@ -556,7 +583,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
         if cut is None:
             return o
         if not ghost:
-            o.scope = _why_exact(cut, prop, users)
+            o.scope = _exact_scope(o, users, _why_exact(cut, prop, users))
             return o
         if o.status == "valid":
             if o.method in ("inductive", "invariants"):
@@ -577,7 +604,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                         o.method, o.cti, trace=o.trace, scope=notes[-1])
         else:
             # an outcome true for fewer users (Kind 2): what the run with more users gave
-            head = ([k2_note] if k2_note else []) if o.true_for else [f"with {_n(low)}"]
+            head = (([k2_note] if k2_note else []) if o.true_for
+                    else [f"no verdict with the cutoff {low}"])
             o.scope = "; ".join(head + notes[-1:])
         return o
 
