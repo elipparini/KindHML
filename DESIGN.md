@@ -245,7 +245,10 @@ generates them from templates over the fields of the contracts: signs (`f >= 0`,
 `sum(m) <= f`, `∀u. m[u] <= f`), reserves (`sum(m) == balance[C]`, `sum(m) <= balance[C]`
 for each contract C: what the users can claim is held by C), definitions (`G -> f == e` and `G && d != 0 -> f * d == e'`
 for the assignments `f = e` and `f = e' / d` under the conditions G of the enclosing ifs),
-and `a != null` for address fields. `sum(m)` is a new built-in (also for users): the sum of
+and, for an address field a, an address constant K (null or a contract) and a boolean field
+g, `a == K`, `a != K`, `g -> a != K` and `!g -> a != K` (regression owner `P2_true`, for every
+n, needs `owner != C`; price-bet `Winnability` needs `player_has_joined -> player != null`).
+`sum(m)` is a new built-in (also for users): the sum of
 m over all addresses, finite (A1). The candidates are written as source text and
 type-checked like declared invariants; those false in a reachable state of the fuzzer (2 s
 of random transactions) are discarded first (as Daikon does). Kind 2's own generators do

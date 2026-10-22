@@ -17,7 +17,8 @@ of the contracts (f, g numeric fields, m mappings to numbers, c constants of the
 * definitions:  G -> f == e, for an assignment f = e under the conditions G of the
                 enclosing ifs, with e over fields and constants; G && d != 0 -> f * d == e',
                 for f = e' / d
-* addresses:    a != null, for an address field a
+* addresses:    a == K;  a != K;  g -> a != K;  !g -> a != K, for an address field a, an
+                address constant K (null or a contract) and a boolean field g
 
 They are written as source text and type-checked like invariants written by the user. A
 candidate false in a reachable state of the fuzzer (random transactions run by the reference
@@ -140,7 +141,7 @@ def _definitions(program: S.Program) -> List[str]:
 def _templates(program: S.Program) -> List[Tuple[str, tuple]]:
     """The candidate invariants, as source text, each with a key that describes it (used to
     find the candidates implied by others, `minimize`)."""
-    nums, maps, addrs = [], [], []
+    nums, maps, addrs, flags = [], [], [], []
     for c in program.contracts:
         for f in c.fields:
             name = f"{c.name}.{f.name}"
@@ -151,6 +152,8 @@ def _templates(program: S.Program) -> List[Tuple[str, tuple]]:
                 nums.append(name)
             elif f.type == S.ADDRESS:
                 addrs.append(name)
+            elif f.type == S.BOOL:
+                flags.append(name)
     out: List[Tuple[str, tuple]] = []
     for f in nums:
         out += [(f"{f} >= 0", ("ge", f, Fraction(0))), (f"{f} > 0", ("gt", f))]
@@ -177,7 +180,12 @@ def _templates(program: S.Program) -> List[Tuple[str, tuple]]:
             b = f"balance[{c.name}]"
             out += [(f"sum({m}) == {b}", ("sum_eq", m, b)), (f"sum({m}) <= {b}", ("sum_le", m, b))]
     for a in addrs:
-        out.append((f"{a} != null", ("addr", a)))
+        for k in ["null"] + [c.name for c in program.contracts]:
+            out += [(f"{a} != {k}", ("addr", a) if k == "null" else ("addr_ne", a, k)),
+                    (f"{a} == {k}", ("addr_eq", a, k))]
+            for g in flags:
+                out += [(f"{g} -> {a} != {k}", ("addr_if", g, True, a, k)),
+                        (f"(!{g}) -> {a} != {k}", ("addr_if", g, False, a, k))]
     out += [(t, ("def", t)) for t in _definitions(program)]
     return list(dict(out).items())            # without duplicates, in order
 
@@ -192,7 +200,8 @@ def minimize(keys: List[tuple]) -> List[tuple]:
     f >= c by f >= c' (c' > c) or, for c <= 0, by f > 0; f > 0 by f >= c (c > 0);
     f <= c by f <= c' (c' < c); f > 0 -> g > 0 by (f > 0) == (g > 0) or by g positive;
     (f > 0) == (g > 0) by f and g positive; sum(m) <= f by sum(m) == f; m[null] >= 0 by
-    m[null] == 0. Fewer, stronger premises are faster for the solvers."""
+    m[null] == 0; g -> a != K by a != K; a != K and g -> a != K by a == K' (K' != K). Fewer,
+    stronger premises are faster for the solvers."""
     ks = set(keys)
     ge = {}
     for k in ks:
@@ -201,6 +210,10 @@ def minimize(keys: List[tuple]) -> List[tuple]:
 
     def positive(f):
         return ("gt", f) in ks or any(c > 0 for c in ge.get(f, []))
+
+    def elsewhere(a, k) -> bool:
+        """a == k' for an address constant k' other than k."""
+        return any(x[0] == "addr_eq" and x[1] == a and x[2] != k for x in ks)
 
     def implied(k) -> bool:
         kind = k[0]
@@ -219,6 +232,13 @@ def minimize(keys: List[tuple]) -> List[tuple]:
             return ("sum_eq", k[1], k[2]) in ks
         if kind == "null_ge":
             return ("null_eq", k[1]) in ks
+        if kind == "addr":
+            return elsewhere(k[1], "null")
+        if kind == "addr_ne":
+            return elsewhere(k[1], k[2])
+        if kind == "addr_if":
+            a, c = k[3], k[4]
+            return (("addr", a) if c == "null" else ("addr_ne", a, c)) in ks or elsewhere(a, c)
         return False
     return [k for k in keys if not implied(k)]
 

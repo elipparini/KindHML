@@ -112,6 +112,18 @@ def test_invariant_templates():
     assert len(invgen.candidates(program)) == len(texts)      # all well typed
 
 
+def test_address_templates():
+    """An address field against null and the contracts, also under a boolean field: price-bet
+    Winnability needs player_has_joined -> player != null for every number of users."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "price-bet", "price-bet.sol"))
+    texts = invgen.templates(program)
+    for t in ("Bet.player != null", "Bet.player != Bet", "Bet.player == null",
+              "Bet.player_has_joined -> Bet.player != null",
+              "(!Bet.player_has_joined) -> Bet.player != Bet"):
+        assert t in texts, t
+    assert len(invgen.candidates(program)) == len(texts)      # all well typed
+
+
 def test_invariant_definitions():
     """An assignment f = e / d under the conditions G gives G && d != 0 -> f * d == e."""
     program, _ = V.load(os.path.join(ROOT, "contracts", "lending-real", "lending_real.sol"))
@@ -137,6 +149,12 @@ def test_minimize_keeps_the_strongest():
             ("sum_le", "C.m", f), ("null_eq", "C.m"), ("null_ge", "C.m")]
     assert invgen.minimize(keys) == [("ge", f, Fraction(1)), ("le", g, Fraction(1)),
                                      ("peq", f, g), ("sum_eq", "C.m", f), ("null_eq", "C.m")]
+    # addresses: a, b address fields, j a boolean field
+    a, b, j = "C.a", "C.b", "C.j"
+    keys = [("addr", a), ("addr_if", j, True, a, "null"), ("addr_if", j, False, a, "C"),
+            ("addr_eq", b, "C"), ("addr", b), ("addr_if", j, True, b, "D"), ("addr_ne", b, "D")]
+    assert invgen.minimize(keys) == [("addr", a), ("addr_if", j, False, a, "C"),
+                                     ("addr_eq", b, "C")]
 
 
 def test_hoist_universal_quantifiers():

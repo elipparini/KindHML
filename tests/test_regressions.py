@@ -27,8 +27,6 @@ OPEN = {
     ("two-donatees", "P4_true"): "needs an auxiliary invariant; unknown within the timeout",
     ("two-donatees", "P2b_true"): "valid by IC3 with z3 in about 30 s: at the edge of the timeout",
     ("two-donatees", "P3c_true"): "needs an auxiliary invariant; unknown within the timeout",
-    ("two-donatees", "P5_true"): "valid by IC3 in about 27 s with strategy kind2; the checks on "
-                                 "free states of the portfolio leave too little time",
     ("signature_error", "P5_true"): "valid by IC3 with z3, in 16 s to more than 30 s depending "
                                     "on the run: at the edge of the timeout",
     ("calls", "Report_sees_balance_after_transfer"): "invalid; found in 25-30 s (by the search "
@@ -47,8 +45,6 @@ OPEN_ANY = {
                                " no cutoff, true up to some number of users only",
     ("features", "Trivial"): "outside the fragment (the map next has address values): no cutoff,"
                              " true up to some number of users only",
-    ("owner", "P2_true"): "the proof with the cutoff fails: the invariants do not exclude owner"
-                          " = C (counterexample to induction); proved for 1, 2, 3 users in 120 s",
 }
 
 # for every number of users only: the time of the properties decided after TIMEOUT, since

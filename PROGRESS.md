@@ -591,6 +591,29 @@ Results (`pytest -m kind2 tests/test_regressions.py`, 30 s): every n, 80 passed,
 1 xpassed (18 min); `--users 2`, 83 passed, 8 xfailed, 2 xpassed (12 min). The first run for
 every n, with 30 s for all: 74 passed, 9 failed, none with a wrong verdict.
 
+## Done (2026-10-22): address templates (with the user)
+
+The proofs with the cutoff of owner `P2_true` and of the price-bet properties failed on
+counterexamples to induction with `owner = C`, `oracle = Bet`, or `player = null` after the
+join: the templates only gave `a != null`. New templates, chosen with the user (no cap), for an
+address field a, an address constant K (null or a contract) and a boolean field g: `a == K`,
+`a != K`, `g -> a != K`, `!g -> a != K`; `minimize` drops `g -> a != K` given `a != K`, and both
+given `a == K'` (K' ≠ K). They add at most 21 templates per benchmark file (price-bet; vault 9,
+lending 3, AMM and bank none); they have no address quantifiers, and the cutoffs of the 328
+properties are unchanged.
+
+Results:
+- price-bet, every n, 120 s: the 12 properties match (the 6 true ones, "true up to 6-8 users"
+  after 600 s in `results/new.csv`, are valid in 0.5-3.7 s, "n >= 5 by invariants"); invariant
+  phase 21-34 s per file.
+- owner `P2_true` (every n) and two-donatees `P5_true` are valid by invariants in 0.5 s (P5 was
+  proved by Kind 2 in 9 s, at the edge of the timeout): both removed from the open lists.
+- `pytest -m kind2 tests/test_regressions.py`: every n, 81 passed, 10 xfailed, 2 xpassed
+  (17 min); `--users 2`, 83 passed, 8 xfailed, 2 xpassed (11 min).
+- Invariant phase, parameterized mode, 900 s: vault 8 s as before (6 proved, 5 before);
+  lending-real does not end, as before; lending-int ends in 808 s (it did not end before): at
+  the edge of the limit both times, so no conclusion on the cost there.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

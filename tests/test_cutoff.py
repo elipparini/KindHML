@@ -450,6 +450,19 @@ def test_witness_premises_prove_for_every_number_of_users():
 
 @pytest.mark.kind2
 @pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_address_templates_prove_for_every_number_of_users():
+    """price-bet, Winnability: the generated invariants player_has_joined -> player != null
+    and player_has_joined -> player != Bet exclude its former counterexample to induction (the
+    player null after the join), so the check with the cutoff proves it (before, it was true
+    up to 6 users after 600 s)."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "price-bet", "price-bet.sol"))
+    o = V.verify(program, program.prop("Winnability"), V.ANY, 120)
+    assert (o.status, o.scope) == ("valid", "n >= 5 by invariants, n < 5 one by one"), \
+        o.describe()
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
 def test_kind2_with_more_users():
     """With 3 users asked for, Kind 2 proves At_most_two with 2 users (the cutoff), not a
     proof for 3 users; it goes on with 3 users and refutes it. The property has no address
