@@ -30,7 +30,7 @@ from .concrete import python_value, state_from_values
 from .cutoff import Cutoff, OutOfFragment, Scanner, check_program, nonnegative_maps
 from .encode_formula import FormulaEncoder
 from .encode_trans import (BALANCE, ST, TX, Encoder, constructed_var, default_value, field_var,
-                           ghost_var, key_field, zero)
+                           ghost_var, key_field, summed_maps, zero)
 from .lustre_subst import eq
 from .model import NULL, System
 from .reference import FormulaEvaluator, Interpreter, Tx, default
@@ -105,6 +105,40 @@ class Checks:
             out.append(L.op("=>", guard, L.op("<=", total, L.proj(st, ghost_var(key)))))
         return L.conj(out)
 
+    def witness_maps(self, names: List[str], prop: S.Property) -> List:
+        """The maps of the witness premises of the check of `prop` with the premises `names`
+        (`witness_axioms`): those whose sum occurs in the contracts, in the property or in the
+        premises. For another map, they would add nothing: in a counterexample, σ can be
+        replaced by the sum of the entries at the addresses of the system, which satisfies
+        them and the bounds of `sum_axioms`, and changes nothing else."""
+        formulas = (prop,) + tuple(self.program.prop(n) for n in names if n not in self.axioms)
+        occurring = summed_maps(S.Program(self.program.contracts, formulas,
+                                          self.program.balance_type))
+        return [key for key in self.enc.ghosts if key in occurring]
+
+    def witness_axioms(self, keys: List, st: L.LExpr) -> L.LExpr:
+        """Parameterized mode: for each map m of `keys`, if the entries at null and at the
+        contracts do not add up to σ, a user has a nonzero entry. It holds in every state where
+        σ is the sum (with the entries 0 at the users, the sum is that of the other
+        addresses), so assuming it is sound; each adds an address existential to the check,
+        one user to its cutoff (DESIGN.md, Sect. 7.3). Without it, the check of
+        `total == 0 || exists a . deposit[a] > 0`, with `sum(deposit) == total`, has the
+        counterexample to induction where every entry of the system is 0 and σ = total = 1:
+        the depositor is a user outside the system."""
+        system = self.enc.system
+        fixed = [NULL] + [c.name for c in system.contracts]
+        out = []
+        for key in keys:
+            m = L.proj(st, BALANCE if key == BALANCE else field_var(*key))
+            total = None
+            for a in fixed:
+                x = L.proj(m, key_field(a))
+                total = x if total is None else L.op("+", total, x)
+            out.append(L.op("=>", L.neg(eq(L.proj(st, ghost_var(key)), total)),
+                            L.disj([L.neg(eq(L.proj(m, key_field(u)), zero(self.enc.ghosts[key])))
+                                    for u in system.users])))
+        return L.conj(out)
+
     def _premise_count(self, names: List[str]) -> int:
         """The address constants of the free state and of the premises `names` in the
         negation of a check (`cutoff.py`). Raises OutOfFragment."""
@@ -123,10 +157,12 @@ class Checks:
         after = self._after(c, p, self._guard(conj))
         return self._premise_count(names) + Scanner(self.enc.system).skolems(after, True)
 
-    def property_count(self, premises: List[str], prop: S.Property) -> int:
-        """k of the check of `prop` on a free state with the premises `premises`
-        (`property_check`): its cutoff is max(1, k). Raises OutOfFragment."""
-        return (self._premise_count(premises)
+    def property_count(self, premises: List[str], prop: S.Property,
+                       witnesses: Sequence = ()) -> int:
+        """k of the check of `prop` on a free state with the premises `premises` and the
+        witness premises of the maps `witnesses` (`property_check`): its cutoff is max(1, k).
+        Raises OutOfFragment."""
+        return (self._premise_count(premises) + len(witnesses)
                 + Scanner(self.enc.system).skolems(prop.formula, True))
 
     def cutoff(self, properties: List[S.Property]) -> Cutoff:
@@ -309,10 +345,10 @@ class Checks:
         return [direct] + ([closure] if closure != direct else [])
 
     def property_check(self, prop: S.Property, invariants: List[str],
-                   split: bool = False) -> Tuple[str, List[str]]:
-        """The property on a free state satisfying the given invariants, as one Kind 2
-        property or, with `split`, as one property per case. Returns the program and the
-        property names.
+                   split: bool = False, witnesses: Sequence = ()) -> Tuple[str, List[str]]:
+        """The property on a free state satisfying the given invariants (and the witness
+        premises of the maps `witnesses`), as one Kind 2 property or, with `split`, as one
+        property per case. Returns the program and the property names.
 
         The invariants are the premise of the property, not Lustre assertions: with
         assertions, Kind 2 did not prove Swap_reversibility of the swap pool in 30 s; as a
@@ -324,7 +360,8 @@ class Checks:
         proved in 1 s as one property, and its 2 cases are unknown after 20 s in one run
         (0.6 s each in separate runs)."""
         prog, s = self._program(), L.Var("s")
-        goal = L.op("=>", L.conj([self._conj(invariants, s), self.sum_axioms(invariants, s)]),
+        goal = L.op("=>", L.conj([self._conj(invariants, s), self.sum_axioms(invariants, s),
+                                  self.witness_axioms(list(witnesses), s)]),
                     self._property(prop, s))
         parts = cases(goal) if split else [goal]
         names = [prop.name] if len(parts) == 1 else [f"{prop.name}__{i}"

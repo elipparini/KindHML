@@ -481,6 +481,27 @@ When Houdini replays the counterexample of a step with the reference interpreter
 the interpreter keeps the difference (`State.sum_offsets`), which a call does not change. Before
 this, the replay could refute a true candidate such as `sum(minted) == supply`.
 
+**Witness premises.** Let F = {null, C_1, ..., C_m}, and, for a map m with a state variable
+σ_m, let W_m be σ_m ≠ Σ_{a ∈ F} m[a] → ∃u ∉ F. m[u] ≠ 0: if the entries at null and at the
+contracts do not add up to σ_m, a user has a nonzero entry (`Checks.witness_axioms`).
+* Lemma 7.4 also holds when the premises of χ# contain W_m: in the instance with
+  σ_m := Σ_a m[a], if every user has entry 0, then σ_m is the sum of the entries at F.
+* In ¬χ#, W_m reads σ_m = Σ_F m ∨ ∃u. (u ∉ F ∧ m[u] ≠ 0): one address existential, under
+  no universal. So χ# stays in the fragment, and k grows by 1 for each W_m.
+* If sum(m) occurs neither in the contracts, nor in the property, nor in the premises, W_m
+  adds nothing: in a counterexample of the check without it, σ_m can be replaced by the sum
+  of the entries at the addresses of the check, which satisfies W_m and E_m and changes
+  nothing else (`Checks.witness_maps`).
+
+They matter: in `contracts/regression/pool.sol`, `Someone_deposited`
+(`total == 0 || exists a . deposit[a] > 0`, with the invariant `sum(deposit) == total`) holds
+for every n. Without W_deposit, its check has the counterexample to induction where every
+entry of the system is 0 and σ_deposit = total = 1: the depositor is a user outside the
+system. Since each W_m adds a user, the tool assumes them only in the checks of the
+properties, and only within the cutoff (Sect. 7.5). With the W_m of all the sums in every
+check of a property, the cutoffs of 110 of the 277 benchmark properties with a cutoff would
+grow (lending: from 4–6 to 7–11 users).
+
 ### 7.4 Counterexamples
 
 **Lemma 7.5 (added users).** Suppose that a trace of S_c reaches a state where all contracts
@@ -592,7 +613,10 @@ With `--parameterized` (strategy portfolio), for n users asked for:
   largest of the cutoffs of the final steps (`_Invariants.users`);
 * the check of the property uses the cutoff of its premises (`Checks.property_count`), possibly
   fewer users than Houdini; a proof (`inductive` or `invariants`) holds for every
-  n' ≥ max(c_H, u) (Prop. 7.7), and the verdict gives both numbers;
+  n' ≥ max(c_H, u) (Prop. 7.7), and the verdict gives both numbers. After the checks without
+  them, the check is also tried with the witness premises of its sums (Sect. 7.3), if its
+  cutoff u, one more user for each of them, is at most N: so max(c_H, u) ≤ N still holds, and
+  no cutoff changes;
 * the searches for counterexamples are sound with any number of users; the search for the
   counterexample to induction uses the users of the check that produced it, fuzzing and
   Kind 2 use N users. A counterexample with m users holds for every n' ≥ m if Lemma 7.5 or
@@ -630,7 +654,8 @@ is not found (registry `At_most_two` is unknown for every n). A BMC of depth d w
 to d(1 + p) + w users (p address parameters, w witnesses). (2) Properties such as additivity
 P1_true, `forall c1 c2 . exists c3 v12 v3 . forall addr ...`, are outside (F3). (3) With
 c = n, ghost sums are weaker than exact sums with n users, so a proof for exactly n users
-can be lost (registry `At_most_two` with n = 2).
+can be lost (registry `At_most_two` with n = 2). (4) The witness premises are assumed only
+within the cutoff, and not in the steps of Houdini.
 
 *Results* (10 s per property; PROGRESS.md, 2026-10-14). On the 46 properties of seven regression
 files, the time is 62–71 s for n = 2, 3, 4 and 100 (normal mode: 71–78 s for n = 2, 3, 4,

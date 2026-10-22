@@ -3,7 +3,8 @@
 // of Registered_bounded needs sum(registered) == count). At_most_two holds with at most 2
 // users and fails with 3 or more: it is proved with 2 users without parameterized mode,
 // and it is not proved in parameterized mode, whatever the number of users.
-// Not in tests/contracts, whose properties are checked with 2 users only (test_regressions.py).
+// Not in tests/contracts (test_regressions.py), since the verdict of At_most_two depends on the
+// number of users; test_cutoff.py checks it with several numbers of users.
 
 contract Registry {
     mapping (address => int) registered;

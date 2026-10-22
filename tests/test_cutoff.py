@@ -26,6 +26,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "tests", "contracts", "parameterized", "registry.sol")
 CAPPED = os.path.join(ROOT, "tests", "contracts", "parameterized", "capped_registry.sol")
 SHARES = os.path.join(ROOT, "tests", "contracts", "parameterized", "shares.sol")
+POOL = os.path.join(ROOT, "contracts", "regression", "pool.sol")
 
 try:
     kind2.find_kind2()
@@ -289,6 +290,26 @@ def test_sum_axioms_need_nonnegative_entries():
     assert all(f"s.Registry_registered.k_{a}" in axiom for a in checks.enc.system.addresses)
 
 
+def test_witness_premises():
+    """The witness premise of a sum (if the entries at null and at the contracts do not add
+    up to it, a user has a nonzero entry) is for the sums of the property and of its
+    premises; it adds one user to the cutoff of the check."""
+    program, _ = V.load(POOL)
+    checks = Checks(program, 2, V.DEFAULT_MODE, V.DEFAULT_EXPAND, ghost_sums=True)
+    prop = program.prop("Someone_deposited")
+    deposit = ("Pool", "deposit")
+    assert checks.witness_maps([], prop) == []          # the property has no sum
+    assert checks.witness_maps(["Nonnegative"], prop) == []
+    assert checks.witness_maps(["Sum"], prop) == [deposit]
+    assert checks.property_count(["Sum"], prop, [deposit]) == \
+        checks.property_count(["Sum"], prop) + 1
+    axiom = L.render(checks.witness_axioms([deposit], L.Var("s")))
+    assert axiom == ("((not (s.sum_Pool_deposit = (s.Pool_deposit.k_null + s.Pool_deposit.k_Pool)))"
+                     " => ((not (s.Pool_deposit.k_u1 = 0)) or (not (s.Pool_deposit.k_u2 = 0))))")
+    assert axiom in checks.property_check(prop, ["Sum"], witnesses=[deposit])[0]
+    assert axiom not in checks.property_check(prop, ["Sum"])[0]
+
+
 def registry_with(*invariants) -> S.Program:
     """The registry with the given invariants (name, text) added."""
     program, _ = V.load(REGISTRY)
@@ -409,6 +430,22 @@ def test_sum_of_all_entries_bounds_the_shares():
     [invs] = V.prove_invariants(program, 5, 60, context, parameterized=True, invgen=False)
     assert sorted(n for n in invs.proved or [] if not n.startswith("_")) == [
         "Nonnegative", "Pairs", "Total"], invs.dropped
+
+
+@pytest.mark.kind2
+@pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
+def test_witness_premises_prove_for_every_number_of_users():
+    """Pool, Someone_deposited (total == 0 || exists a . deposit[a] > 0): without the witness
+    premise of sum(deposit), the check with the cutoff has a counterexample to induction where
+    the depositor is a user outside the system; with it, the property is proved for every
+    n >= 2, and with 1 user by the exact side."""
+    program, _ = V.load(POOL)
+    prop = program.prop("Someone_deposited")
+    o = V.verify(program, prop, V.ANY, 60)
+    assert (o.status, o.scope) == ("valid", "n >= 2 by invariants, n < 2 one by one"), \
+        o.describe()
+    o = V.verify(program, prop, 3, 60, parameterized=True)
+    assert o.status == "valid" and o.scope.startswith("for every n >= 2 users"), o.describe()
 
 
 @pytest.mark.kind2

@@ -514,8 +514,10 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
       1. prove the invariants (`invariants.py`; shared by the properties of a run through
          `context`): those of the file (unless `user_invariants` is false) and, with
          `invgen`, the generated candidates (`invgen.py`);
-      2. "invariants": check the property on a free state satisfying them; a counterexample s*
-         ends this task and starts task 3;
+      2. "invariants": check the property on a free state satisfying them (with ghost sums,
+         then also with the witness premises of its sums, `Checks.witness_axioms`, if their
+         users fit in N); a counterexample s* of the checks without them ends those checks
+         and starts task 3;
       3. "reach": BMC search for s* in the transition system (a counterexample of the property);
       4. "fuzz": random testing, guided by s* if any, then unguided, confirmed exactly
          (`fuzz.py`);
@@ -659,6 +661,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     target_users = users                # the users of the counterexample to induction
     guide: Optional[Dict[tuple, object]] = None     # its known values, for the fuzzer
     premises: List[List[str]] = []
+    witnesses: List[list] = []          # the maps of the witness premises of each premise set
     attempts: Optional[List[tuple]] = None
     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
     while True:
@@ -699,29 +702,42 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                 # forms to try: for each premise, from the smallest, the property as one
                 # Kind 2 property
                 # and split into cases; a counterexample under the last premise (the
-                # strongest) is the state searched for by "reach"
+                # strongest) is the state searched for by "reach". Parameterized mode: then
+                # the same with the witness premises of the sums of the check, if their users
+                # fit in the cutoff of the side, so that the proof holds from it on
                 if attempts is None:
                     premises = invs.checks.premises(prop, invs.assumed())
-                    attempts = [(i, split) for i in range(len(premises))
-                                for split in (False, True)]
-                for i, split in list(attempts):
-                    if (i, split) not in attempts:
+                    witnesses = [invs.checks.witness_maps(p, prop) if ghost else []
+                                 for p in premises]
+                    attempts = [(i, split, w) for w in (False, True)
+                                for i in range(len(premises)) for split in (False, True)
+                                if not w or (witnesses[i] and users >= max(
+                                    1, invs.checks.property_count(premises[i], prop,
+                                                                  witnesses[i])))]
+                for i, split, w in list(attempts):
+                    if (i, split, w) not in attempts:
                         continue
                     left = None if deadline is None else deadline - time.time()
                     if left is not None and left <= 1:
                         break
                     b = budget if left is None else min(budget, left)
                     # parameterized mode: the cutoff of this check, with these premises
-                    u = max(1, invs.checks.property_count(premises[i], prop)) if ghost else users
-                    lus, names = invs.checks_for(u).property_check(prop, premises[i], split)
+                    ws = witnesses[i] if w else []
+                    u = (max(1, invs.checks.property_count(premises[i], prop, ws)) if ghost
+                         else users)
+                    lus, names = invs.checks_for(u).property_check(prop, premises[i], split, ws)
                     status, refuted, s = _free_run(lus, names, b)
                     if status == "valid":
                         return scoped(_valid(prop, "invariants", time.time() - start, s),
                                       max(invs.users, u), u)
                     if status == "invalid":
-                        attempts = [a for a in attempts if a[0] != i]
-                        if i == len(premises) - 1:
-                            proof_open = False
+                        # fewer premises refute it too: after the strongest, no attempt of
+                        # this kind is left
+                        strongest = i == len(premises) - 1
+                        attempts = [a for a in attempts
+                                    if a[2] != w or not (strongest or a[0] == i)]
+                        proof_open = bool(attempts)
+                        if strongest and not w:
                             left = None if deadline is None else deadline - time.time()
                             out = kind2.run(lus, b if left is None else max(min(b, left), 1),
                                             solver=s, extra_args=LIGHT_ENGINES, cex=True)
@@ -737,7 +753,6 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                                                    enc.system, enc, known=known)
                             have = locations(st)
                             guide = {loc: have[loc] for loc in known if loc in have} or None
-                            break
             elif task == "fuzz":
                 deadline_fuzz = time.time() + b
                 # first towards the counterexample to induction, if any, then at random; each

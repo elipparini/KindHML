@@ -1,8 +1,11 @@
 """End-to-end regression tests: each property of contracts/regression and tests/contracts must
-match its ground truth within a small timeout. Runs Kind 2 (one job at a time); select with
--m kind2.
+match its ground truth within a small timeout, for every number of users (the default of the
+tool), or for the number of users of the option --users (e.g. `--users 2`). Runs Kind 2 (one
+job at a time); select with -m kind2.
 
-Properties listed in OPEN are known not to match yet; each entry says why.
+Properties listed in OPEN are known not to match yet; each entry says why. Those listed in
+OPEN_ANY are known not to match for every number of users only, and those of LONGER_ANY get
+more time for every number of users.
 """
 
 import glob
@@ -38,6 +41,33 @@ OPEN = {
 }
 
 
+# for every number of users only
+OPEN_ANY = {
+    ("additivity", "P1_true"): "outside the fragment (an address existential under a universal):"
+                               " no cutoff, true up to some number of users only",
+    ("features", "Trivial"): "outside the fragment (the map next has address values): no cutoff,"
+                             " true up to some number of users only",
+    ("owner", "P2_true"): "the proof with the cutoff fails: the invariants do not exclude owner"
+                          " = C (counterexample to induction); proved for 1, 2, 3 users in 120 s",
+}
+
+# for every number of users only: the time of the properties decided after TIMEOUT, since
+# the invariant phases of the checks with the cutoff and with 1, 2, ... users share it (with
+# 120 s, on 2026-10-22: two-donatees P1_false in 45 s, P3b_false 57 s, calls
+# Pay_zero_reverts 70 s, real_balances Small_payment 88 s, swap_pool Inv 57 s,
+# Swap_reversibility 59 s)
+LONGER_ANY = {("two-donatees", "P1_false"), ("two-donatees", "P3b_false"),
+              ("calls", "Pay_zero_reverts"), ("real_balances", "Small_payment"),
+              ("swap_pool", "Inv"), ("swap_pool", "Swap_reversibility")}
+TIMEOUT_LONGER = 180
+
+
+@pytest.fixture
+def users(request):
+    """The number of users of the option --users (conftest.py): every number by default."""
+    return V.parse_users(request.config.getoption("--users"))
+
+
 def cases():
     for path in [p for d in DIRS for p in sorted(glob.glob(os.path.join(d, "*.sol")))]:
         program, _ = V.load(path)
@@ -49,7 +79,11 @@ def cases():
 
 @pytest.mark.kind2
 @pytest.mark.parametrize("path,prop", list(cases()))
-def test_regression(path, prop):
+def test_regression(path, prop, users, request):
     program, _ = V.load(path)
-    outcome = V.verify(program, program.prop(prop), 2, TIMEOUT)
+    key = (V.stem(path), prop)
+    if users == V.ANY and key in OPEN_ANY:
+        request.node.add_marker(pytest.mark.xfail(reason=OPEN_ANY[key], strict=False))
+    timeout = TIMEOUT_LONGER if users == V.ANY and key in LONGER_ANY else TIMEOUT
+    outcome = V.verify(program, program.prop(prop), users, timeout)
     assert outcome.groundtruth_check() == "OK", outcome.describe()

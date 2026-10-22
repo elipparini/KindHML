@@ -566,6 +566,31 @@ Results (one job at a time, 1 GB):
   unknown depending on the run, also in exact mode and at the previous commit 5312cdd (Houdini
   ends at about 29 s in the rounds of the property); added to OPEN.
 
+## Done (2026-10-22): witness premises of the sums; regressions for every n (with the user)
+
+Pool `Someone_deposited` (`total == 0 || exists a . deposit[a] > 0`, with the invariant
+`sum(deposit) == total`; `contracts/regression/pool.sol`) holds for every n, but was unknown
+for every n: in the check with the cutoff, σ_deposit is free, and the counterexample to
+induction has every entry of the system 0 and σ = total = 1 (a depositor outside the system).
+- `Checks.witness_axioms`, `witness_maps` (DESIGN.md, Sect. 7.3): the premise "if the entries
+  at null and at the contracts do not add up to σ_m, a user has a nonzero entry", for the sums
+  of the contracts, of the property and of its premises; one more user per sum.
+- `_rounds`, task "invariants": after the checks without them, the checks with the witness
+  premises, if their users fit in the cutoff of the side (decided with the user): no cutoff
+  changes (the cutoffs of the 328 properties of the benchmarks and regressions are the same
+  as at c0e341d). With the premises of all the sums in every check, the cutoffs of 110 of 277
+  benchmark properties would grow (lending: from 4–6 to 7–11 users).
+- Pool `Someone_deposited`: valid, "n >= 2 by invariants, n < 2 one by one" (1.5 s).
+- `tests/test_regressions.py`: every number of users by default (decided with the user),
+  `--users N` for N users (`tests/conftest.py`); `OPEN_ANY` (additivity P1_true and features
+  Trivial, without a cutoff; owner P2_true, whose proof with the cutoff needs `owner != C`),
+  and `LONGER_ANY`, 180 s for 6 properties decided in 45–88 s for every n (the invariant
+  phases of the checks with the cutoff and with 1, 2, ... users share the time).
+
+Results (`pytest -m kind2 tests/test_regressions.py`, 30 s): every n, 80 passed, 12 xfailed,
+1 xpassed (18 min); `--users 2`, 83 passed, 8 xfailed, 2 xpassed (12 min). The first run for
+every n, with 30 s for all: 74 passed, 9 failed, none with a wrong verdict.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates
