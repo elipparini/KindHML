@@ -21,6 +21,11 @@ selection options restrict the tasks; they combine (a task must satisfy all of t
                               groundtruth.csv, can be given.
 --list prints the selected tasks without running them.
 
+Each task runs in a child process, stopped at the hard limit --task_timeout (default
+2 x timeout + TASK_MARGIN seconds), with the Kind 2 runs it started: the time limit of a
+check is only checked between its steps, and a step can take hours (the encoding of a
+property with nested modalities).
+
 With --out DIR, the run is saved in DIR: results.csv (one row per task), run.log (the
 output of the run, with the invariants proved for each file) and info.txt (the command,
 the date, the git commit and the versions of the tools).
@@ -30,9 +35,11 @@ import argparse
 import csv
 import datetime
 import glob
+import multiprocessing
 import os
 import platform
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -47,6 +54,12 @@ from kindhml.errors import KindHMLError             # noqa: E402
 
 LOG = None                                          # the log file of --out, if any
 C = PLAIN                                           # the colors on the screen (--color)
+
+# The checks run past their time limit (the last Kind 2 run, the confirmation of a
+# counterexample): by at most 77 s with 600 s in the cluster runs of 2026-10-21 and 22, by
+# 147 s with 60 s for lending_simple_real Liquidation_attack_any.
+TASK_MARGIN = 300
+STOP_GRACE = 30             # seconds for a task to stop, and stop Kind 2, after SIGTERM
 
 
 def say(line: str, screen: bool = True, colored: str = ""):
@@ -152,6 +165,12 @@ def select(args):
             else:
                 wanted.setdefault(f, set()).add(r)
     files = files_of(paths)
+    if families is not None:
+        known = {family(f) for f in files}
+        unknown = [x for x in families if x not in known]
+        if unknown:
+            sys.exit(f"--families: no selected file is in {', '.join(unknown)}"
+                     f" (families: {', '.join(sorted(known))})")
     if families is not None:          # the order of --families; stable within a family
         rank = {name: i for i, name in reversed(list(enumerate(families)))}
         files = sorted((f for f in files if family(f) in rank), key=lambda f: rank[family(f)])
@@ -184,10 +203,69 @@ def select(args):
     return out
 
 
+def isolated(work, limit: float) -> tuple:
+    """work() in a child process (a fork, which shares the state of this one), within `limit`
+    seconds (0: no limit): ("done", its value), ("failed", the error), or ("stopped", None) if
+    it was stopped at the limit."""
+    recv, send = multiprocessing.Pipe(duplex=False)
+    pid = os.fork()
+    if pid == 0:
+        # the child never returns: SIGTERM raises SystemExit (`kind2.py`), even in the inner
+        # `finally`, and only one is sent
+        try:
+            try:
+                recv.close()
+                try:
+                    result = ("done", work())
+                except Exception as e:
+                    result = ("failed", f"{type(e).__name__}: {e}")
+                send.send(result)
+            finally:
+                os._exit(0)
+        finally:
+            os._exit(1)
+    send.close()
+    ended = False                       # the child ends by itself
+    try:
+        if not recv.poll(limit or None):
+            return "stopped", None
+        ended = True
+        try:
+            return recv.recv()
+        except EOFError:
+            return "failed", "the process of the task ended without a result"
+    finally:
+        if ended:
+            os.waitpid(pid, 0)
+        else:
+            stop(pid)
+
+
+def stop(pid: int):
+    """Stop the child process `pid`: SIGTERM, on which `kind2.run` stops Kind 2; after
+    STOP_GRACE seconds, SIGKILL, for it and its Kind 2 runs."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    end = time.time() + STOP_GRACE
+    while time.time() < end:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+            kind2.kill_runs(pid, alive=False)
+            return
+        time.sleep(0.1)
+    kind2.kill_runs(pid, alive=True)
+    os.kill(pid, signal.SIGKILL)
+    os.waitpid(pid, 0)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--timeout", type=float, default=10)
+    ap.add_argument("--task_timeout", type=float, default=None,
+                    help="hard limit of a task (s), at which its process is stopped (default:"
+                         f" 2 x timeout + {TASK_MARGIN}; 0: no limit)")
     ap.add_argument("--participants", type=V.parse_users, default=None,
                     help=f"number of users, or {V.ANY} (every number of users; the default)")
     ap.add_argument("--users_mode", choices=V.USERS_MODES, default=None,
@@ -229,6 +307,8 @@ def main():
     ap.add_argument("--out", default="",
                     help="directory where the run is saved (results.csv, run.log, info.txt)")
     args = ap.parse_args()
+    if args.task_timeout is None:
+        args.task_timeout = 2 * args.timeout + TASK_MARGIN if args.timeout else 0
     args.users_mode = V.users_mode_of(args.users_mode)
     if args.participants is None:
         if args.strategy == "kind2" or args.users_mode == "parameterized":
@@ -283,19 +363,36 @@ def main():
                             f" {C.dim(elapsed)}")
         for prop in properties:
             start = time.time()
-            try:
-                out = V.verify(program, prop, args.participants, args.timeout,
-                               mode=args.mode, expand=expand, solver=args.solver,
-                               strategy=args.strategy, context=context,
-                               invgen=not args.no_invgen,
-                               user_invariants=not args.no_user_invariants,
-                               users_mode=args.users_mode)
-                gt, desc, colored = out.groundtruth_check(), out.describe(), out.describe(C)
-                status, method, scope = out.status, out.method, out.scope
-            except KindHMLError as e:
-                gt, desc, status, method = "error", f"{prop.name}: error: {e}", "error", ""
-                scope = ""
-                colored = f"{C.bold(prop.name)}: {C.magenta('error:')} {e}"
+
+            def check(prop=prop):
+                """The task, in a child process: its outcome, and the progress of Houdini,
+                which the next tasks continue."""
+                try:
+                    out = V.verify(program, prop, args.participants, args.timeout,
+                                   mode=args.mode, expand=expand, solver=args.solver,
+                                   strategy=args.strategy, context=context,
+                                   invgen=not args.no_invgen,
+                                   user_invariants=not args.no_user_invariants,
+                                   users_mode=args.users_mode)
+                    found = (out.groundtruth_check(), out.describe(), out.describe(C),
+                             out.status, out.method, out.scope)
+                except KindHMLError as e:
+                    found = ("error", f"{prop.name}: error: {e}",
+                             f"{C.bold(prop.name)}: {C.magenta('error:')} {e}", "error", "", "")
+                return found, V.houdini_progress(context)
+
+            how, value = isolated(check, args.task_timeout)
+            if how == "done":
+                (gt, desc, colored, status, method, scope), progress = value
+                V.resume_houdini(context, progress)
+            else:
+                why = (f"stopped at the limit of the task ({args.task_timeout:g} s)"
+                       if how == "stopped" else f"the task failed: {value}")
+                gt, status, method, scope = ("unknown" if how == "stopped" else "error",
+                                             "unknown" if how == "stopped" else "error",
+                                             "", why)
+                desc = f"{prop.name}: {status} ({why})"
+                colored = f"{C.bold(prop.name)}: {C.magenta(status)} ({why})"
             wall = time.time() - start
             tally[gt] = tally.get(gt, 0) + 1
             say(f"{V.stem(f):>18} - {desc} [{wall:.1f}s]",

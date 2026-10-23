@@ -193,6 +193,24 @@ def _cleanup(proc: subprocess.Popen, unit: Optional[str], watcher: "_Watcher"):
                 pass
 
 
+def kill_runs(pid: int, alive: bool) -> None:
+    """Kill the Kind 2 runs of process `pid` (`run`), with their solvers, when `pid` was stopped
+    before `run` could clean up: their systemd scopes and, if `pid` is still alive (otherwise
+    its number may be reused), its descendants."""
+    if alive:
+        for p in _descendants(pid):
+            try:
+                os.kill(p, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+    if _HAVE_SCOPE is not False and shutil.which("systemctl"):
+        try:
+            subprocess.run(["systemctl", "--user", "kill", "--signal=SIGKILL",
+                            f"kindhml-{pid}-*.scope"], capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
 SOLVERS = ("z3", "cvc5")
 
 

@@ -151,6 +151,9 @@ Without files, `tests/run_all.py` runs every task (a property of a contract file
 `results.csv` of a run, or `contract` and `property`, as in a `groundtruth.csv`); the
 restrictions combine. Without `--participants`, the tasks are checked for every number of
 users (`--participants any`). `--list` prints the selected tasks without running them.
+Each task runs in a child process, stopped with its Kind 2 runs at `--task_timeout` seconds
+(default 2 x `--timeout` + 300; 0: no limit), since the time limit of a check is only checked
+between its steps. A family of `--families` must contain a selected file.
 `tests/run_all.py --out DIR` saves the run in `DIR`: `results.csv` (one row per task),
 `run.log` (the output, with the invariants proved for each file) and `info.txt` (the command,
 the date, the git commit and the versions of Kind 2, Z3 and cvc5).

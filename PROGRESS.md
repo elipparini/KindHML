@@ -704,6 +704,69 @@ Possible next steps (not started; the user decides):
    2026-10-21, with the same Lustre programs at the previous commit. Kind 2 reports a parser
    error or no result. Not investigated.
 
+## Done (2026-10-23): a hard limit per task in `tests/run_all.py` (with the user)
+
+The cluster runs of 2026-10-21 and 22 stopped after lending_simple_real
+`Liquidation_attack_exists`: the next task, `Liquidation_attack_any`, never ended. The time
+limit of `verify` is only checked between the steps of a round, and one step, the encoding of
+this property (three nested `exists f, args . <<a : f(args)>>`), does not end (see the next
+section). Kind 2 is not involved: its runs stop at their limit.
+
+Each task of `run_all.py` now runs in a forked child, stopped at `--task_timeout` (default
+2 x `--timeout` + 300 s): SIGTERM, on which `kind2.run` stops Kind 2, then, after 30 s,
+SIGKILL for the child and its Kind 2 runs (`kind2.kill_runs`). A stopped task is "unknown",
+with the scope "stopped at the limit of the task". The child sends back the progress of
+Houdini (`verify.houdini_progress`, `resume_houdini`), so the next tasks of the file go on
+from it, as before; the Houdinis that a task creates (more users) are not sent back.
+`--families` now rejects a name that matches no selected file (the cluster command had
+`lending-simply-real`, so lending-simple-int never ran).
+
+## Planned (2026-10-23): the encoding of nested modalities (not started; the user decides)
+
+Measurements (lending_simple_real, encoding only, no Kind 2):
+
+| Property | `lustre_for`, 1 user | free-state check (`Checks._property`), 1 / 2 users |
+|---|---|---|
+| `Liquidation_attack`, `Liquidation_attack_exists` (1 modality) | 0.0 s | 0.0 s / 0.1 s |
+| copy of `Liquidation_attack_any` with 1 modality | 0.5 s | 0.4 s / 1.0 s |
+| copy with 2 modalities | 2.5 s | 2.4 s / 11.5 s |
+| `Liquidation_attack_any` (3 modalities) | > 600 s | > 300 s / not run |
+
+`Liquidation_attack_any` in the other modes: `levels` 22.8 s (1 user), > 60 s (2 users);
+`exists` 0.1 s, 0.3 s, 0.6 s (1, 2, 3 users). The profile of the copy with 2 modalities: 43% in
+`free_vars`, called by `quantify` on the whole body at every quantifier, and most of the rest
+in `Inliner.run`. With 1 user the premise `a != b` is false for every pair, so the property is
+trivially true, but the body is encoded before the simplification removes it.
+
+Cause (hypothesis to confirm in step 1): in mode `inline` (the default), the next state of a
+modality is a term, substituted without sharing into the nested modalities, so the work grows
+multiplicatively with the depth; `quantify` adds a traversal of the body per quantifier.
+
+Steps:
+1. **Measure.** The number of nodes of the terms per depth, with and without sharing (by
+   identity), and the time of `free_vars`, `Inliner.run` and the equality tests of the
+   simplifications, on the three properties above.
+2. **Changes that keep the formula.**
+   - `free_vars` cached by node identity, or computed once bottom-up (the nodes are frozen
+     dataclasses, whose hash traverses the whole tree, so not by hash).
+   - An implication whose premise simplifies to false is encoded as true without encoding
+     its conclusion (the premise first). This removes the whole cost with 1 user here.
+   The Lustre output must stay the same: compare it, character by character, on all the
+   benchmark and regression properties, before and after.
+3. **Structural change (a hybrid mode).** From a bound on the depth or on the size of the
+   term on, a modality gets fresh existential state variables, as in mode `exists`, instead of
+   the substituted term. This is equivalent, since Trans is a function (Lemma
+   `lem:transition`), and both forms exist already. The cost for Kind 2 of the quantified
+   states is not measured: compare the Kind 2 times on the regressions and on the benchmark
+   rows with nested modalities (`Sandwich*`, `Two_steps_*`, `Liquidation_*`), and choose the
+   bound from these data, not a priori.
+4. **A deadline in the encoder** (the third option of 2026-10-23). `verify` passes its deadline
+   to the encoders, which stop past it; the round ends without a verdict. The time limit of a
+   check then holds without the child processes of `run_all.py` (e.g. for `kindHML.py`).
+5. **Validation.** The differential test of the formula encoding (`pytest -m slow`), the
+   regressions (`pytest -m kind2 tests/test_regressions.py`), `Liquidation_attack_any` with
+   600 s, and the lending families on the cluster.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

@@ -1140,6 +1140,18 @@ class _Invariants:
         self._programs: List[tuple] = []
         self._done: set = set()
 
+    def progress(self) -> tuple:
+        """The state of Houdini (`attempt`), without its programs: picklable."""
+        return self.candidates, self.dropped, self.proved, self.users, self._for, self._done
+
+    def resume(self, progress: tuple):
+        """Houdini from the `progress` of a copy, which went further: its step programs are
+        made again, if they are for other candidates."""
+        self.candidates, self.dropped, self.proved, self.users, names, self._done = progress
+        if names != self._for:
+            self._for = names
+            self._programs = self._steps(names) if names is not None else []
+
     def checks_for(self, n_users: int) -> Checks:
         """The checks of the same candidates with `n_users` users."""
         if n_users not in self._checks:
@@ -1276,6 +1288,20 @@ class _Invariants:
                 self.proved = self.checks.axioms + names
                 self.users = self._proved_users(self._programs)
             return
+
+
+def houdini_progress(context: dict) -> Dict[tuple, tuple]:
+    """The progress of the Houdinis of `context`, by key (`_Invariants.progress`): for a check
+    in another process (tests/run_all.py)."""
+    return {k: v.progress() for k, v in context.items() if isinstance(v, _Invariants)}
+
+
+def resume_houdini(context: dict, progress: Dict[tuple, tuple]):
+    """The Houdinis of `context` go on from the `progress` of a copy of `context`
+    (`houdini_progress`); those that the copy created are left out."""
+    for k, p in progress.items():
+        if isinstance(context.get(k), _Invariants):
+            context[k].resume(p)
 
 
 def invariant_summary(invs: "_Invariants", c: Palette = PLAIN) -> str:
