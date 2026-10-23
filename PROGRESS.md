@@ -614,6 +614,96 @@ Results:
   lending-real does not end, as before; lending-int ends in 808 s (it did not end before): at
   the edge of the limit both times, so no conclusion on the cost there.
 
+## Noted (2026-10-23): the cluster runs before and after 2026-10-22 compared (with the user)
+
+Files:
+- `results/cluster-20261021-2221.csv`: started on 2026-10-21 at 22:21, so probably at
+  7454e3f;
+- `results/cluster-20261022-2304.csv`: at 9d91616 (= origin/v1).
+
+Every number of users (the default), 600 s per property. The two files have the same 157
+rows: amm-int 12, amm-real 60, amm-simple-int 9, amm-simple-real 36, bank 16,
+lending-simple-real 6, price-bet 12, vault 6. lending-int, lending-real and
+lending-simple-int are missing from both.
+
+Commits between the runs:
+- dd30672: guided fuzzing;
+- c0e341d: a Kind 2 run stopped at a limit is unknown;
+- 2e69b3e: witness premises;
+- 9d91616: address templates;
+- efd3104, 75b8cbf: no effect on these rows.
+
+Only the files were compared; nothing was rerun.
+
+Verdicts: no wrong verdict in either run, and no row has a weaker verdict.
+- 115 rows are correct in both.
+- 8 rows go from "true up to 4–8 users" (600 s) to valid for every n, in 2.5–19 s:
+  - price-bet `Winnability` (v1, v4), `Liquidity` (v1, v3), `Frontrunning` (v1, v2);
+  - vault and vault_v3 `Two_steps_drainability`.
+
+  The cause is the address templates: vault has no sums, so the witness premises cannot
+  apply there.
+- 5 rows go from "error" to "unknown, true up to 1–5 users", with the same scope (c0e341d):
+  amm_real `Sandwich_slippage`; lending_simple_real `Health_non_interference` and
+  `Liquidation_defence_exists`; vault and vault_v2 `Two_steps_drainability_non_inflation`.
+- 4 rows are partial in both: `Sandwich_slippage` of amm_real_v2, amm_real_v5,
+  amm_simple_real and amm_simple_real_v2, true up to 1 user.
+- 25 rows are unknown in both, all AMM: `Arbitrage_exists`, `Deposit_reversibility`,
+  `Swap_reversibility`, and `Sandwich`/`Sandwich_slippage` of some versions. Two of them
+  went from "error" to "unknown".
+
+Times of the 115 rows correct in both: 1276 s before, 1830 s after. About 500 s of the
+difference comes from three refutations by fuzzing:
+- amm_real_v4 `Swap_additivity`: 34.7 s (Kind 2), now 116.5 s (fuzz);
+- amm_real_v4 `Swap_reversibility`: 40.3 s, now 177.0 s (fuzz);
+- lending_simple_real `Liquidation_attack_exists`: 193.7 s (3 users), now 474.2 s (2 users).
+
+price-bet_v4 `Frontrunning` went from 18.6 s (Kind 2) to 3.5 s (reach).
+
+Hypotheses on the slowdowns (not tested):
+- the two AMM rows: the witness checks apply there. A static count, with all the candidates
+  as premises, gives 3 sums and 4 users, within the cutoff 4. With nonlinear arithmetic
+  they may time out in each round and take time from fuzzing and Kind 2. Besides, dd30672
+  gives half of the fuzzing time to the search guided by s*.
+- the lending row: the witness checks do not apply there (8 users, cutoff 4), so the cause
+  is the guided fuzzing or the scheduling.
+
+Possible next steps (not started; the user decides):
+1. **Witness checks only when they can help.** Run them only after a counterexample to
+   induction s* that violates a witness premise: σ_m ≠ Σ_F m and every shown user has
+   entry 0, as in Pool. Otherwise s* satisfies W, and W cannot exclude it. This is sound,
+   since checks are only dropped, and it would remove the cost on real counterexamples
+   such as the AMM ones. s* is computed now only when the strongest plain check is invalid.
+2. **Targeted reruns, to separate the causes.**
+   - The three slow rows at 9d91616, with and without the witness checks.
+   - The same rows at 75b8cbf and at dd30672.
+   - The families missing from the runs, to evaluate the guided fuzzing (the families
+     whose false properties were unknown: lending-real, lending-int, amm-int,
+     amm-simple-int).
+3. **Templates not added yet.**
+   - Comparisons between two address fields (`a == b`, `a != b`): offered, not chosen.
+   - Conservation invariants with constructor arguments, as on lending-simple-int:
+     `sum(w0) + res0 == s0`, where s0 is a constructor argument, and
+     `res0 + sum(debt) == sum(c0)`. Both counterexamples to induction printed there violate
+     them.
+4. **Witness premises.** They could also go in the steps of Houdini, and a sum could get
+   more than one witness. No case needs either yet.
+5. **Performance with many users.**
+   - In parameterized mode, Houdini on lending-real does not end in 900 s, with or without
+     the address templates.
+   - The encoding time grows fast with the users: vault
+     `Two_steps_drainability_non_inflation` takes 0.4 s with 1 user and 41 s with 7.
+   - Integer lending is hard for z3: lending-simple-int `Nonnegative` has no verdict with 3
+     users at 60 s, while the real version is inductive in 0.01 s.
+6. **The 25 + 4 AMM rows without a full verdict.** Not analyzed in these sessions. The true
+   ones (`Arbitrage_exists`, `Deposit_reversibility`, `Swap_reversibility`) have
+   existential witnesses over numbers.
+7. **The scope "nor with the cutoff c"** reads like "with c users" to the user. Proposed
+   wording: "nor by invariants for every n (cutoff c)". Not decided.
+8. **27 failures of the Kind 2 tests of `tests/test_trans.py`.** They were already there on
+   2026-10-21, with the same Lustre programs at the previous commit. Kind 2 reports a parser
+   error or no result. Not investigated.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates
