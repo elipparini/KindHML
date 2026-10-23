@@ -13,7 +13,7 @@ import threading
 import uuid
 import tempfile
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from .colors import PLAIN, Palette
 
@@ -214,17 +214,22 @@ def kill_runs(pid: int, alive: bool) -> None:
 SOLVERS = ("z3", "cvc5")
 
 
+def find_z3() -> str:
+    """$Z3, then the z3 next to the Python interpreter (pip package z3-solver), then z3 on
+    the PATH."""
+    bin_dir = os.path.dirname(os.path.abspath(sys.executable))
+    for c in (os.environ.get("Z3"), os.path.join(bin_dir, "z3"), shutil.which("z3")):
+        if c and os.path.isfile(c):
+            return c
+    raise FileNotFoundError("z3 not found: set $Z3 or pip install z3-solver")
+
+
 def solver_args(solver: str) -> List[str]:
-    """Kind 2 options selecting the SMT solver. z3 is looked up as $Z3, then next to the
-    Python interpreter (pip package z3-solver), then on the PATH."""
+    """Kind 2 options selecting the SMT solver (z3: `find_z3`)."""
     if solver == "cvc5":
         return ["--smt_solver", "cvc5"]
     if solver == "z3":
-        bin_dir = os.path.dirname(os.path.abspath(sys.executable))
-        for c in (os.environ.get("Z3"), os.path.join(bin_dir, "z3"), shutil.which("z3")):
-            if c and os.path.isfile(c):
-                return ["--smt_solver", "z3", "--z3_bin", c]
-        raise FileNotFoundError("z3 not found: set $Z3 or pip install z3-solver")
+        return ["--smt_solver", "z3", "--z3_bin", find_z3()]
     raise ValueError(f"unknown solver {solver}")
 
 
@@ -242,27 +247,11 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
         path = os.path.join(tmp, "task.lus")
         with open(path, "w") as f:
             f.write(lustre)
-        scope = _memory_scope()
-        unit = f"kindhml-{os.getpid()}-{uuid.uuid4().hex[:8]}" if scope else None
-        prefix = scope + [f"--unit={unit}"] if scope else []
         output = ["-json"] if cex else ["--color", "false", "--print_cex", "false"]
         limit = ["--timeout", str(timeout)] if timeout is not None else []
-        cmd = prefix + [kind2] + output + solver_args(solver) + limit + [
-            "--output_dir", tmp] + (extra_args or []) + [path]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                start_new_session=True,
-                                preexec_fn=None if scope else _limit_memory)
-        watcher = _Watcher(proc.pid)
-        watcher.start()
-        try:
-            raw, err = proc.communicate(timeout=timeout + 10 if timeout is not None else None)
-            killed = False
-        except subprocess.TimeoutExpired:
-            _cleanup(proc, unit, watcher)
-            raw, err = proc.communicate()
-            killed = True
-        finally:
-            _cleanup(proc, unit, watcher)
+        raw, err, killed, oom_kills = run_command(
+            [kind2] + output + solver_args(solver) + limit + ["--output_dir", tmp]
+            + (extra_args or []) + [path], timeout + 10 if timeout is not None else None)
     if save_to:
         with open(save_to, "w") as f:
             f.write(raw)
@@ -270,11 +259,37 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
     if killed:
         out.errors.append("Kind 2 did not stop in time and was killed")
         out.timed_out = True
-    if watcher.oom_kills:
+    if oom_kills:
         out.memory_killed = True
         out.errors.append(f"the memory limit ({memory_limit_mb()} MB) killed"
-                          f" {watcher.oom_kills} process(es)")
+                          f" {oom_kills} process(es)")
     return out
+
+
+def run_command(cmd: List[str], timeout: Optional[float]) -> Tuple[str, str, bool, int]:
+    """Run a solver command (Kind 2, or z3 for `direct.py`) in a systemd scope named after
+    this process (so that `kill_runs` finds it), with the memory limit of `memory_limit_mb`.
+    It is killed, with every process it started, after `timeout` seconds (None: no limit).
+    Returns (stdout, stderr, whether it was killed at the timeout, processes killed by the
+    memory limit)."""
+    scope = _memory_scope()
+    unit = f"kindhml-{os.getpid()}-{uuid.uuid4().hex[:8]}" if scope else None
+    prefix = scope + [f"--unit={unit}"] if scope else []
+    proc = subprocess.Popen(prefix + cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True,
+                            preexec_fn=None if scope else _limit_memory)
+    watcher = _Watcher(proc.pid)
+    watcher.start()
+    try:
+        raw, err = proc.communicate(timeout=timeout)
+        killed = False
+    except subprocess.TimeoutExpired:
+        _cleanup(proc, unit, watcher)
+        raw, err = proc.communicate()
+        killed = True
+    finally:
+        _cleanup(proc, unit, watcher)
+    return raw, err, killed, watcher.oom_kills
 
 
 def _json_objects(raw: str) -> List[dict]:

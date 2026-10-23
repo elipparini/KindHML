@@ -28,6 +28,7 @@ from . import lustre as L
 from . import syntax as S
 from .concrete import python_value, state_from_values
 from .cutoff import Cutoff, OutOfFragment, Scanner, check_program, nonnegative_maps
+from .direct import Declarations, Query, prepare
 from .encode_formula import FormulaEncoder
 from .encode_trans import (BALANCE, ST, TX, Encoder, constructed_var, default_value, field_var,
                            ghost_var, key_field, summed_maps, zero)
@@ -54,6 +55,7 @@ class Checks:
         # the built-in lemmas hold in every system (DESIGN.md, "Lemmas"): assumed, not checked
         self.axioms: List[str] = [n for n, _ in lemmas]
         self.candidates: Dict[str, StateFormula] = dict(lemmas + mine)
+        self._declarations: Optional[Declarations] = None     # for `direct_queries`
 
     def defaults(self, st: L.LExpr) -> L.LExpr:
         """Before C is constructed, the fields of C have their default values: they are
@@ -359,27 +361,51 @@ class Checks:
         property, and its 54 cases are proved in 3 s in one run; the swap-pool round trip is
         proved in 1 s as one property, and its 2 cases are unknown after 20 s in one run
         (0.6 s each in separate runs)."""
-        prog, s = self._program(), L.Var("s")
+        names, parts = self.property_goals(prop, invariants, split, witnesses)
+        node = L.Function(
+            "main", [("s", ST)], [], properties=list(zip(names, parts)),
+            comment=f"{prop.name} on every state satisfying the invariants"
+                    f" {', '.join(invariants) or '(none)'}")
+        return self._render(self._program(), node), names
+
+    def property_goals(self, prop: S.Property, invariants: List[str], split: bool = False,
+                       witnesses: Sequence = ()) -> Tuple[List[str], List[L.LExpr]]:
+        """The formulas of `property_check` over the free state s, with their names."""
+        s = L.Var("s")
         goal = L.op("=>", L.conj([self._conj(invariants, s), self.sum_axioms(invariants, s),
                                   self.witness_axioms(list(witnesses), s)]),
                     self._property(prop, s))
         parts = cases(goal) if split else [goal]
         names = [prop.name] if len(parts) == 1 else [f"{prop.name}__{i}"
                                                       for i in range(len(parts))]
-        node = L.Function(
-            "main", [("s", ST)], [], properties=list(zip(names, parts)),
-            comment=f"{prop.name} on every state satisfying the invariants"
-                    f" {', '.join(invariants) or '(none)'}")
-        return self._render(prog, node), names
+        return names, parts
+
+    def direct_queries(self, parts: List[L.LExpr], free_state: bool = True) -> List[Query]:
+        """The checks of the formulas `parts` (of `property_goals`, over the free state s, or
+        of `concrete_goal`) for z3 directly (`direct.py`), their universal quantifiers in
+        positive position replaced by free constants, as in `_render`. Raises
+        `direct.NotApplicable` if one is outside the fragment of `direct.py`."""
+        if self._declarations is None:
+            self._declarations = Declarations.of(self._program())
+        out = []
+        for p in parts:
+            inputs: List[Tuple[str, str]] = [("s", ST)] if free_state else []
+            body = hoist(p, inputs)
+            out.append(prepare(body, inputs, self._declarations))
+        return out
 
     def concrete_check(self, prop: S.Property, state: L.LExpr) -> str:
         """The property at a concrete state (a record literal): exact, unlike the bounded
         evaluation of `fuzz.py`. A Kind 2 counterexample means that the property is false there."""
         prog = self._program()
         node = L.Function("main", [("dummy", "bool")], [],
-                          properties=[(prop.name, self._property(prop, state))],
+                          properties=[(prop.name, self.concrete_goal(prop, state))],
                           comment=f"{prop.name} at a concrete state")
         return self._render(prog, node)
+
+    def concrete_goal(self, prop: S.Property, state: L.LExpr) -> L.LExpr:
+        """The formula of `concrete_check`."""
+        return self._property(prop, state)
 
     def _property(self, prop: S.Property, s: L.LExpr) -> L.LExpr:
         return self.fenc.prop(prop, s)

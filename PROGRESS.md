@@ -767,6 +767,44 @@ Steps:
    regressions (`pytest -m kind2 tests/test_regressions.py`), `Liquidation_attack_any` with
    600 s, and the lending families on the cluster.
 
+## Done (2026-10-23): existentials over numbers decided by z3 directly (with the user)
+
+Analysis of `results/cluster-20261022-2304.csv` (34 rows without a full verdict): 29 are AMM
+properties with an existential over a number (Swap_reversibility, Deposit_reversibility,
+Arbitrage_exists, Sandwich_slippage; 21 true, 8 false), none decided in 600 s, while the same
+properties with an explicit witness are proved in seconds. The others: vault
+`Two_steps_drainability_non_inflation` x2 (cutoff 8: the check with the cutoff has 9(n+1)^3 cases,
+6561), lending `Health_non_interference` (cutoff 6, 456 cases), lending
+`Liquidation_defence_exists` (no cutoff: an address existential under a universal), amm_real_v4
+`Sandwich` (its counterexample to induction loses the value of x).
+
+Cause (measured on the check of amm_simple_real `Arbitrage_exists` with 1 user; DESIGN.md Sect. 6,
+"Existentials over numbers"): nlqsat rejects the query because of divisions and if-then-else terms
+under the quantifier, and Kind 2's `check-sat-assuming` keeps z3 away from nlqsat anyway. After
+two rewritings under the quantifier, asked once, z3 decides it in 0.02 s.
+
+Changes:
+- `src/kindhml/direct.py`: translation of a node property into z3, check that divisions are
+  guarded, rewriting into pure real arithmetic, z3 run in the memory scope
+  (`kind2.run_command`, factored out of `kind2.run`), models;
+- `Checks.property_goals`, `direct_queries`, `concrete_goal`;
+- `_rounds`: with `fuzz.has_witness`, a direct attempt first for each premise set, split into
+  cases (proved cases kept across rounds); a refuted case gives s* (state variables of the check)
+  and the values of the universal variables; the exact checks of the fuzzer and of `normalized`
+  go to z3 directly first;
+- tests: `tests/test_direct.py`, `tests/contracts/swap_witness.sol`.
+
+An adversarial review (agents) found an unsound case, fixed with a regression test: `check_guards`
+compared guards and divisors across quantifiers by de Bruijn index, so `exists v . v != 0 &&
+exists w . (w = 0 && 1 / w = 5)` was reported valid. Also fixed: division by the numeral 0, the
+exact check of `normalized` through Kind 2 only, an irrational universal value that discarded s*.
+
+Results (every n, 120 s per property, one job at a time, 1 GB; `runs/direct_amm_simple*`,
+`runs/direct_amm_real`): 19 of the 21 true rows valid (most in under 5 s), 4 of the 8 false rows
+refuted. Still unknown: amm_real `Sandwich_slippage`, amm_real_v3 `Deposit_reversibility`, and the
+false `Sandwich_slippage` of amm_simple_real_v3, amm_real_v3, _v4, amm_int. amm_int
+`Swap_additivity` (integers, outside the new path): refuted in 88.6 s before and 91.5 s after.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

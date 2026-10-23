@@ -285,6 +285,51 @@ either finds a trace to s*, which is a counterexample of φ, or not; s* is shown
 user when the time limit expires, as a hint for stronger invariants. Unreachability of s*
 cannot be decided in general.
 
+**Existentials over numbers** (`direct.py`, 2026-10-23). A property with an existential over a
+real in positive position (`fuzz.has_witness`; e.g. AMM `Swap_reversibility`, `exists y` the
+amount that undoes a swap) was never decided through Kind 2: 29 of the 34 rows without a
+verdict in `results/cluster-20261022-2304.csv`, while the same properties with an explicit
+witness were proved in seconds. Two causes, both measured on the check of amm_simple_real
+`Arbitrage_exists` with 1 user (Kind 2: unknown after 15 s):
+* z3 has a complete procedure for quantified nonlinear real arithmetic (nlqsat), but it rejects
+  the query ("not NRA"): the encoding puts divisions (`ite(b != 0, a / b, old)`) and if-then-else
+  terms of number type under the quantifier, and z3's own rewritings (purify-arith,
+  blast-term-ite) do not act under binders;
+* Kind 2 asks with `check-sat-assuming`, so z3 uses its incremental solver (quantifier
+  instantiation), never nlqsat. The rewritten query, asked this way, still timed out (20 s);
+  z3's fallback parameters (`combined_solver.*`) do not apply with assumptions, and with
+  push/pop only two of four queries were decided.
+
+So for such properties the check on a free state and the exact check of the fuzzer at a
+concrete state also go to z3 directly: the formula of the node property (`Checks.property_goals`
+or `concrete_goal`, universal quantifiers hoisted as for Kind 2) is translated into a z3 term
+(records become their fields, Lustre functions are inlined), rewritten under each quantifier —
+a division a / b becomes a fresh variable d with `b != 0 -> b * d = a`, an if-then-else term
+ite(c, x, y) a fresh variable v with `(c -> v = x) && (!c -> v = y)`, both bound at the innermost
+quantifier around them (free constants outside) — and its negation is checked once, with
+`(check-sat-using (then simplify nlqsat))`, by the z3 binary in the memory scope of the Kind 2
+runs. Each fresh variable is determined by its definition (d when b != 0), so the rewriting is an
+equivalence if every division is guarded: wherever a / b occurs, a context makes its value
+irrelevant when b = 0 (`direct.check_guards`: the condition of an implication or of the branch of an
+if-then-else, another conjunct, a disjunct b = 0, implying b != 0). Divisions of contract code are
+guarded by def^i; a division written in a property may not be (the type checker only warns), and
+then, as with integers, addresses or methods that are not constants, the check is outside the
+fragment and goes to Kind 2 as before. Otherwise an unguarded `exists v . x / (y + v) > 0` would
+become valid (d free when b = 0).
+
+In the rounds (`_rounds`, task "proof"), for such a property the direct check comes first, for each
+premise set, split into cases (as a whole, the AMM checks with the cutoff timed out; split, each
+case takes at most 0.5 s); the cases share the budget, and those proved are kept for the next
+rounds. The Kind 2 attempts follow. A model of a refuted case gives s* (only the state variables
+that occur in the check: the property does not depend on the others, so a reachable state that
+agrees with s* on them is a counterexample; no s* if a value is irrational) and the values of the
+universal variables, printed with s*. The exact check of the fuzzer also goes to z3 directly, so
+that a reachable state where no witness exists is a counterexample. Results on the 29 rows with an
+existential over a number left unknown by the cluster run (every n, 120 s per property, against
+600 s there): 19 of the 21 true ones valid, most in under 5 s (amm_real `Sandwich_slippage` and
+amm_real_v3 `Deposit_reversibility` still unknown), and 4 of the 8 false ones refuted (the
+`Sandwich_slippage` of amm_simple_real_v3, amm_real_v3, _v4 and amm_int still unknown).
+
 **Random testing** (`fuzz.py`). Kind 2 rarely finds counterexamples through nonlinear
 transitions (on the integer AMM, BMC reaches depth 1 in 60 s, and a counterexample needs a
 constructor, a deposit and a swap). Random transactions, run by the reference interpreter

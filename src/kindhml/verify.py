@@ -20,7 +20,8 @@ from .errors import KindHMLError
 from .concrete import (describe_tx, python_value, state_from_values, state_literal,
                        state_paths)
 from .cutoff import Cutoff, OutOfFragment, Scanner, idle_users
-from .fuzz import Fuzzer, locations
+from . import direct
+from .fuzz import Fuzzer, has_witness, locations
 from .invariants import Checks, describe_state, final_values, python_constant, state_values
 from .invgen import (candidates as invariant_templates, generate as generate_invariants,
                      minimize as minimize_invariants)
@@ -582,10 +583,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
         out = dict(final)
         out.update({f"s.balance.k_{u}": zero for u in moved})
         checks = invs.checks_for(m)
-        lus = checks.concrete_check(prop, state_literal(state_from_values(out, system,
-                                                                          checks.enc),
-                                                        system, checks.enc))
-        return out if _free_run(lus, [prop.name], CONFIRM_SECONDS)[0] == "invalid" else None
+        literal = state_literal(state_from_values(out, system, checks.enc), system, checks.enc)
+        return out if exact(checks, literal, CONFIRM_SECONDS)[0] == "invalid" else None
 
     def extends(final: Optional[Dict[str, object]], participants: Optional[set],
                 m: int) -> Optional[str]:
@@ -652,6 +651,27 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     invs = _entry(context, program, cut.steps if ghost else users, mode, expand, invgen,
                   user_invariants, ghost)
     nonlinear = is_nonlinear(program)
+    # an existential over numbers in positive position: Kind 2 leaves the checks on free
+    # values undecided, z3 directly may decide them (`direct.py`)
+    numeric = has_witness(prop.formula)
+    direct_cases: Dict[tuple, Optional[_DirectCases]] = {}
+    direct_concrete = [numeric]     # false once an exact check is outside the fragment
+
+    def exact(checks: Checks, literal: L.LExpr, budget: float) -> Tuple[str, str]:
+        """The property at a concrete state (a record literal), exactly: (status, solver), the
+        status "invalid" if it is false there. With an existential over numbers, z3 directly
+        first (`_direct_concrete`), then Kind 2 with the time left."""
+        end = time.time() + budget
+        status, s = "inapplicable", ""
+        if direct_concrete[0]:
+            status, s = _direct_concrete(checks, prop, literal, budget * 3 / 4)
+            # the fragment does not depend on the state: no more translations
+            direct_concrete[0] = status != "inapplicable"
+        left = end - time.time()
+        if status in ("unknown", "inapplicable") and left > 1:
+            status, _, s = _free_run(checks.concrete_check(prop, literal), [prop.name], left)
+        return status, s
+
     budget = FIRST_BUDGET
     proof_open, target, engines, kind2_open = True, None, extra_args, side.kind2
     searching = side.search             # false after a proof by Kind 2 with users < goal
@@ -709,14 +729,19 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                     premises = invs.checks.premises(prop, invs.assumed())
                     witnesses = [invs.checks.witness_maps(p, prop) if ghost else []
                                  for p in premises]
-                    attempts = [(i, split, w) for w in (False, True)
-                                for i in range(len(premises)) for split in (False, True)
+                    # (premises, split, witness premises, by z3 directly): with an existential
+                    # over numbers, z3 directly first, split into cases (`_direct_check`)
+                    forms = ([(True, True)] if numeric else []) + [(False, False),
+                                                                   (True, False)]
+                    attempts = [(i, split, w, d) for w in (False, True)
+                                for i in range(len(premises)) for split, d in forms
                                 if not w or (witnesses[i] and users >= max(
                                     1, invs.checks.property_count(premises[i], prop,
                                                                   witnesses[i])))]
-                for i, split, w in list(attempts):
-                    if (i, split, w) not in attempts:
+                for a in list(attempts):
+                    if a not in attempts:
                         continue
+                    i, split, w, d = a
                     left = None if deadline is None else deadline - time.time()
                     if left is not None and left <= 1:
                         break
@@ -725,8 +750,18 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                     ws = witnesses[i] if w else []
                     u = (max(1, invs.checks.property_count(premises[i], prop, ws)) if ghost
                          else users)
-                    lus, names = invs.checks_for(u).property_check(prop, premises[i], split, ws)
-                    status, refuted, s = _free_run(lus, names, b)
+                    answer: Optional[direct.Answer] = None
+                    if d:
+                        status, refuted, s, answer = _direct_check(
+                            invs.checks_for(u), prop, premises[i], ws, b, direct_cases,
+                            (u, i, w))
+                        if status == "inapplicable":
+                            attempts.remove(a)
+                            continue
+                    else:
+                        lus, names = invs.checks_for(u).property_check(prop, premises[i],
+                                                                       split, ws)
+                        status, refuted, s = _free_run(lus, names, b)
                     if status == "valid":
                         return scoped(_valid(prop, "invariants", time.time() - start, s),
                                       max(invs.users, u), u)
@@ -734,18 +769,26 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                         # fewer premises refute it too: after the strongest, no attempt of
                         # this kind is left
                         strongest = i == len(premises) - 1
-                        attempts = [a for a in attempts
-                                    if a[2] != w or not (strongest or a[0] == i)]
+                        attempts = [x for x in attempts
+                                    if x[2] != w or not (strongest or x[0] == i)]
                         proof_open = bool(attempts)
                         if strongest and not w:
-                            left = None if deadline is None else deadline - time.time()
-                            out = kind2.run(lus, b if left is None else max(min(b, left), 1),
-                                            solver=s, extra_args=LIGHT_ENGINES, cex=True)
-                            res = next((p for p in out.properties if p.name == refuted),
-                                       None)
-                            target = state_values(res.counterexample) if res else {}
+                            if answer is not None:
+                                # the state variables of the check, if all rational: a
+                                # reachable state that agrees on them violates the property
+                                target = ({} if any(p.startswith("s.") for p in answer.missing)
+                                          else {p: direct.literal(v)
+                                                for p, v in answer.values.items()
+                                                if p.startswith("s.")})
+                            else:
+                                left = None if deadline is None else deadline - time.time()
+                                out = kind2.run(lus, b if left is None else max(min(b, left), 1),
+                                                solver=s, extra_args=LIGHT_ENGINES, cex=True)
+                                res = next((p for p in out.properties if p.name == refuted),
+                                           None)
+                                target = state_values(res.counterexample) if res else {}
                             target_users = u
-                            last.cti = describe_state(target)
+                            last.cti = describe_state(target) + _inputs(answer and answer.values)
                             known: set = set()
                             enc = invs.checks_for(u).enc
                             st = state_from_values({p: python_constant(v)
@@ -766,9 +809,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                         left = deadline_fuzz - time.time()
                         if left <= 1:
                             break
-                        lus = checks.concrete_check(
-                            prop, state_literal(st, checks.enc.system, checks.enc))
-                        status, _, s = _free_run(lus, [prop.name], left)
+                        status, s = exact(checks, state_literal(st, checks.enc.system,
+                                                                checks.enc), left)
                         if status == "invalid":
                             res = kind2.PropertyResult(prop.name, "invalid", len(txs), "fuzz",
                                                        time.time() - start)
@@ -1073,6 +1115,78 @@ def _free_run(lustre: str, names: List[str], budget: float):
         if valid >= set(names):
             return "valid", None, s
     return "unknown", None, ""
+
+
+DIRECT_SOLVER = "z3/nlqsat"         # the solver of the checks of `direct.py`
+
+
+@dataclass
+class _DirectCases:
+    """The cases of a check on a free state for z3 directly (`direct.py`), and those proved."""
+    names: List[str]
+    queries: List[direct.Query]
+    proved: set
+
+
+def _direct_check(checks: Checks, prop: S.Property, premises: List[str], witnesses: list,
+                  budget: float, cache: Dict[tuple, Optional[_DirectCases]], key: tuple):
+    """The check on a free state of `Checks.property_check`, split into cases, by z3 directly
+    (`direct.py`), within `budget` seconds shared by the cases still open: the cases proved
+    are kept in `cache` (under `key`) for the next rounds. Returns (status, the case refuted,
+    the solver, the answer of z3, with the model of the negation): "valid" when every case is
+    proved, "invalid" when one is refuted, "unknown", or "inapplicable" if the check is outside
+    the fragment of `direct.py` (Kind 2 then checks it). A formula too deep for the recursion
+    of the translation counts as outside."""
+    if key not in cache:
+        try:
+            names, parts = checks.property_goals(prop, premises, True, witnesses)
+            cache[key] = _DirectCases(names, checks.direct_queries(parts), set())
+        except (direct.NotApplicable, RecursionError):
+            cache[key] = None
+    cases = cache[key]
+    if cases is None:
+        return "inapplicable", None, "", None
+    deadline = time.time() + budget
+    todo = [(n, q) for n, q in zip(cases.names, cases.queries) if n not in cases.proved]
+    for k, (n, q) in enumerate(todo):
+        left = deadline - time.time()
+        if left <= 0.5:
+            break
+        answer = q.run(left / (len(todo) - k))
+        if answer.status == "valid":
+            cases.proved.add(n)
+        elif answer.status == "invalid":
+            return "invalid", n, DIRECT_SOLVER, answer
+    if len(cases.proved) == len(cases.names):
+        return "valid", None, DIRECT_SOLVER, None
+    return "unknown", None, "", None
+
+
+def _direct_concrete(checks: Checks, prop: S.Property, literal: L.LExpr, budget: float):
+    """The exact check of `Checks.concrete_check` by z3 directly: (status, solver), the status
+    "invalid" if the property is false at the state, or "inapplicable"."""
+    try:
+        [query] = checks.direct_queries([checks.concrete_goal(prop, literal)],
+                                        free_state=False)
+    except (direct.NotApplicable, RecursionError):
+        return "inapplicable", ""
+    return query.run(budget).status, DIRECT_SOLVER
+
+
+def _inputs(model: Optional[Dict[str, object]]) -> str:
+    """The values of the universal variables in a model of `_direct_check` (the inputs of
+    the check, e.g. q_x_3 for a variable x), for the description of a counterexample to
+    induction."""
+    if not model:
+        return ""
+    shown = []
+    for name, v in sorted(model.items()):
+        if name.startswith("q_"):
+            base = name[2:].rsplit("_", 1)[0]
+            text = str(v) if not isinstance(v, Fraction) or v.denominator != 1 \
+                else str(v.numerator)
+            shown.append(f"{base} = {text}")
+    return f"; with {', '.join(shown)}" if shown else ""
 
 
 def _free_run_cex(lustre: str, name: str, budget: float):
