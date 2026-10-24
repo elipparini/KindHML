@@ -394,7 +394,9 @@ product of two variables, a division by a variable) the rounds go on.
    and each has its own solver, which exceeds the memory on nonlinear problems).
 
 Verdicts say how they were found: `inductive` (an invariant proved by Houdini),
-`invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `kind2` (task 5).
+`invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `kind2-<ENGINE>` (task 5, with the
+engine of Kind 2 that found the verdict, in Kind 2's abbreviation: `kind2-BMC`, `kind2-IND`,
+`kind2-IND2`, `kind2-IC3IA`, `kind2-IC3QE`; `kind2` if Kind 2 does not name it).
 
 On the regressions and test contracts (30 s per property), 82 properties out of 89 match; 28 are
 decided by free-state checks (0.4–2.6 s each). Two properties at the edge of the time limit with

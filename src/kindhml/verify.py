@@ -894,7 +894,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                                            ghost_sums=ghost)
                     continue
                 if o.status in ("valid", "invalid"):
-                    o.method = "kind2"
+                    o.method = kind2_method(o.result)
                     final, named = None, None
                     if o.status == "invalid" and dual:
                         # without the lemmas, which BMC cannot prove: Kind 2 then stops at
@@ -1097,11 +1097,20 @@ def kind2_search(prop: S.Property, lustre: str, timeout: Optional[float],
             # Kind 2 stopped at a limit before reporting on the property (e.g. at its time
             # limit while parsing a large program): no verdict, not an error
             result = kind2.PropertyResult(prop.name, "unknown")
-        outcome = Outcome(prop, result, out.errors, s, "kind2")
+        outcome = Outcome(prop, result, out.errors, s, kind2_method(result))
         if outcome.status in ("valid", "invalid"):
             break
     outcome.memory_killed = killed
     return outcome
+
+
+def kind2_method(result: Optional[kind2.PropertyResult]) -> str:
+    """The method of a verdict of Kind 2, with the engine that found it: "kind2-BMC",
+    "kind2-IND", "kind2-IND2", "kind2-IC3IA", ... (Kind 2's abbreviations, in capitals); "kind2"
+    without a verdict or an engine."""
+    if result is None or result.status not in ("valid", "invalid") or not result.engine:
+        return "kind2"
+    return "kind2-" + "".join(ch if ch.isalnum() else "_" for ch in result.engine).upper()
 
 
 def is_nonlinear(program: S.Program) -> bool:

@@ -104,6 +104,15 @@ def test_text_output():
                           'Invalid_argument("Ltree.fold : quantified term")', "Wallclock timeout."]
 
 
+def test_method_names_the_engine():
+    """A verdict of Kind 2 has the method kind2-<ENGINE> (verify.kind2_method)."""
+    from kindhml.verify import kind2_method
+    out = {p.name: kind2_method(p) for p in parse_text(TEXT).properties}
+    assert out == {"L": "kind2-IND2", "P": "kind2-IC3IA", "Q": "kind2-BMC", "R": "kind2",
+                   "S": "kind2"}
+    assert kind2_method(None) == "kind2"
+
+
 def test_timeout_before_the_analysis():
     """When the time limit expires before the analysis (e.g. while parsing a large
     program), Kind 2 reports its timeout exception as an error, with no summary
