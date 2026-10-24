@@ -915,8 +915,27 @@ the quantifier). Tests: `tests/test_guided_values.py` (a crafted property whose 
 needs x = 1/1000). Results (server, 32 rows with nested modalities, 300 s, 5 shards; runs/server/cd3 against
 runs/server/nested-head, 54efdf0): amm_real_v4 `Sandwich` refuted by fuzz in 13.5 s (by reach in
 234 s before); the other verdicts unchanged, all in agreement with the ground truth.
-amm_simple_real_v4 `Sandwich_slippage` took 111 s (57 s before): rerun 3 times with and without
-C under the same load, it takes 105 s in all six runs, so the difference does not come from C.
+amm_simple_real_v4 `Sandwich_slippage` took 111 s (57 s before): rerun 3 times each under the
+same load, it takes 105 s with B and C, 105 s with B only, 53 s at 54efdf0. Not a regression of
+B: the guided search gives a number of candidates per round that depends on the time of the
+checks, so the counterexample found, and the round, depend on timing. Under cProfile, 54efdf0
+took 211 s (a counterexample of 2 steps) and B 56 s (13 steps); B encodes faster (0.07 s per
+call of `FormulaEncoder.prop` against 0.39 s, the memo of `free_vars`).
+
+## Done (2026-10-24): milestone D, candidate witnesses of existentials over methods
+
+Group 3 (lending-simple-* `Liquidation_defence_exists`, no cutoff). DESIGN.md, Sect. 7.8:
+`witness.instances` (instances with procedures and terms of the state; only when the modalities
+of the method variable are at the state of the existential, and no quantifier captures a
+variable of the terms) and a side of `_drive_any` (`verify._witness_rounds`) that checks the
+instances with a cutoff and no idle user on a free state, one per Kind 2 run. Measured on
+lending-simple-real (`experiments/witness/`): the 64 instances all have cutoff 4 and need no
+idle user; in one Kind 2 run, none was decided in 300 s; one at a time, each in 0.5 s (63
+refuted, `repay(debt[a])` proved): the property is proved for every n in 30 s after Houdini.
+Tests: `tests/test_witness.py` (crafted `tests/contracts/witness/lock.sol`). Results (same run
+as C): the 5 rows `Liquidation_defence_exists` of lending-simple-* are valid for every n (31-70
+s; unknown at 300 s before), each by the instance repay(debt[a]), in agreement with the ground
+truth.
 
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 

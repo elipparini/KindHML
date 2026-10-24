@@ -22,6 +22,7 @@ from .concrete import (describe_tx, python_value, state_from_values, state_liter
                        state_paths)
 from .cutoff import Cutoff, OutOfFragment, Scanner, idle_users
 from . import direct
+from . import witness
 from .fuzz import Fuzzer, has_witness, locations
 from .invariants import Checks, describe_state, final_values, python_constant, state_values
 from .invgen import (candidates as invariant_templates, generate as generate_invariants,
@@ -305,8 +306,13 @@ def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
         ghost = c is not None and c <= n_users
         return _drive_one(side(c if ghost else n_users, ghost, n_users, cut, climb=True))
     if n_users == ANY:
+        wit = None
+        if c is None and users_mode == "combined":
+            wit = _Side(cut.steps or 1, True, None, kind2=False, search=False, prop=prop)
+            wit.gen = _witness_rounds(program, prop, context, mode, expand, invgen,
+                                      user_invariants, start, deadline)
         return _drive_any(program, prop, cut, c if users_mode == "combined" else None,
-                          side, deadline)
+                          side, deadline, wit)
     if c is None or c > n_users:
         return _drive_combined(None, side(n_users, False, n_users, None),
                                _why_exact(cut, prop, n_users))
@@ -367,6 +373,90 @@ def _decided(o: Outcome) -> bool:
     return o.status in ("valid", "invalid")
 
 
+def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: str, expand,
+                    invgen: bool, user_invariants: bool, start: float,
+                    deadline: Optional[float]) -> Generator[None, None, Outcome]:
+    """Every number of users, a property without a cutoff: its instances with candidate
+    witnesses of an existential over a method (`witness.instances`; DESIGN.md, Sect. 7.8)
+    that have a cutoff and need no idle user (Cor. 7.8), checked on a free state with the
+    invariants of Houdini, one instance at a time (from the smallest premise set to the
+    strongest; a refuted instance goes on with the next set), the budget of a check doubled
+    after each pass over the instances, that of a round of the side at each round. An
+    instance implies the property; a proof of an instance holds for every n >= L = max(c_H,
+    its cutoff), and for every n < L since the instance needs no idle user. Without such a
+    proof, unknown (a refuted instance refutes nothing)."""
+    unknown = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
+    found = witness.instances(program, prop)
+    cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
+    if not found or cut.steps is None:
+        return unknown
+    checks = context[("cutoff checks", id(program), invgen, user_invariants)]
+    icut = checks.cutoff([inst for _, inst in found])
+    scanner = Scanner(System.make(program, 1))
+
+    def downward(inst: S.Property) -> bool:
+        try:
+            return scanner.idle_needed(inst.formula) == 0
+        except OutOfFragment:
+            return False
+
+    found = [(text, inst) for text, inst in found
+             if icut.of_property(inst.name) is not None and downward(inst)]
+    if not found:
+        return unknown
+    invs = _entry(context, program, cut.steps, mode, expand, invgen, user_invariants, True)
+    budget = FIRST_BUDGET
+    while invs.proved is None:          # Houdini (usually done by `prove_invariants`)
+        left = None if deadline is None else deadline - time.time()
+        if left is not None and left <= 1:
+            return unknown
+        invs.attempt(budget if left is None else min(budget, left))
+        budget *= 2
+        yield
+    # each instance: its premise sets (from the smallest) and the index of the current one;
+    # one Kind 2 run per check (with the 64 instances of Liquidation_defence_exists in one
+    # run, none was decided in 300 s; alone, each is decided in 0.5 s)
+    pending = [(text, inst, premises, 0) for text, inst in found
+               for premises in [invs.checks.premises(inst, invs.assumed())] if premises]
+    per = FIRST_BUDGET / 2              # the budget of a check, doubled after each pass
+    budget, k = FIRST_BUDGET, 0         # the budget of a round; the next instance
+    while pending:
+        end = time.time() + budget
+        while pending and time.time() < end:
+            left = None if deadline is None else deadline - time.time()
+            if left is not None and left <= 1:
+                return unknown
+            text, inst, premises, i = pending[k]
+            try:
+                u = max(1, invs.checks.property_count(premises[i], inst))
+            except OutOfFragment:
+                status = "invalid"      # not checked: the next premise set, if any
+            else:
+                lus, names = invs.checks_for(u).property_check(inst, premises[i])
+                status, _, solver = _free_run(lus, names, per if left is None
+                                              else min(per, left))
+            if status == "valid":
+                low = max(invs.users, u)
+                o = _valid(prop, "invariants", time.time() - start, solver)
+                o.scope = (f"n >= {low} by invariants"
+                           + (f", n < {low} by the proof with {_n(low)}, which holds for"
+                              " fewer users" if low > 1 else "")
+                           + f"; for the instance {text} of {prop.name}")
+                return o
+            if status == "invalid":
+                if i + 1 < len(premises):
+                    pending[k] = (text, inst, premises, i + 1)
+                else:
+                    del pending[k]
+                    k -= 1
+            k += 1
+            if k >= len(pending):
+                k, per = 0, per * 2
+        yield
+        budget *= 2
+    return unknown
+
+
 def _drive_one(side: _Side) -> Outcome:
     while not _step(side):
         pass
@@ -399,7 +489,8 @@ def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
 
 
 def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[int],
-               side: Callable[..., _Side], deadline: Optional[float]) -> Outcome:
+               side: Callable[..., _Side], deadline: Optional[float],
+               wit: Optional[_Side] = None) -> Outcome:
     """Every number of users n >= 1 (DESIGN.md, Sect. 7.6). The sides: with a cutoff c, the
     parameterized side P (its proofs hold for every n >= L, with L <= c) and the exact sides
     for m = 1, ..., c - 1; without a cutoff, the exact side for 1 user. While P has not proved
@@ -408,7 +499,9 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
     counterexample with any m users refutes the property. The property is valid if P proves
     it for every n >= L and each m < L is proved: by the exact side with m users, or, if no
     address variable is universal in the negation of the property, by any proof with M >= m
-    users, P's included (Cor. 7.8). After P's proof, the exact sides with m >= L stop."""
+    users, P's included (Cor. 7.8). After P's proof, the exact sides with m >= L stop. The
+    side `wit`, if any, proves instances of an existential over a method (`_witness_rounds`):
+    its proof holds for every n."""
     sides: List[_Side] = []
     exact: Dict[int, _Side] = {}
     # the numbers of users m proved, each with the users M of its proof: M = m, or M > m by
@@ -438,6 +531,8 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
     param = side(c, True, None, cut, kind2=False, alone=alone) if c is not None else None
     if param is not None:
         sides.append(param)
+    if wit is not None:
+        sides.append(wit)
     for m in range(1, c if c is not None else 2):
         add(m)
     low = None                          # P proved every n >= low
@@ -459,6 +554,9 @@ def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[in
                 return o
             if o.status != "valid":
                 continue
+            if s is wit:
+                close()
+                return o
             if s is param:
                 # P runs without Kind 2: its proofs, by invariants, hold from users_from on
                 assert o.users_from is not None, o.describe()
@@ -1039,8 +1137,9 @@ def cutoff_of(context: dict, program: S.Program, mode: str, expand, invgen: bool
                              _with_candidates(program, user_invariants) + tuple(templates),
                              program.balance_type)
         # every property, also the lemmas and the invariants, which can be checked by name
-        context[key] = Checks(extended, 1, mode, expand,
-                              ghost_sums=True).cutoff(list(program.properties))
+        checks = Checks(extended, 1, mode, expand, ghost_sums=True)
+        context[key] = checks.cutoff(list(program.properties))
+        context[("cutoff checks",) + key[1:]] = checks
     return context[key]
 
 

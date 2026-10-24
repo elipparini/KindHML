@@ -881,3 +881,30 @@ The number of users of the check, and so the cutoffs (Sect. 7.2-7.5), do not cha
 state still has n users; only the cases of the conclusion are fewer. With the reduction, the vault
 check has 135 cases for every n >= 3 (1.3 s of encoding with 8 users).
 
+### 7.8 Candidate witnesses of an existential over a method (2026-10-24)
+
+A property with `∃f : method. ∃args : calldataargs. ψ` in positive position may have no cutoff
+where an instance of it has one: lending-simple-real `Liquidation_defence_exists`, whose negation
+has the liquidator existential under the universal over the arguments, has none; its instance
+with f = repay and args = (debt[a]) is `Liquidation_defence`, which has cutoff 4. An instance
+implies the property (introduction of the existentials), so a proof of an instance for every n
+proves the property for every n. `witness.instances` gives the instances of the first such
+existential: each procedure p, and terms of the types of its parameters built from the state
+and the address variables in scope (the entries of the maps of that type at those variables,
+the scalar fields of that type; for an address, those variables, the contracts and null; for a
+boolean, true and false), the procedures with fewer combinations first, at most 64. The terms
+replace the arguments only if every modality with f is at the state of the existential (not
+under another modality, where the terms would denote values of a later state), and no
+quantifier in ψ binds a variable of the terms; otherwise there is no instance.
+
+With every number of users (combined mode) and no cutoff, a side of `_drive_any`
+(`verify._witness_rounds`) checks the instances that have a cutoff and need no idle user
+(Cor. 7.8) on a free state with the invariants of Houdini (cutoff c_H), one instance per Kind 2
+run, from its smallest premise set to the strongest (a refuted instance goes on with the next
+set), the budget of a check doubled after each pass over the instances, in rounds alternating
+with the exact sides. In one Kind 2 run, the 64 instances of `Liquidation_defence_exists` were
+all undecided after 300 s; one at a time, each is decided in 0.5 s (63 refuted, `repay(debt[a])`
+proved; `experiments/witness/`). A proved instance proves the property for every
+n >= L = max(c_H, u), u the cutoff of its check, and, since it needs no idle user, for every n < L (the proof with L users
+holds for fewer users); the scope names the instance. A refuted instance refutes nothing.
+
