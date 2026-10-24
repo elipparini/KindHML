@@ -14,7 +14,8 @@ from .colors import PLAIN, Palette
 from . import lustre as L
 from . import pretty
 from .builder import parse, parse_spec
-from .encode_formula import FormulaEncoder
+from . import lustre_subst
+from .encode_formula import EncodingTimeout, FormulaEncoder
 from .encode_trans import BALANCE, Encoder, param_var, proc_const, summed_maps
 from .errors import KindHMLError
 from .concrete import (describe_tx, python_value, state_from_values, state_literal,
@@ -235,6 +236,7 @@ class _Side:
     alone: Callable[[], bool] = lambda: True    # whether Kind 2 may get all the time left
     gen: Optional[Generator] = None
     outcome: Optional[Outcome] = None
+    prop: Optional[S.Property] = None   # for the outcome of an encoding stopped at the limit
 
 
 def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Optional[float],
@@ -251,7 +253,25 @@ def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Option
     Strategy "kind2": Kind 2 on (Init, Trans) and Φ(φ) with n_users users (`kind2_search`).
     Strategy "portfolio" (default): the sides of the users mode (`users_mode_of`), each one
     number of users run by `_rounds`, advanced one round at a time in turn (`_drive_one`,
-    `_drive_combined`, `_drive_any`)."""
+    `_drive_combined`, `_drive_any`).
+
+    The encoders stop at the time limit too (`lustre_subst.DEADLINE`): the encoding of
+    nested modalities once took hours, while the time limit was only checked between steps."""
+    saved = lustre_subst.DEADLINE
+    lustre_subst.DEADLINE = time.time() + timeout if timeout else None
+    try:
+        return _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
+                       solver, cex, strategy, context, invgen, user_invariants, parameterized,
+                       users_mode)
+    except EncodingTimeout as e:
+        return Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [e.message])
+    finally:
+        lustre_subst.DEADLINE = saved
+
+
+def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args, solver, cex,
+            strategy, context, invgen, user_invariants, parameterized, users_mode) -> Outcome:
+    """`verify`, without the time limit of the encoders."""
     if context is None:
         context = {}
     users_mode = users_mode_of(users_mode, parameterized)
@@ -272,6 +292,7 @@ def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Option
     def side(users: int, ghost: bool, goal: Optional[int], cut: Optional[Cutoff],
              **flags) -> _Side:
         s = _Side(users, ghost, goal, **flags)
+        s.prop = prop
         s.gen = _rounds(program, prop, s, cut, context, start, deadline, mode, expand,
                         extra_args, solver, cex, invgen, user_invariants)
         return s
@@ -328,12 +349,17 @@ def _exact_scope(o: Outcome, n_users: int, why: str) -> str:
 
 
 def _step(side: _Side) -> bool:
-    """One round of a side; whether it has ended (its outcome is then set)."""
+    """One round of a side; whether it has ended (its outcome is then set). An encoding stopped
+    at the time limit of the check ends the side without a verdict."""
     try:
         next(side.gen)
         return False
     except StopIteration as e:
         side.outcome = e.value
+        return True
+    except EncodingTimeout as e:
+        side.outcome = Outcome(side.prop, kind2.PropertyResult(side.prop.name, "unknown"),
+                               [e.message])
         return True
 
 
@@ -1062,14 +1088,20 @@ def prove_invariants(program: S.Program, n_users: Users, timeout: Optional[float
     deadline = time.time() + timeout if timeout else None
     b = FIRST_BUDGET
     pending = list(entries)
-    while pending:
-        for invs in pending:
-            left = None if deadline is None else deadline - time.time()
-            if left is not None and left <= 1:
-                return entries
-            invs.attempt(b if left is None else min(b, left))
-        pending = [invs for invs in pending if invs.proved is None]
-        b *= 2
+    saved, lustre_subst.DEADLINE = lustre_subst.DEADLINE, deadline
+    try:
+        while pending:
+            for invs in pending:
+                left = None if deadline is None else deadline - time.time()
+                if left is not None and left <= 1:
+                    return entries
+                invs.attempt(b if left is None else min(b, left))
+            pending = [invs for invs in pending if invs.proved is None]
+            b *= 2
+    except EncodingTimeout:
+        pass                    # the phase did not end: the rounds of the properties go on
+    finally:
+        lustre_subst.DEADLINE = saved
     return entries
 
 

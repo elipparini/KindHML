@@ -20,6 +20,7 @@ quantified (extension, see DESIGN.md).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -29,10 +30,52 @@ from . import syntax as S
 from .encode_trans import (BLOCKS, REVERT, TX, Encoder, addr_const, base_type, constructed_var,
                            default_value, key_field, param_var, proc_const)
 from .errors import KindHMLError
-from .lustre_subst import Inliner, eq, free_vars, ite
+from .lustre_subst import EncodingTimeout, Inliner, eq, free_vars, ite, tick
 from .model import NULL
 
 MODES = ("levels", "exists", "inline", "subst")
+# mode inline: the largest next state of a modality, as a tree (nodes of the Lustre text), that
+# is substituted into its body; a larger one gets fresh state variables (`modal`). INLINE_BOUND
+# for a next state that a nested modality whose method is a variable takes as input (its
+# transition is a case split over all procedures, which copies the input once per procedure),
+# LAST_BOUND for the others. On a copy of lending-simple-real Liquidation_attack_any (three
+# modalities whose methods are variables, 2 users), the next states have 4,200, 375,000 and 31
+# million nodes: with 20,000 or 100,000 as INLINE_BOUND, a state of 11,800 nodes was still
+# substituted, and the encoding took 150 s and 10 million nodes; with 5,000, 12 s and 0.8
+# million (without the bound: > 600 s). With INLINE_BOUND for every nested modality, the AMM
+# Sandwich properties (methods given, inputs of 2,900-7,300 nodes) were bound too, and their
+# refutations became slower (amm_real_v4 Sandwich: 238 s, then unknown at 600 s).
+INLINE_BOUND = int(os.environ.get("KINDHML_INLINE_BOUND", "5000"))
+LAST_BOUND = int(os.environ.get("KINDHML_LAST_BOUND", "1000000"))
+
+
+def _has_method_variable(e) -> bool:
+    """Whether the formula e (source syntax) contains a modality whose method is a variable."""
+    if isinstance(e, S.Modal) and not isinstance(e.proc, S.ProcConst):
+        return True
+    for name in getattr(e, "__dataclass_fields__", ()):
+        v = getattr(e, name)
+        for x in (v if isinstance(v, tuple) else (v,)):
+            if isinstance(x, S.Expr) and _has_method_variable(x):
+                return True
+    return False
+
+
+def tree_size(e: L.LExpr, memo: Optional[dict] = None) -> int:
+    """The number of nodes of e as a tree (as printed), computed on the shared nodes once."""
+    memo = {} if memo is None else memo
+    k = id(e)
+    if k not in memo:
+        n = 1
+        for name in getattr(e, "__dataclass_fields__", ()):
+            v = getattr(e, name)
+            for x in (v if isinstance(v, tuple) else (v,)):
+                if isinstance(x, tuple):
+                    x = x[-1]                     # (name, value) of a record literal
+                if isinstance(x, L.LExpr):
+                    n += tree_size(x, memo)
+        memo[k] = n
+    return memo[k]
 METHOD_COPIES = 32      # default bound on the copies of the expanded method quantifiers
 
 
@@ -75,6 +118,8 @@ class FormulaEncoder:
         # reduction by symmetry (`symmetric` of `prop`): the users bound by the reduced
         # address quantifiers around, or None where there is no reduction
         self._sym: Optional[List[str]] = None
+        # free variables of the nodes of the formula being encoded, by identity (`quantify`)
+        self._fv: Dict[int, tuple] = {}
 
     def fresh(self, base: str) -> str:
         self._fresh += 1
@@ -107,6 +152,7 @@ class FormulaEncoder:
             return self.phi(e, node, {})
         finally:
             self._sym = saved
+            self._fv = {}
 
     # ------------------------------------------------------------ reduction by symmetry
     #
@@ -138,6 +184,7 @@ class FormulaEncoder:
     # ------------------------------------------------------------ formulae
 
     def phi(self, e: S.Expr, node: Node, env: Dict[str, object]) -> L.LExpr:
+        tick()                          # the time limit (`lustre_subst.DEADLINE`)
         if isinstance(e, S.Quant):
             return self.quant(e, node, env)
         if isinstance(e, S.Modal):
@@ -234,18 +281,18 @@ class FormulaEncoder:
             return [L.op(">=", v, L.Int(0))]
         return []
 
-    @staticmethod
-    def quantify(kind: str, decls, guards: List[L.LExpr], body: L.LExpr) -> L.LExpr:
+    def quantify(self, kind: str, decls, guards: List[L.LExpr], body: L.LExpr) -> L.LExpr:
         """Q decls. (guards ∧/→ body). A guard mentioning a single declared variable is a
         domain restriction, satisfiable for every value of the other variables; a variable
         used only in such guards is dropped together with them."""
+        fv = lambda x: free_vars(x, self._fv)
         names = {n for n, _ in decls}
-        used = free_vars(body) & names
+        used = fv(body) & names
         for g in guards:
-            if len(free_vars(g) & names) > 1:     # e.g. the transition relation
-                used |= free_vars(g) & names
+            if len(fv(g) & names) > 1:     # e.g. the transition relation
+                used |= fv(g) & names
         decls = [(n, t) for n, t in decls if n in used]
-        guards = [g for g in guards if not (free_vars(g) & names - used)]
+        guards = [g for g in guards if not (fv(g) & names - used)]
         if not decls:
             return body
         if kind == "forall":
@@ -260,6 +307,7 @@ class FormulaEncoder:
         # property proved that way, tests/test_symmetry.py)
         here = lambda x: self._with(None, lambda: self.phi(x, node, env))
         decls: List[Tuple[str, str]] = []
+        bound_state = False             # mode inline: the next state got variables (universal)
         guards: List[L.LExpr] = []
         fields = {"sender": here(e.sender), "cx": L.Var(addr_const(e.contract)),
                   "fx": here(e.proc), "value": here(e.value)}
@@ -285,7 +333,26 @@ class FormulaEncoder:
         if self.mode == "subst":
             child = Node(L.call("trans", node.state, tx), node)
         elif self.mode == "inline":
-            child = Node(self.trans_term(e, node.state, tx), node)
+            nxt_term = self.trans_term(e, node.state, tx)
+            bound = INLINE_BOUND if _has_method_variable(e.body) else LAST_BOUND
+            if tree_size(nxt_term) > bound:
+                # a large next state gets fresh variables s' with s' = next state: equivalent
+                # since Trans is a function; the nested modalities and old(...) then use s'. A
+                # next state that a nested modality takes as input multiplies its size (as a
+                # tree): by 70-80 per modality whose method is a variable on
+                # lending-simple-real; the last one, or one with a given method, only adds
+                # to it. Without parameters to
+                # quantify, s' is universal (∀s'. s' = t → body, equivalent to ∃s'. s' = t ∧
+                # body since s' is determined), so that in positive position it becomes an
+                # input of the check (`invariants.hoist`), and the query has no quantifier:
+                # with ∃, the refutation of amm_real_v4 Sandwich took 308 s instead of 238
+                bound_state = not decls
+                nxt, nxt_decls = self.state_vars()
+                decls += nxt_decls
+                guards.append(eq(nxt, nxt_term))
+                child = Node(nxt, node)
+            else:
+                child = Node(nxt_term, node)
         elif self.mode == "exists":
             nxt, nxt_decls = self.state_vars()
             decls += nxt_decls
@@ -302,7 +369,7 @@ class FormulaEncoder:
         # transition is a function: ⟨t⟩∀a.ψ ⟺ ∀a.⟨t⟩ψ), not under existential variables
         keep = self._sym if self.mode == "inline" and not decls else None
         body = self._with(keep, lambda: self.phi(e.body, child, env))
-        return self.quantify("exists", decls, guards, body)
+        return self.quantify("forall" if bound_state else "exists", decls, guards, body)
 
     def trans_relation(self, e: S.Modal, state: L.LExpr, tx: L.LExpr, nxt: L.LExpr):
         """Trans(SVars^V, TVars^E, SVars^1..m, SVars^{V'}) written as scalar equations

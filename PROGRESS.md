@@ -867,6 +867,42 @@ refuted in 230.8 s (300 s limit; integers, outside the direct path) and lending_
 `Liquidation_attack_exists` in 132.4 s (600 s limit; by a direct exact check).
 lending_simple_real `Liquidation_defence_exists` (no cutoff) true up to 3 users (5 in 600 s).
 
+## Done (2026-10-24): server for the experiments; methods kind2-<ENGINE> (with the user)
+
+- From now on, every run of a solver (tests included) is on the server (SERVER.md, Sect. 7;
+  scripts in `tools/server/`, uncommitted with SERVER.md: they contain the server address).
+  Self-tests: same verdicts with 1 and 4 shards (34 tasks), regressions in 4 min with 6 shards.
+- 54efdf0: a verdict of Kind 2 has the method `kind2-BMC`, `kind2-IND`, ... (its engine).
+
+## Done (2026-10-24): milestone B, the encoding of nested modalities (with the user)
+
+Plan of 2026-10-23 (above). Measured on the server (`experiments/nested/`):
+- the next states of the copies `Any1-3` of `Liquidation_attack_any` (tests/contracts/nested/
+  any.sol) have, as trees, 4,200 / 375,000 / 31 million nodes (2 users); building them takes
+  1-2 s (shared in Python), the traversals and the Lustre text do not end;
+- the largest input of a nested modality, over all the properties with nested modalities (2 and
+  6 users): 37,000-3.3 million for `Liquidation_attack_any`, at most 14,800 for the others.
+Changes (DESIGN.md, Sect. 2, mode inline): a next state that a nested modality whose method is
+a variable takes as input gets variables s' (s' = next state) above 5,000 nodes, any other above
+10^6; s' is universal (∀s'. s' = t → body), so that it is hoisted in positive position;
+`free_vars` memoized by identity; the encoders stop at the time limit of the check
+(`EncodingTimeout`).
+Results (server, 5 shards, 300 s; runs/server/nested-head, nested3, nested4):
+- `Liquidation_attack_any` (9 rows) ends at its time limit (unknown) instead of hanging;
+- a first version bound every input of a nested modality above 5,000 nodes, the AMM `Sandwich*`
+  inputs included: two refutations close to the limit got slower (at 600 s: amm_real_v4
+  `Sandwich` 238 s, 308 s with ∃s', unknown with ∀s'; amm_simple_int `Sandwich_slippage` 234,
+  381, 384 s), others faster, the lending rows unchanged (all unknown). Hence the restriction to
+  modalities whose method is a variable: no AMM property is bound;
+- the Lustre texts of all the other properties (361 checks of the families and the regressions,
+  `experiments/nested/lustre_hashes.py`) are identical to those of 54efdf0, so their verdicts
+  do not change;
+- with the bounds disabled, a check of Any3 did not stop at its limit (636 s for 20 s): the
+  inlining of the transitions (`lustre_subst.Inliner.run`) did not check it; it now does;
+- tests on the server: all pass but `test_trans.py::test_trans_kind2` (31 cases), which fails at
+  54efdf0 too: the server's Kind 2 (v2.3.0-ge8216dd) rejects the map arguments of its check node
+  (a parser error), not the tool's programs.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

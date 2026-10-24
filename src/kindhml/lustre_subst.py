@@ -10,13 +10,49 @@ field by field), and constant conditions.
 
 from __future__ import annotations
 
-from typing import Dict
+import time
+from typing import Dict, Optional
 
 from . import lustre as L
+from .errors import KindHMLError
+
+# The time limit of the check being encoded (`verify` sets it): the encoders (`Inliner.run`,
+# `encode_formula.FormulaEncoder.phi`) raise EncodingTimeout past it, so that a check stops at
+# its time limit during an encoding too (the time limit is otherwise only checked between the
+# steps of the check).
+DEADLINE: Optional[float] = None
+_calls = 0
 
 
-def free_vars(e: L.LExpr) -> set:
-    """Names of the variables occurring free in e (enum constants excluded)."""
+class EncodingTimeout(KindHMLError):
+    pass
+
+
+def tick() -> None:
+    """Raises EncodingTimeout past DEADLINE (checked every 256 calls)."""
+    global _calls
+    _calls += 1
+    if DEADLINE is not None and _calls % 256 == 0 and time.time() > DEADLINE:
+        raise EncodingTimeout("the encoding of the formula did not end within the time limit")
+
+
+def free_vars(e: L.LExpr, memo: Optional[dict] = None) -> set:
+    """Names of the variables occurring free in e (enum constants excluded). With `memo` (a
+    dict, kept by the caller while the nodes live), the results are kept by node identity:
+    the terms of nested modalities share subterms, and a traversal as a tree is exponential in
+    the depth (the hash of a node also traverses the whole tree, so not by value)."""
+    if memo is None:
+        return _free_vars(e, None)
+    hit = memo.get(id(e))
+    if hit is not None and hit[0] is e:
+        return hit[1]
+    out = _free_vars(e, memo)
+    memo[id(e)] = (e, out)
+    return out
+
+
+def _free_vars(e: L.LExpr, memo: Optional[dict]) -> set:
+    free_vars = lambda x: globals()["free_vars"](x, memo)
     if isinstance(e, L.Var):
         return set() if is_const(e) else {e.name}
     if isinstance(e, (L.Int, L.Real, L.Bool)):
@@ -106,6 +142,7 @@ class Inliner:
         self.functions = functions
 
     def run(self, e: L.LExpr, env: Dict[str, L.LExpr]) -> L.LExpr:
+        tick()
         r = lambda x: self.run(x, env)
         if isinstance(e, L.Var):
             return env.get(e.name, e)

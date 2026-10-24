@@ -90,6 +90,26 @@ The child state `SVars^{V'}` is obtained in one of four ways (`--mode`):
   (`S^i`) in Python (`lustre_subst.py`), with constant folding. This is the substitution of
   χ_v described at the end of Sect. `sec:encoding:contract`; it is equivalent to the paper's
   ∃SVars^{V'} since Trans is a function (Lemma `lem:transition`).
+  A large next state gets fresh state variables s' with s' = next state (2026-10-24): the
+  terms of nested modalities share subterms in Python, but the Lustre text, and every traversal
+  as a tree, does not. With a method variable that is not expanded, the next state is an ite over
+  all the procedures, and each such modality multiplies the size of the term by 70-80 (copies of
+  lending-simple-real `Liquidation_attack_any`, 2 users: 4,200, 375,000 and 31 million nodes; its
+  encoding did not end, and hung the cluster runs). A next state that a nested modality whose
+  method is a variable takes as input is bound if it has more than `INLINE_BOUND` = 5,000 nodes,
+  any other if it has more than `LAST_BOUND` = 10^6. Measured on all the properties with nested
+  modalities (2 and 6 users): the inputs of `Liquidation_attack_any` have 37,000-3.3 million
+  nodes, all the others at most 14,800 (AMM `Sandwich*` 2,900-7,300, lending
+  `Liquidation_defence*` 4,200-14,800); a bound of 20,000 still left an input of 11,800 nodes
+  before a method variable (150 s, 10 million nodes), 5,000 gives 12 s and 0.8 million. A first
+  version bound every input of a nested modality above 5,000 nodes: the AMM `Sandwich*`
+  properties (methods given) were bound too, and two refutations close to the time limit got
+  slower (amm_real_v4 `Sandwich`: 238 s, then 308 s with ∃s', unknown at 600 s with ∀s'). Without
+  parameters to quantify, s' is universal (∀s'. s' = t → ψ, equivalent to ∃s'. s' = t ∧ ψ since
+  s' is determined): in positive position it becomes an input of the check, and the query has
+  no quantifier. `free_vars` is memoized by node identity. The encoders stop at the time limit
+  of the check (`lustre_subst.DEADLINE`, checked by `FormulaEncoder.phi` and `Inliner.run`,
+  `EncodingTimeout`): the check is then unknown.
 * `levels`: the paper's literal form: ∃ over fresh scalar copies of the levels SVars^1..m and
   of SVars^{V'}, constrained by the equations of Trans written on these scalars. This is also
   what the old tool did. Performance is similar to `inline`.
@@ -854,3 +874,4 @@ system (where it would weaken the induction hypothesis). `KINDHML_SYMMETRY=0` tu
 The number of users of the check, and so the cutoffs (Sect. 7.2-7.5), do not change: the free
 state still has n users; only the cases of the conclusion are fewer. With the reduction, the vault
 check has 135 cases for every n >= 3 (1.3 s of encoding with 8 users).
+

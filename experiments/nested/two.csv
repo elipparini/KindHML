@@ -1,0 +1,3 @@
+file,property
+contracts/amm-real/amm_real_v4.sol,Sandwich
+contracts/amm-simple-int/amm_simple_int.sol,Sandwich_slippage
