@@ -8,7 +8,7 @@ of the contracts (f, g numeric fields, m mappings to numbers, c constants of the
 
 * signs:        f >= 0;  f > 0;  forall u. m[u] >= 0
 * bounds:       f >= c;  f <= c
-* positivity:   (f > 0) == (g > 0);  f > 0 -> g > 0
+* positivity:   (f > 0) == (g > 0);  f > 0 -> g > 0;  f == 0 -> g == 0
 * holders:      forall u. !is_EOA(u) -> m[u] == 0         (only users hold m);
                 m[null] == 0;  m[null] >= 0              (quantifiers exclude null)
 * totals:       sum(m) == f;  sum(m) <= f;  forall u. m[u] <= f
@@ -167,6 +167,9 @@ def _templates(program: S.Program) -> List[Tuple[str, tuple]]:
         for g in nums:
             if g != f:
                 out.append((f"{f} > 0 -> {g} > 0", ("pimp", f, g)))
+                # without signs (amm_real_v3, where swaps can make the reserves negative),
+                # an empty pool still has no reserves: supply == 0 -> r0 == 0
+                out.append((f"{f} == 0 -> {g} == 0", ("zimp", f, g)))
     for m in maps:
         # address quantifiers exclude null, but sum(m) includes m[null]: without these, a
         # free state may have m[null] < 0, and sum(m) == f no longer bounds the entries
@@ -199,7 +202,8 @@ def minimize(keys: List[tuple]) -> List[tuple]:
     """The keys of the candidates not implied by others among `keys` (syntactically):
     f >= c by f >= c' (c' > c) or, for c <= 0, by f > 0; f > 0 by f >= c (c > 0);
     f <= c by f <= c' (c' < c); f > 0 -> g > 0 by (f > 0) == (g > 0) or by g positive;
-    (f > 0) == (g > 0) by f and g positive; sum(m) <= f by sum(m) == f; m[null] >= 0 by
+    (f > 0) == (g > 0) by f and g positive; f == 0 -> g == 0 by g > 0 -> f > 0 (or
+    (f > 0) == (g > 0)) when g >= 0; sum(m) <= f by sum(m) == f; m[null] >= 0 by
     m[null] == 0; g -> a != K by a != K; a != K and g -> a != K by a == K' (K' != K). Fewer,
     stronger premises are faster for the solvers."""
     ks = set(keys)
@@ -210,6 +214,9 @@ def minimize(keys: List[tuple]) -> List[tuple]:
 
     def positive(f):
         return ("gt", f) in ks or any(c > 0 for c in ge.get(f, []))
+
+    def nonnegative(f):
+        return ("gt", f) in ks or any(c >= 0 for c in ge.get(f, []))
 
     def elsewhere(a, k) -> bool:
         """a == k' for an address constant k' other than k."""
@@ -228,6 +235,11 @@ def minimize(keys: List[tuple]) -> List[tuple]:
                     or positive(k[2]))
         if kind == "peq":
             return positive(k[1]) and positive(k[2])
+        if kind == "zimp":
+            # f == 0 -> g == 0 by g > 0 -> f > 0 (or (f > 0) == (g > 0)) when g >= 0
+            f, g = k[1], k[2]
+            return nonnegative(g) and (("pimp", g, f) in ks or ("peq", f, g) in ks
+                                       or ("peq", g, f) in ks)
         if kind == "sum_le":
             return ("sum_eq", k[1], k[2]) in ks
         if kind == "null_ge":

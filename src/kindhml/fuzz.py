@@ -203,7 +203,7 @@ class Fuzzer:
             signal.setitimer(signal.ITIMER_REAL, 0)
 
     def guided(self, prop: S.Property, target: Dict[tuple, object], seconds: float,
-               limit: int = 3) -> List[Tuple[List[Tx], State]]:
+               limit: int = 3, filtered: bool = True) -> List[Tuple[List[Tx], State]]:
         """The candidates of `candidates`, on traces that go towards `target` (values by
         location, `locations`; e.g. a counterexample to induction): after the constructors,
         at each step, of GUIDED_TRIES random transactions that do not revert, the one whose
@@ -214,7 +214,11 @@ class Fuzzer:
         witness (see `candidates`), the candidate of a trace is its closest state to the
         target where the bounded evaluation is false, if not returned before: near the
         target, the bounded evaluation is a useful filter (on lending-simple-int,
-        Liquidation_attack_exists holds wherever its premise fails)."""
+        Liquidation_attack_exists holds wherever its premise fails). Without `filtered`, when
+        the exact checks are cheap (z3 directly, `direct.py`), it is the closest state of the
+        trace: on amm_real_v4 Sandwich_slippage, the filter rejected almost every state near
+        the target (one candidate in 12 s), while the closest state of the first trace
+        violates the property."""
         methods = [(c, p) for c, p in self.system.methods if p.name != S.CONSTRUCTOR]
         witness = has_witness(prop.formula)
         seen = self.seen.setdefault(prop.name, set())
@@ -247,7 +251,9 @@ class Fuzzer:
                     if d >= best[0]:
                         continue
                     best = (d, txs, st)
-                    if self._violates(prop, st, left):
+                    if witness and not filtered:
+                        closest = (txs, st)
+                    elif self._violates(prop, st, left):
                         if not witness:
                             out.append((txs, st))
                             break

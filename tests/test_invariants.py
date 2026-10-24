@@ -155,6 +155,20 @@ def test_minimize_keeps_the_strongest():
             ("addr_eq", b, "C"), ("addr", b), ("addr_if", j, True, b, "D"), ("addr_ne", b, "D")]
     assert invgen.minimize(keys) == [("addr", a), ("addr_if", j, False, a, "C"),
                                      ("addr_eq", b, "C")]
+    # f == 0 -> g == 0 by g > 0 -> f > 0 when g >= 0; kept when the sign of g is unknown
+    assert invgen.minimize([("zimp", f, g), ("pimp", g, f), ("ge", g, Fraction(0))]) == \
+        [("pimp", g, f), ("ge", g, Fraction(0))]
+    assert invgen.minimize([("zimp", f, g), ("pimp", g, f)]) == [("zimp", f, g), ("pimp", g, f)]
+
+
+def test_zero_templates():
+    """In amm_real_v3 the reserves can be negative, and Deposit_reversibility needs that an
+    empty pool has no reserves: supply == 0 -> r0 == 0 (and the same for r1)."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "amm-real", "amm_real_v3.sol"))
+    texts = invgen.templates(program)
+    assert "AMM.supply == 0 -> AMM.r0 == 0" in texts
+    assert "AMM.supply == 0 -> AMM.r1 == 0" in texts
+    assert len(invgen.candidates(program)) == len(texts)      # all well typed
 
 
 def test_hoist_universal_quantifiers():

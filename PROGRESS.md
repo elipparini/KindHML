@@ -805,6 +805,30 @@ refuted. Still unknown: amm_real `Sandwich_slippage`, amm_real_v3 `Deposit_rever
 false `Sandwich_slippage` of amm_simple_real_v3, amm_real_v3, _v4, amm_int. amm_int
 `Swap_additivity` (integers, outside the new path): refuted in 88.6 s before and 91.5 s after.
 
+## Done (2026-10-24): the rest of group 1 (with the user)
+
+The 6 rows left (300 s; `runs/group1_open_300`): amm_real `Sandwich_slippage` valid in 169 s and
+amm_real_v3 `Sandwich_slippage` refuted in 199 s (time only). For the others, measured with
+logs of the rounds (`direct_check`, searches, exact checks):
+- amm_real_v3 `Deposit_reversibility` (true): its s* has supply = 0, r0 = 0, r1 = -1 (the linear
+  price of v3 makes reserves negative, so the sign templates fail). With `supply == 0 -> (r0 == 0
+  && r1 == 0)` declared, Houdini proves it and the property is valid in 0.4 s: new template
+  `f == 0 -> g == 0` (`invgen.py`; `minimize` drops it when implied by `g > 0 -> f > 0` and
+  `g >= 0`).
+- amm_simple_real_v3 `Sandwich_slippage` (false): alone, the fuzz loop with direct exact checks
+  finds a counterexample in 12 s (13 checks); in the rounds, a search gave 3 candidates per round,
+  about 6 checks in 300 s. A search is now repeated until its time is over.
+- amm_real_v4 `Sandwich_slippage` (false): s* found at 77 s, but the guided search got 1-2 s per
+  round (one budget for fuzzing, a quarter for it), returned no candidate (the bounded evaluation
+  rejected the states near s*), and an undecided exact check took 14 s. Changes: fuzzing and Kind 2
+  swap their shares, the guided search proposes the closest states without the filter, an exact
+  check by z3 takes at most 5 s, the direct attempt gets the time of the two Kind 2 forms it
+  replaces, and its cases rotate.
+- amm_int `Sandwich_slippage` (integers): still unknown; outside `direct.py`.
+
+Results (all 29 rows, every n, 300 s; `runs/group1_all_300`): 28 correct (21 valid, 7 refuted in
+5-240 s); amm_int `Sandwich_slippage` unknown.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

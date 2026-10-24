@@ -239,7 +239,8 @@ borrowed).
 **Invariant generation** (`invgen.py`). Houdini only selects among candidates, so the tool
 generates them from templates over the fields of the contracts: signs (`f >= 0`, `f > 0`,
 `∀u. m[u] >= 0`), bounds by the constants of the contracts, positivity relations
-(`(f > 0) == (g > 0)`, `f > 0 -> g > 0`), holders (`∀u. !is_EOA(u) -> m[u] == 0`,
+(`(f > 0) == (g > 0)`, `f > 0 -> g > 0`, and `f == 0 -> g == 0` for fields without a sign,
+e.g. the reserves of amm_real_v3: `supply == 0 -> r0 == 0`), holders (`∀u. !is_EOA(u) -> m[u] == 0`,
 `m[null] == 0`; address quantifiers exclude null, so `m[null]` needs its own templates, or
 `sum(m) == f` does not bound the entries of a free state), totals (`sum(m) == f`,
 `sum(m) <= f`, `∀u. m[u] <= f`), reserves (`sum(m) == balance[C]`, `sum(m) <= balance[C]`
@@ -324,11 +325,27 @@ rounds. The Kind 2 attempts follow. A model of a refuted case gives s* (only the
 that occur in the check: the property does not depend on the others, so a reachable state that
 agrees with s* on them is a counterexample; no s* if a value is irrational) and the values of the
 universal variables, printed with s*. The exact check of the fuzzer also goes to z3 directly, so
-that a reachable state where no witness exists is a counterexample. Results on the 29 rows with an
-existential over a number left unknown by the cluster run (every n, 120 s per property, against
-600 s there): 19 of the 21 true ones valid, most in under 5 s (amm_real `Sandwich_slippage` and
-amm_real_v3 `Deposit_reversibility` still unknown), and 4 of the 8 false ones refuted (the
-`Sandwich_slippage` of amm_simple_real_v3, amm_real_v3, _v4 and amm_int still unknown).
+that a reachable state where no witness exists is a counterexample.
+
+Scheduling, for these properties (2026-10-24; each change measured on the rows still open):
+* the direct attempt of a premise set replaces its two Kind 2 forms, and gets their time (3
+  budgets): through Kind 2 none of these checks was decided, and with 1 budget shared by 16 cases
+  the refuted case of amm_real_v4 `Sandwich_slippage` was found or not depending on the time of
+  the cases before it; the cases also start one later at each round;
+* fuzzing gets the share of Kind 2 on the transition system (4 budgets), and Kind 2 1 budget;
+* a search of the fuzzer is repeated until its time is over (it gives a few candidates per
+  call: amm_simple_real_v3 `Sandwich_slippage` needed 13 exact checks, about 6 in 300 s before);
+* the guided search proposes the closest state of each trace without the bounded evaluation as a
+  filter (near the s* of amm_real_v4 `Sandwich_slippage`, the filter kept one state in 12 s);
+* an exact check by z3 takes at most 5 s, and is not followed by Kind 2 (on amm_real_v4, an
+  undecided one took the whole fuzzing budget of a round).
+
+Results on the 29 rows with an existential over a number left unknown by the cluster run (every
+n, against 600 s there): with 120 s per property and before these scheduling changes, 19 of the
+21 true ones valid and 4 of the 8 false ones refuted; with 300 s and the changes (and the
+template `f == 0 -> g == 0`, for amm_real_v3 `Deposit_reversibility`), 28 of 29: all the true
+ones valid (most in under 5 s, amm_real `Sandwich_slippage` in 20 s), and the false ones refuted
+in 5-240 s, except amm_int `Sandwich_slippage` (integers, outside `direct.py`).
 
 **Random testing** (`fuzz.py`). Kind 2 rarely finds counterexamples through nonlinear
 transitions (on the integer AMM, BMC reaches depth 1 in 60 s, and a counterexample needs a

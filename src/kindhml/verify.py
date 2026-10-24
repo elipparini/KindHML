@@ -664,11 +664,16 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
         end = time.time() + budget
         status, s = "inapplicable", ""
         if direct_concrete[0]:
-            status, s = _direct_concrete(checks, prop, literal, budget * 3 / 4)
+            # decided checks take 1-2 s on the AMM; an undecided one must not take the
+            # time of the next candidates (amm_real_v4 Sandwich_slippage: 14 s, the whole
+            # budget of the round, on its first candidate)
+            status, s = _direct_concrete(checks, prop, literal,
+                                         min(budget * 3 / 4, DIRECT_EXACT_SECONDS))
             # the fragment does not depend on the state: no more translations
             direct_concrete[0] = status != "inapplicable"
         left = end - time.time()
-        if status in ("unknown", "inapplicable") and left > 1:
+        # Kind 2 only outside the fragment: it decided none of these checks in our runs
+        if status == "inapplicable" and left > 1:
             status, _, s = _free_run(checks.concrete_check(prop, literal), [prop.name], left)
         return status, s
 
@@ -706,12 +711,19 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
             if left is not None and left <= 0:
                 return scoped(last, users)
             b = budget if left is None else min(budget, left)
+            # an existential over numbers checked by z3 directly: fuzzing gets the share of
+            # Kind 2 (on the transition system, no such property was decided in 600 s; on
+            # amm_real_v4 Sandwich_slippage, the guided search got 1-2 s per round, too
+            # little for a trace, while alone it finds the counterexample at once)
+            direct_on = any(v is not None for v in direct_cases.values())
+            if task == "fuzz" and direct_on:
+                b = KIND2_SHARE * budget if left is None else min(KIND2_SHARE * budget, left)
             if task == "kind2":
                 # With a time limit and linear arithmetic, Kind 2 gets all the time left: it
                 # restarts from scratch at each run, and the other tasks succeed in seconds
                 # or not at all. With nonlinear arithmetic, Kind 2 rarely concludes, and the
                 # rounds go on; so do they if other sides have their rounds.
-                b = KIND2_SHARE * budget
+                b = (1 if direct_on else KIND2_SHARE) * budget
                 if left is not None:
                     b = min(b, left) if nonlinear or not side.alone() else left
             if task == "invariants":
@@ -751,9 +763,17 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                     u = (max(1, invs.checks.property_count(premises[i], prop, ws)) if ghost
                          else users)
                     answer: Optional[direct.Answer] = None
+                    if not d and direct_cases.get((u, i, w)) is not None:
+                        # z3 directly checks these premises: through Kind 2, such checks were
+                        # never decided (none of 29 rows in 600 s), and they take time from
+                        # the other tasks
+                        attempts.remove(a)
+                        continue
                     if d:
+                        # the time of the two Kind 2 forms too, which it replaces
+                        b3 = 3 * budget if left is None else min(3 * budget, left)
                         status, refuted, s, answer = _direct_check(
-                            invs.checks_for(u), prop, premises[i], ws, b, direct_cases,
+                            invs.checks_for(u), prop, premises[i], ws, b3, direct_cases,
                             (u, i, w))
                         if status == "inapplicable":
                             attempts.remove(a)
@@ -798,14 +818,22 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                             guide = {loc: have[loc] for loc in known if loc in have} or None
             elif task == "fuzz":
                 deadline_fuzz = time.time() + b
-                # first towards the counterexample to induction, if any, then at random; each
-                # search gets half of the time left, its confirmations the rest
-                searches = ([(target_users, lambda f, t: f.guided(prop, guide, t))]
+                # first towards the counterexample to induction, if any, then at random; the
+                # first search gets half of the time, the last all the time left. A search
+                # gives a few candidates at a time, so it is repeated until its time is over:
+                # with only one call per round, the exact checks of a property with an
+                # existential over numbers (each about 1 s, `direct.py`) were too few to reach
+                # the counterexample of amm_simple_real_v3 Sandwich_slippage in 300 s, which
+                # the loop alone finds in 12 s
+                # with cheap exact checks (z3 directly), every closest state is a candidate
+                searches = ([(target_users, lambda f, t: f.guided(
+                                prop, guide, t, filtered=not direct_concrete[0]))]
                             if guide else []) + [(users, lambda f, t: f.candidates(prop, t))]
-                for m, search in searches:
+                for k, (m, search) in enumerate(searches):
                     checks = invs.checks_for(m)
-                    share = (deadline_fuzz - time.time()) / 2
-                    for txs, st in search(invs.fuzzer_for(m), share):
+                    end = (deadline_fuzz if k == len(searches) - 1
+                           else time.time() + (deadline_fuzz - time.time()) / 2)
+                    for txs, st in _repeated(search, invs.fuzzer_for(m), end):
                         left = deadline_fuzz - time.time()
                         if left <= 1:
                             break
@@ -1117,7 +1145,19 @@ def _free_run(lustre: str, names: List[str], budget: float):
     return "unknown", None, ""
 
 
+def _repeated(search: Callable, fuzzer: Fuzzer, end: float):
+    """The candidates of `search(fuzzer, seconds)` (a few per call), called again until `end`
+    or until a call gives none. The time a caller spends on a candidate counts: each call gets
+    3/4 of the time left, so that some is left for the checks of its candidates."""
+    while time.time() < end - 1:
+        found = search(fuzzer, (end - time.time()) * 3 / 4)
+        if not found:
+            return
+        yield from found
+
+
 DIRECT_SOLVER = "z3/nlqsat"         # the solver of the checks of `direct.py`
+DIRECT_EXACT_SECONDS = 5.0          # at most for an exact check at a concrete state by z3
 
 
 @dataclass
@@ -1126,6 +1166,7 @@ class _DirectCases:
     names: List[str]
     queries: List[direct.Query]
     proved: set
+    start: int = -1                 # the rounds so far: the rotation of the open cases
 
 
 def _direct_check(checks: Checks, prop: S.Property, premises: List[str], witnesses: list,
@@ -1148,6 +1189,13 @@ def _direct_check(checks: Checks, prop: S.Property, premises: List[str], witness
         return "inapplicable", None, "", None
     deadline = time.time() + budget
     todo = [(n, q) for n, q in zip(cases.names, cases.queries) if n not in cases.proved]
+    # each round starts one case later, so that the same undecided cases do not always take
+    # the time first (on amm_real_v4 Sandwich_slippage, the refuted case was found or not
+    # depending on the time the cases before it took)
+    cases.start += 1
+    if todo:
+        r = cases.start % len(todo)
+        todo = todo[r:] + todo[:r]
     for k, (n, q) in enumerate(todo):
         left = deadline - time.time()
         if left <= 0.5:
