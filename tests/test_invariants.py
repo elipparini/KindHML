@@ -17,6 +17,7 @@ from kindhml.fuzz import Fuzzer, distance, has_witness, locations
 from kindhml.model import System
 from kindhml.reference import FormulaEvaluator, initial_state
 from kindhml.typecheck import check
+from kindhml import invariants as invariants_module
 from kindhml.invariants import Checks, cases, constant, hoist, state_fields, state_values
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,10 +75,15 @@ def test_cases_through_implications():
     assert cases(L.op("and", L.op("=>", a, b), c_)) == [L.op("=>", a, b), c_]
 
 
-def test_property_split_into_cases():
+def test_property_split_into_cases(monkeypatch):
     """Swap_reversibility quantifies over the addresses but null: one case per user (with
-    the sender Pool, the transaction reverts, and its case simplifies to true)."""
+    the sender Pool, the transaction reverts, and its case simplifies to true). With the
+    reduction by symmetry (the default), the cases of u1 and u2 are the same up to a renaming
+    of the users, and only that of u1 is checked."""
     program, c = checks()
+    _, names = c.property_check(program.prop("Swap_reversibility"), ["Inv"], split=True)
+    assert names == ["Swap_reversibility"]
+    monkeypatch.setattr(invariants_module, "SYMMETRY", False)
     _, names = c.property_check(program.prop("Swap_reversibility"), ["Inv"], split=True)
     assert names == ["Swap_reversibility__0", "Swap_reversibility__1"]
     _, names = c.property_check(program.prop("Swap_reversibility"), ["Inv"])

@@ -808,3 +808,47 @@ asked:
 * every n: "n ≥ L by invariants, n < L one by one", or "n < L by the proof(s) with M
   users, which hold(s) for fewer users" (Cor. 7.8); "counterexample with m users"; without a
   verdict, "true ...; no verdict with m users, ..., nor with the cutoff c".
+
+### 7.7 Reduction by symmetry of the checks on free states (2026-10-24)
+
+The checks on free states expand the address quantifiers into conjunctions over the addresses,
+so a property with k universal address variables has about (n + |contracts|)^k cases with n
+users: vault `Two_steps_drainability_non_inflation` (a, b, c, two method variables) has
+9 (n + 1)^3 cases, 6561 with its cutoff of 8 users (2.1 MB of Lustre and 21 s of encoding with
+5 users); lending `Health_non_interference` 456 cases with its cutoff 6. Most cases are the
+same up to a renaming of the users.
+
+Claim. Let G = ∀s. P(s) → Φ(s) be a check on a free state s, where P (the invariants, the
+built-in facts, the sum and witness premises) names no user, i.e. P(π s) ⟺ P(s) for every
+permutation π of the users (π acts on the keys of the maps, on the address values of the fields,
+and leaves null, the contracts and the ghost sums unchanged). Let ∀a. ψ(a) be an address
+quantifier of Φ in positive position: reached from the top of Φ only through conjunctions, the
+conclusions of implications, universal quantifiers, and modalities whose next state is a term
+(`inline`, no existential parameter), and let B be the users bound by such quantifiers around
+it. Then G is valid iff it is valid with ∀a. ψ(a) replaced by the conjunction over the
+contracts, the users of B, and one user not in B.
+Argument. (1) The universal quantifiers in positive position can be moved to the front:
+A → ∀a.ψ ⟺ ∀a.(A → ψ) and (∀a.ψ) ∧ χ ⟺ ∀a.(ψ ∧ χ) (a not free in A, χ), and
+⟨t⟩∀a.ψ ⟺ ∀a.⟨t⟩ψ because the transition is a function that does not depend on a. So
+G ⟺ ∀ā. ∀s. P(s) → Ψ(s, ā), with ā these variables. (2) For a permutation π of the users,
+∀s. P(s) → Ψ(s, ā) ⟺ ∀s. P(s) → Ψ(s, π ā): substitute π s for s; P is invariant, and
+Ψ(π s, π ā) ⟺ Ψ(s, ā) since Ψ names no user other than those of ā (its other address
+quantifiers, not reduced, range over all the addresses, a set invariant under π; the
+transitions commute with π, Sect. 7.4). (3) So G needs one tuple ā per orbit, i.e. per pattern
+of equalities of its components with the users. A conjunction splits the check
+(∀s. P → (ψ1 ∧ ψ2) is the conjunction of the checks of ψ1 and ψ2), so only the variables on one
+path matter together; choosing each of them among the contracts, the users of the variables
+before it on the path, and the next user gives one representative of each orbit.
+The reduction stops at a disjunction: in (∀a.A) ∨ (∀b.B), the variables a and b must be chosen
+together, and choosing b like a misses b = u2 when a = u1 (`tests/test_symmetry.py`, Either).
+It also stops at negations, premises, existentials, the terms of a modality (sender, value and
+arguments: a quantified boolean argument is a term, and its reduced value would be weaker; an
+audit found a false property proved that way, `tests/test_symmetry.py`), and constructs other
+than the above; it is
+used for the property of a check on free states and for the conclusion of a step of Houdini,
+never for a check at a concrete state (not invariant under π) or for Kind 2 on the transition
+system (where it would weaken the induction hypothesis). `KINDHML_SYMMETRY=0` turns it off.
+
+The number of users of the check, and so the cutoffs (Sect. 7.2-7.5), do not change: the free
+state still has n users; only the cases of the conclusion are fewer. With the reduction, the vault
+check has 135 cases for every n >= 3 (1.3 s of encoding with 8 users).

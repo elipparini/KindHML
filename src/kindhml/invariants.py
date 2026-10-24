@@ -20,6 +20,7 @@ system: each is one Kind 2 run on free values (a node without `pre`), i.e. one S
 
 from __future__ import annotations
 
+import os
 from fractions import Fraction
 from itertools import product
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -37,6 +38,10 @@ from .model import NULL, System
 from .reference import FormulaEvaluator, Interpreter, Tx, default
 
 StateFormula = Callable[[L.LExpr], L.LExpr]
+
+# the reduction by symmetry of the checks on free states (DESIGN.md, Sect. 7.7); off with
+# KINDHML_SYMMETRY=0, for comparisons
+SYMMETRY = os.environ.get("KINDHML_SYMMETRY", "1") != "0"
 
 
 class Checks:
@@ -228,7 +233,8 @@ class Checks:
         for c, p in self.enc.system.methods:
             if only is not None and (c.name, p.name) != (only[0].name, only[1].name):
                 continue
-            after = self.fenc.state_formula(self._after(c, p, self._guard(conj)), s)
+            after = self.fenc.state_formula(self._after(c, p, self._guard(conj)), s,
+                                            symmetric=SYMMETRY)
             node = L.Function("main", [("s", ST)], [],
                               properties=[("step", L.op("=>", premise, after))],
                               comment=f"the candidate invariants after a call of {p.name}")
@@ -312,7 +318,8 @@ class Checks:
             for n in names:
                 prop = f"step_{n}__{c.name}_{p.name}"
                 guarded = self._guard(self.program.prop(n).formula)
-                after = self.fenc.state_formula(self._after(c, p, guarded), s)
+                after = self.fenc.state_formula(self._after(c, p, guarded), s,
+                                                symmetric=SYMMETRY)
                 props.append((prop, L.op("=>", premise, after)))
                 about[prop] = n
         node = L.Function("main", [("s", ST)], [], properties=props,
@@ -372,9 +379,11 @@ class Checks:
                        witnesses: Sequence = ()) -> Tuple[List[str], List[L.LExpr]]:
         """The formulas of `property_check` over the free state s, with their names."""
         s = L.Var("s")
+        # the premises name no user: the property can be reduced by symmetry (DESIGN.md,
+        # Sect. 7.7)
         goal = L.op("=>", L.conj([self._conj(invariants, s), self.sum_axioms(invariants, s),
                                   self.witness_axioms(list(witnesses), s)]),
-                    self._property(prop, s))
+                    self._property(prop, s, symmetric=SYMMETRY))
         parts = cases(goal) if split else [goal]
         names = [prop.name] if len(parts) == 1 else [f"{prop.name}__{i}"
                                                       for i in range(len(parts))]
@@ -407,8 +416,8 @@ class Checks:
         """The formula of `concrete_check`."""
         return self._property(prop, state)
 
-    def _property(self, prop: S.Property, s: L.LExpr) -> L.LExpr:
-        return self.fenc.prop(prop, s)
+    def _property(self, prop: S.Property, s: L.LExpr, symmetric: bool = False) -> L.LExpr:
+        return self.fenc.prop(prop, s, symmetric)
 
     def relevant(self, prop: L.LExpr, invariants: List[str],
                  transitive: bool = True) -> List[str]:

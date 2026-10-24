@@ -829,6 +829,44 @@ logs of the rounds (`direct_check`, searches, exact checks):
 Results (all 29 rows, every n, 300 s; `runs/group1_all_300`): 28 correct (21 valid, 7 refuted in
 5-240 s); amm_int `Sandwich_slippage` unknown.
 
+## Done (2026-10-24): group 2, reduction by symmetry of the checks on free states (with the user)
+
+Group 2 of the analysis of `results/cluster-20261022-2304.csv`: vault and vault_v2
+`Two_steps_drainability_non_inflation` (cutoff 8) and lending_simple_real
+`Health_non_interference` (cutoff 6), no verdict in 600 s. The check with the cutoff of the vault
+property has 9 (n + 1)^3 cases (6561 with 8 users); most are the same up to a renaming of the
+users.
+
+Change (DESIGN.md, Sect. 7.7): in the property of a check on free states and in the conclusion of
+a step of Houdini, a universal address quantifier in positive position (through conjunctions,
+conclusions of implications, universal quantifiers and inline modalities) ranges over the
+contracts, the users bound around it and one more user; `KINDHML_SYMMETRY=0` turns it off. The
+vault check then has 135 cases for every n >= 3 (1.3 s of encoding with 8 users).
+
+Soundness:
+- my design first reduced through disjunctions; I found it unsound before implementing it
+  ((∀a. m[a] > 0) || (∀b. m[b] <= 0), valid if b is chosen like a): the reduction stops there;
+- an audit by an independent agent found that the terms of a modality (a quantified boolean
+  argument) were reduced, and gave a false property that the reduced check proved; confirmed
+  with a test that failed before the fix; fixed (terms are encoded without the reduction);
+- tests: `tests/test_symmetry.py` (patterns, where the reduction stops, two solver tests).
+
+Results (every n, 300 s; `runs/group2_300`): the 3 rows valid, "n >= 8 (or 6) by invariants,
+fewer users by the proof with 8 (or 6) users": vault 29.4 s, vault_v2 27.6 s, lending 7.0 s.
+
+All 157 rows of the cluster run, every n, 120 s per property (against 600 s there;
+`runs/cluster_rows_120`): 150 correct, against 123. A regression of ff17998 showed up:
+amm_int `Deposit_reversibility` (integers), refuted in 34 s before, unknown. Bisected with copies
+of the code: the guided search ran without its filter until the first exact check found the
+direct path inapplicable. Fixed: the filter is dropped only once a direct check (exact, or on
+free states) has applied; refuted in 34.9 s again, and amm_real_v4 and amm_simple_real_v3
+`Sandwich_slippage` still refuted (152 s, 57 s at 300 s). Not decided at 120 s, decided in the
+cluster run in more time: amm_simple_int `Sandwich_slippage` (178.6 s) and lending_simple_real
+`Liquidation_attack_exists` (474 s); rerun with the fix, amm_simple_int `Sandwich_slippage`
+refuted in 230.8 s (300 s limit; integers, outside the direct path) and lending_simple_real
+`Liquidation_attack_exists` in 132.4 s (600 s limit; by a direct exact check).
+lending_simple_real `Liquidation_defence_exists` (no cutoff) true up to 3 users (5 in 600 s).
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

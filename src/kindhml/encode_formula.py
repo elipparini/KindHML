@@ -72,6 +72,9 @@ class FormulaEncoder:
         self.inliner = Inliner({f.name: f for f in enc.helpers()})
         self._fresh = 0
         self._copies = 1          # copies made by the expanded method quantifiers around
+        # reduction by symmetry (`symmetric` of `prop`): the users bound by the reduced
+        # address quantifiers around, or None where there is no reduction
+        self._sym: Optional[List[str]] = None
 
     def fresh(self, base: str) -> str:
         self._fresh += 1
@@ -79,21 +82,58 @@ class FormulaEncoder:
 
     # ------------------------------------------------------------ properties
 
-    def prop(self, r: S.Property, state: L.LExpr = L.Var("s")) -> L.LExpr:
+    def prop(self, r: S.Property, state: L.LExpr = L.Var("s"),
+             symmetric: bool = False) -> L.LExpr:
         """(∧_C constructed_C) → Φ(φ): φ is required in the states where all contracts are
-        constructed (DESIGN.md, Sect. 4)."""
+        constructed (DESIGN.md, Sect. 4). With `symmetric`, reduced by symmetry (`_reduced`):
+        only for the conclusion of a check on free states whose premises name no user."""
         self._fresh = 0
         constructed = L.conj([L.proj(state, constructed_var(c.name)) for c in self.system.contracts])
-        prop = L.op("=>", constructed, self.phi(r.formula, Node(state), {}))
+        prop = L.op("=>", constructed, self._top(r.formula, Node(state), symmetric))
         if self.mode in ("levels", "inline"):
             prop = self.inliner.run(prop, {})     # inline helpers and simplify
         return prop
 
-    def state_formula(self, e: S.Expr, state: L.LExpr) -> L.LExpr:
+    def state_formula(self, e: S.Expr, state: L.LExpr, symmetric: bool = False) -> L.LExpr:
         """Φ(φ) at `state` for a formula without modalities (an invariant): required in
-        every reachable state, so without the guard on construction."""
-        f = self.phi(e, Node(state), {})
+        every reachable state, so without the guard on construction. `symmetric` as for
+        `prop`."""
+        f = self._top(e, Node(state), symmetric)
         return self.inliner.run(f, {}) if self.mode in ("levels", "inline") else f
+
+    def _top(self, e: S.Expr, node: Node, symmetric: bool) -> L.LExpr:
+        saved, self._sym = self._sym, ([] if symmetric else None)
+        try:
+            return self.phi(e, node, {})
+        finally:
+            self._sym = saved
+
+    # ------------------------------------------------------------ reduction by symmetry
+    #
+    # In a check on free states, ∀s. P(s) → Φ(s), where the premises P name no user (they are
+    # invariant under the permutations of the users), a universal address quantifier of Φ in
+    # positive position, outside existentials and disjunctions, needs only one value per
+    # pattern of equalities with the users bound by such quantifiers around it: the contracts,
+    # these users, and one more (DESIGN.md, Sect. 7.7). `_sym` holds these users along the
+    # current path; None where the reduction stops.
+
+    def _with(self, sym: Optional[List[str]], f):
+        saved, self._sym = self._sym, sym
+        try:
+            return f()
+        finally:
+            self._sym = saved
+
+    def _reduced(self) -> List[Tuple[L.LExpr, Optional[List[str]]]]:
+        """The values of a reduced universal address quantifier, each with the users bound
+        in its body: the contracts, the users bound around, and the first other user."""
+        bound = self._sym
+        out = [(L.Var(addr_const(c.name)), bound) for c in self.system.contracts]
+        out += [(L.Var(addr_const(u)), bound) for u in bound]
+        rest = [u for u in self.system.users if u not in bound]
+        if rest:
+            out.append((L.Var(addr_const(rest[0])), bound + [rest[0]]))
+        return out
 
     # ------------------------------------------------------------ formulae
 
@@ -111,7 +151,15 @@ class FormulaEncoder:
                 raise KindHMLError("a variable of type calldataargs can only be the argument"
                                    " of a modality", e.pos)
             return env[e.name]
-        return self.enc.expr(e, node.state, None, other=lambda x: self.phi(x, node, env))
+        if self._sym is not None and isinstance(e, S.BinOp) and e.op in ("&&", "->"):
+            # the reduction goes on in both conjuncts and in the conclusion of an implication
+            # (A → ∀a.B ⟺ ∀a.(A → B)); not in a premise, nor in a disjunction, where the
+            # quantifiers of the two disjuncts would need their patterns together
+            left = (self.phi(e.left, node, env) if e.op == "&&"
+                    else self._with(None, lambda: self.phi(e.left, node, env)))
+            return L.op("and" if e.op == "&&" else "=>", left, self.phi(e.right, node, env))
+        return self._with(None, lambda: self.enc.expr(
+            e, node.state, None, other=lambda x: self.phi(x, node, env)))
 
     def quant(self, e: S.Quant, node: Node, env) -> L.LExpr:
         """∀x:T.ψ and ∃x:T.ψ. Addresses range over all addresses but null (DESIGN.md);
@@ -124,17 +172,30 @@ class FormulaEncoder:
                 comps[param_var(v.contract, v.proc, v.name)] = L.Var(name)
                 decls.append((name, base_type(v.type)))
                 guards += self.domain(L.Var(name), v.type, address_quantifier=False)
-            body = self.phi(e.body, node, {**env, e.var: comps})
+            body = self._with(self._sym if e.kind == "forall" else None,
+                              lambda: self.phi(e.body, node, {**env, e.var: comps}))
         elif e.type.name in self.expand and self._expands(e.type):
             values = self.finite_domain(e.type)
             outer = self._copies
             if e.type == S.METHOD:
                 self._copies = outer * len(values)
+            if e.kind == "forall" and e.type == S.ADDRESS and self._sym is not None:
+                scoped = self._reduced()
+            else:
+                # a method quantifier keeps the reduction around it if universal
+                keep = self._sym if e.kind == "forall" else None
+                scoped = [(v, keep) for v in values]
             try:
-                parts = [self.phi(e.body, node, {**env, e.var: v}) for v in values]
+                parts = [self._with(sym, lambda v=v: self.phi(e.body, node, {**env, e.var: v}))
+                         for v, sym in scoped]
             finally:
                 self._copies = outer
             return L.conj(parts) if e.kind == "forall" else L.disj(parts)
+        elif e.kind == "exists":
+            name = self.fresh(f"q_{e.var}")
+            decls = [(name, base_type(e.type))]
+            guards = self.domain(L.Var(name), e.type, address_quantifier=True)
+            body = self._with(None, lambda: self.phi(e.body, node, {**env, e.var: L.Var(name)}))
         else:
             name = self.fresh(f"q_{e.var}")
             decls = [(name, base_type(e.type))]
@@ -194,7 +255,10 @@ class FormulaEncoder:
         return L.Quant(kind, tuple(decls), inner)
 
     def modal(self, e: S.Modal, node: Node, env) -> L.LExpr:
-        here = lambda x: self.phi(x, node, env)
+        # the sender, value and arguments are terms, not formulas in positive position: a
+        # quantified boolean argument must not be reduced by symmetry (an audit found a false
+        # property proved that way, tests/test_symmetry.py)
+        here = lambda x: self._with(None, lambda: self.phi(x, node, env))
         decls: List[Tuple[str, str]] = []
         guards: List[L.LExpr] = []
         fields = {"sender": here(e.sender), "cx": L.Var(addr_const(e.contract)),
@@ -234,7 +298,10 @@ class FormulaEncoder:
             decls += level_decls
             guards.append(relation)
             child = Node(nxt, node)
-        body = self.phi(e.body, child, env)
+        # the reduction by symmetry goes on in the body only if the next state is a term (the
+        # transition is a function: ⟨t⟩∀a.ψ ⟺ ∀a.⟨t⟩ψ), not under existential variables
+        keep = self._sym if self.mode == "inline" and not decls else None
+        body = self._with(keep, lambda: self.phi(e.body, child, env))
         return self.quantify("exists", decls, guards, body)
 
     def trans_relation(self, e: S.Modal, state: L.LExpr, tx: L.LExpr, nxt: L.LExpr):

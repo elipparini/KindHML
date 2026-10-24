@@ -655,7 +655,9 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     # values undecided, z3 directly may decide them (`direct.py`)
     numeric = has_witness(prop.formula)
     direct_cases: Dict[tuple, Optional[_DirectCases]] = {}
-    direct_concrete = [numeric]     # false once an exact check is outside the fragment
+    # whether the exact checks go to z3 directly: [tried, applicable]; tried false until the
+    # first exact check, applicable false once one is outside the fragment
+    direct_concrete = [numeric, False]
 
     def exact(checks: Checks, literal: L.LExpr, budget: float) -> Tuple[str, str]:
         """The property at a concrete state (a record literal), exactly: (status, solver), the
@@ -670,7 +672,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
             status, s = _direct_concrete(checks, prop, literal,
                                          min(budget * 3 / 4, DIRECT_EXACT_SECONDS))
             # the fragment does not depend on the state: no more translations
-            direct_concrete[0] = status != "inapplicable"
+            direct_concrete[0] = direct_concrete[1] = status != "inapplicable"
         left = end - time.time()
         # Kind 2 only outside the fragment: it decided none of these checks in our runs
         if status == "inapplicable" and left > 1:
@@ -794,6 +796,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                         proof_open = bool(attempts)
                         if strongest and not w:
                             if answer is not None:
+                                # in the fragment on free states, so at concrete states too
+                                direct_concrete[1] = direct_concrete[0]
                                 # the state variables of the check, if all rational: a
                                 # reachable state that agrees on them violates the property
                                 target = ({} if any(p.startswith("s.") for p in answer.missing)
@@ -827,7 +831,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                 # the loop alone finds in 12 s
                 # with cheap exact checks (z3 directly), every closest state is a candidate
                 searches = ([(target_users, lambda f, t: f.guided(
-                                prop, guide, t, filtered=not direct_concrete[0]))]
+                                prop, guide, t, filtered=not direct_concrete[1]))]
                             if guide else []) + [(users, lambda f, t: f.candidates(prop, t))]
                 for k, (m, search) in enumerate(searches):
                     checks = invs.checks_for(m)
