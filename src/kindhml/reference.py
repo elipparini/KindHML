@@ -275,6 +275,17 @@ def real_domain(int_domain) -> list:
                   | {Fraction(a + b, 2) for a, b in zip(ints, ints[1:])})
 
 
+def _of_type(v, t):
+    """The number v (from a solver's model) as a value of the number type t, or None."""
+    if isinstance(v, bool) or not isinstance(v, (int, Fraction)):
+        return None
+    if t == S.REAL:
+        return Fraction(v)
+    if t in (S.INT, S.UINT) and Fraction(v).denominator == 1 and (t == S.INT or v >= 0):
+        return int(v)
+    return None
+
+
 class FormulaEvaluator:
     """Bounded evaluation of formulae (Fig. `fig:logSem`) over a sequence of flagged states,
     head first. Quantified integers range over `int_domain`, reals over `int_domain` and the
@@ -288,6 +299,9 @@ class FormulaEvaluator:
         self.ints = list(int_domain)
         self.reals = real_domain(self.ints)
         self.max_records, self.rnd = max_records, rnd
+        # values tried first for the quantified variables of these names (the fuzzer guided by
+        # a counterexample to induction gives its values of the universal variables)
+        self.extra: Dict[str, list] = {}
 
     def values(self, t: S.Type, quantifier: bool = True):
         if t == S.INT:
@@ -374,6 +388,10 @@ class FormulaEvaluator:
                 domain = self.records(self.system.param_vars)
             else:
                 domain = self.values(e.type)
+                extra = [x for x in (_of_type(v, e.type) for v in self.extra.get(e.var, ()))
+                         if x is not None and x not in domain]
+                if extra:
+                    domain = extra + list(domain)
             results = (self.eval(e.body, seq, {**env, e.var: v}) for v in domain)
             return all(results) if e.kind == "forall" else any(results)
         if isinstance(e, S.Modal):

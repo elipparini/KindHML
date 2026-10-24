@@ -394,6 +394,12 @@ Liquidation_attack_exists violate the conservation of T0, and 1 random state in 
 a borrower and an attacker as in the premise of these attacks. The guided search finds a counterexample of
 Liquidation_attack within 1 s (20 seeds out of 20; 2.2 s when the property is evaluated at
 every state), and one of Liquidation_attack_exists within 8 s for 10 seeds out of 20.
+The values of the universal variables of s* (the inputs `q_x_k` of the check, from the model of
+z3 or the counterexample of Kind 2, `verify._input_values`) are tried first by the bounded
+evaluation of the guided search, for the variables of those names (2026-10-24, `values` of
+`Fuzzer.guided`; the evaluation converts them to the type of the quantifier and drops those
+that do not fit): the fixed domain of the evaluation misses, e.g., the small amount x of a
+counterexample of amm_real_v4 `Sandwich`.
 
 **Portfolio** (default; `--strategy kind2` gives the previous behaviour). The tool does not
 give up: it runs rounds of the tasks below, one Kind 2 job at a time, each with the round's

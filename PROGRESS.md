@@ -903,6 +903,21 @@ Results (server, 5 shards, 300 s; runs/server/nested-head, nested3, nested4):
   54efdf0 too: the server's Kind 2 (v2.3.0-ge8216dd) rejects the map arguments of its check node
   (a parser error), not the tool's programs.
 
+## Done (2026-10-24): milestone C, the universal values of a counterexample to induction
+
+Group 4 of the analysis of cluster-20261022-2304 (amm_real_v4 `Sandwich`): the guided fuzzer
+evaluates the property on a fixed domain of numbers, which misses the small amounts of the
+counterexample. The values of the universal variables of the counterexample to induction s*
+(inputs `q_x_k` of the check, from z3's model or from Kind 2's counterexample:
+`verify._input_values`, `_stream_inputs`) are now tried first by the bounded evaluation of the
+guided search (`Fuzzer.guided(values=...)`; `reference._of_type` converts them to the type of
+the quantifier). Tests: `tests/test_guided_values.py` (a crafted property whose counterexample
+needs x = 1/1000). Results (server, 32 rows with nested modalities, 300 s, 5 shards; runs/server/cd3 against
+runs/server/nested-head, 54efdf0): amm_real_v4 `Sandwich` refuted by fuzz in 13.5 s (by reach in
+234 s before); the other verdicts unchanged, all in agreement with the ground truth.
+amm_simple_real_v4 `Sandwich_slippage` took 111 s (57 s before): rerun 3 times with and without
+C under the same load, it takes 105 s in all six runs, so the difference does not come from C.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

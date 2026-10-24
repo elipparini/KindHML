@@ -203,7 +203,20 @@ class Fuzzer:
             signal.setitimer(signal.ITIMER_REAL, 0)
 
     def guided(self, prop: S.Property, target: Dict[tuple, object], seconds: float,
-               limit: int = 3, filtered: bool = True) -> List[Tuple[List[Tx], State]]:
+               limit: int = 3, filtered: bool = True,
+               values: Optional[Dict[str, list]] = None) -> List[Tuple[List[Tx], State]]:
+        """See `_guided`; `values`, if given, are values of quantified variables (by name), tried
+        first by the bounded evaluation: those of the counterexample to induction, e.g. the
+        small amount x of amm_real_v4 Sandwich, which the fixed domain of the evaluation
+        misses (DESIGN.md, Sect. 6)."""
+        saved, self.ev.extra = self.ev.extra, dict(values or {})
+        try:
+            return self._guided(prop, target, seconds, limit, filtered)
+        finally:
+            self.ev.extra = saved
+
+    def _guided(self, prop: S.Property, target: Dict[tuple, object], seconds: float,
+                limit: int = 3, filtered: bool = True) -> List[Tuple[List[Tx], State]]:
         """The candidates of `candidates`, on traces that go towards `target` (values by
         location, `locations`; e.g. a counterexample to induction): after the constructors,
         at each step, of GUIDED_TRIES random transactions that do not revert, the one whose

@@ -713,6 +713,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     k2_note = ""                        # the last run of Kind 2 after such a proof, if undecided
     target_users = users                # the users of the counterexample to induction
     guide: Optional[Dict[tuple, object]] = None     # its known values, for the fuzzer
+    inputs: Dict[str, list] = {}        # and those of its universal variables, by name
     premises: List[List[str]] = []
     witnesses: List[list] = []          # the maps of the witness premises of each premise set
     attempts: Optional[List[tuple]] = None
@@ -837,8 +838,11 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                                 res = next((p for p in out.properties if p.name == refuted),
                                            None)
                                 target = state_values(res.counterexample) if res else {}
+                            model = (answer.values if answer is not None
+                                     else _stream_inputs(res.counterexample if res else None))
                             target_users = u
-                            last.cti = describe_state(target) + _inputs(answer and answer.values)
+                            last.cti = describe_state(target) + _inputs(model)
+                            inputs = _input_values(model)
                             known: set = set()
                             enc = invs.checks_for(u).enc
                             st = state_from_values({p: python_constant(v)
@@ -857,7 +861,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                 # the loop alone finds in 12 s
                 # with cheap exact checks (z3 directly), every closest state is a candidate
                 searches = ([(target_users, lambda f, t: f.guided(
-                                prop, guide, t, filtered=not direct_concrete[1]))]
+                                prop, guide, t, filtered=not direct_concrete[1],
+                                values=inputs))]
                             if guide else []) + [(users, lambda f, t: f.candidates(prop, t))]
                 for k, (m, search) in enumerate(searches):
                     checks = invs.checks_for(m)
@@ -1264,6 +1269,30 @@ def _direct_concrete(checks: Checks, prop: S.Property, literal: L.LExpr, budget:
     except (direct.NotApplicable, RecursionError):
         return "inapplicable", ""
     return query.run(budget).status, DIRECT_SOLVER
+
+
+def _stream_inputs(counterexample: Optional[list]) -> Dict[str, object]:
+    """The values of the inputs q_... (the universal variables of the check) at step 0 of a
+    Kind 2 counterexample (JSON), as values of the reference interpreter."""
+    out: Dict[str, object] = {}
+    for block in counterexample or []:
+        for stream in block.get("streams", []):
+            if stream["name"].startswith("q_"):
+                values = dict((int(k), v) for k, v in stream.get("instantValues", []))
+                if 0 in values:
+                    out[stream["name"]] = python_value(values[0])
+    return out
+
+
+def _input_values(model: Optional[Dict[str, object]]) -> Dict[str, list]:
+    """The numbers of `_inputs`, by the name of their variable in the property (q_x_3 is x),
+    for the guided fuzzer (`Fuzzer.guided`): its bounded evaluation tries them first. Names
+    are fresh in a check, so a variable may have several values."""
+    out: Dict[str, list] = {}
+    for name, v in sorted((model or {}).items()):
+        if name.startswith("q_") and isinstance(v, (int, Fraction)) and not isinstance(v, bool):
+            out.setdefault(name[2:].rsplit("_", 1)[0], []).append(v)
+    return out
 
 
 def _inputs(model: Optional[Dict[str, object]]) -> str:
