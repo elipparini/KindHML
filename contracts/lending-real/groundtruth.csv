@@ -6,7 +6,8 @@ lending_real.sol,Health_non_interference,true,
 lending_real.sol,Liquidation_defence,true,
 lending_real.sol,Liquidation_attack,false,only the oracle sets the price.
 lending_real.sol,Liquidation_attack_any,false,"every user can be healthy, and then no call of a increases its net worth."
-lending_real.sol,Exchange_rate_monotone,true,
+lending_real.sol,Exchange_rate_monotone,false,redeeming the last credits resets xr0 to 1 after interest was accrued and repaid (2026-10-25)
+lending_real.sol,Exchange_rate_monotone_credits,true,
 lending_real.sol,Net_worth_preserved,true,
 lending_real.sol,Deposit_reversibility,true,
 lending_real.sol,Borrow_safe,true,
@@ -18,7 +19,8 @@ lending_real_v2.sol,Health_non_interference,false,anyone can lower the price of 
 lending_real_v2.sol,Liquidation_defence,true,
 lending_real_v2.sol,Liquidation_attack,true,anyone can set the price.
 lending_real_v2.sol,Liquidation_attack_any,true,anyone can set the price.
-lending_real_v2.sol,Exchange_rate_monotone,true,
+lending_real_v2.sol,Exchange_rate_monotone,false,redeeming the last credits resets xr0 to 1 after interest was accrued and repaid (2026-10-25)
+lending_real_v2.sol,Exchange_rate_monotone_credits,true,
 lending_real_v2.sol,Net_worth_preserved,true,
 lending_real_v2.sol,Deposit_reversibility,true,
 lending_real_v2.sol,Borrow_safe,true,
@@ -30,7 +32,8 @@ lending_real_v3.sol,Health_non_interference,true,
 lending_real_v3.sol,Liquidation_defence,true,
 lending_real_v3.sol,Liquidation_attack,false,only the oracle sets the price.
 lending_real_v3.sol,Liquidation_attack_any,false,"every user can be healthy, and then no call of a increases its net worth."
-lending_real_v3.sol,Exchange_rate_monotone,true,
+lending_real_v3.sol,Exchange_rate_monotone,false,redeeming the last credits resets xr0 to 1 after interest was accrued and repaid (2026-10-25)
+lending_real_v3.sol,Exchange_rate_monotone_credits,true,
 lending_real_v3.sol,Net_worth_preserved,true,
 lending_real_v3.sol,Deposit_reversibility,true,
 lending_real_v3.sol,Borrow_safe,false,
@@ -42,7 +45,8 @@ lending_real_v4.sol,Health_non_interference,true,
 lending_real_v4.sol,Liquidation_defence,true,
 lending_real_v4.sol,Liquidation_attack,true,"the price updates of the attacker revert, but the liquidation of the healthy borrower succeeds, with a gain of 0.1 * v."
 lending_real_v4.sol,Liquidation_attack_any,true,liquidate does not check the health of the borrower.
-lending_real_v4.sol,Exchange_rate_monotone,true,
+lending_real_v4.sol,Exchange_rate_monotone,false,redeeming the last credits resets xr0 to 1 after interest was accrued and repaid (2026-10-25)
+lending_real_v4.sol,Exchange_rate_monotone_credits,true,
 lending_real_v4.sol,Net_worth_preserved,true,
 lending_real_v4.sol,Deposit_reversibility,true,
 lending_real_v4.sol,Borrow_safe,true,

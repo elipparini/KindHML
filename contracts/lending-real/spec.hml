@@ -69,10 +69,18 @@ property Liquidation_attack_any {
         old(old(old(w0[a] + w1[a] * p1 + c0[a] * xr0 + c1[a] * p1 - sdebt[a] * idx)))
 }
 
-// The exchange rate never decreases (Lemma 3.4).
+// The exchange rate never decreases (Lemma 3.4). False: after interest is accrued and repaid,
+// redeeming the last credits resets xr0 to 1 (constructor, deposit0(1), borrow(1/2), accrue,
+// repay(11/20), redeem0(1): xr0 from 21/20 to 1).
 property Exchange_rate_monotone {
     forall a : address . forall f : method . forall args : calldataargs .
     << a : Lending.f(args) >> xr0 >= old(xr0)
+}
+
+// The exchange rate never decreases while credits remain.
+property Exchange_rate_monotone_credits {
+    forall a : address . forall f : method . forall args : calldataargs .
+    << a : Lending.f(args) >> (sc0 > 0 -> xr0 >= old(xr0))
 }
 
 // Deposits, redeems, borrows and repays do not change the net worth of anyone (Lemma 4.1).
