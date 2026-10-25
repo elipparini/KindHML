@@ -3,13 +3,14 @@
 KindHML asks SMT queries in two ways: through Kind 2 (`kind2.run`), which writes, with its
 flag --smt_trace, one incremental script per solver process (BMC, k-induction, IC3, invariant
 generation, ...); and through z3 directly (`direct.Query`), one script per query. With tracing
-on, the scripts are saved in a directory, in two forms:
-* incremental/: a Kind 2 script as the solver received it, cleaned: the responses (comments),
+on, the scripts are saved in a directory, first by logic (below), then in two forms, in the
+subdirectories <logic>/incremental/ and <logic>/standalone/:
+* incremental: a Kind 2 script as the solver received it, cleaned: the responses (comments),
   the options, and the commands that do not change the assertions (`get-value`, `apply`,
   `echo`, ...) are removed; a truncated last command (Kind 2 killed at its timeout) is
   dropped; the answer of each check-sat, when the trace has it, is recorded with
   `(set-info :status ...)`; the logic is the one computed below;
-* standalone/: one script per check-sat, with the declarations, definitions and assertions
+* standalone: one script per check-sat, with the declarations, definitions and assertions
   live at that point (after the pushes and pops), the assumptions of `check-sat-assuming`
   asserted, and one `check-sat`.
 
@@ -32,7 +33,8 @@ operators applied to constant terms. A symbol bound by `let`, or defined by a nu
 an application of a defined function is not (conservatively). `abs` is linear. The name
 follows SMT-LIB: [QF_][A][UF][BV][N|L][IA|RA|IRA] (e.g. QF_NIA, NIA, QF_LIA; QF_UF without
 arithmetic). A standalone script has the features of its own commands, so its logic may be
-smaller than the one of its trace. With --smt_trace_logics, only the files whose logic is in
+smaller than the one of its trace (so a trace and its check-sats may be in different
+directories). With --smt_trace_logics, only the files whose logic is in
 the list are written, and a trace is split only if one of its sub-logics is in the list.
 
 Each file is named after its origin (`Tracer.stem`): the task (family, version, property, or
@@ -413,7 +415,7 @@ class Tracer:
     def __init__(self, directory: str, logics: Optional[Sequence[str]] = None):
         self.dir = directory
         self.logics = {x.strip().upper() for x in logics} if logics else None
-        for sub in ("incremental", "standalone", "sources", ".index"):
+        for sub in ("sources", ".index"):       # <logic>/<kind>/ when a file is written
             os.makedirs(os.path.join(directory, sub), exist_ok=True)
         self.manifest = os.path.join(directory, "MANIFEST.csv")
         try:
@@ -472,7 +474,7 @@ class Tracer:
                checks: int, row: dict) -> int:
         body = "\n".join(lines) + "\n(exit)\n"
         digest = hashlib.sha256(f"{kind}\n{logic}\n{status}\n{body}".encode()).hexdigest()
-        name = f"{kind}/{stem}.smt2"
+        name = f"{logic}/{kind}/{stem}.smt2"
         index = os.path.join(self.dir, ".index", digest)
         duplicate = ""
         try:
@@ -492,6 +494,7 @@ class Tracer:
                       f"(set-logic {logic})\n"
                       + (f"(set-info :status {status})\n"
                          if status in ("sat", "unsat") and kind == "standalone" else ""))
+            os.makedirs(os.path.join(self.dir, logic, kind), exist_ok=True)
             with open(os.path.join(self.dir, name), "w") as f:
                 f.write(header + body)
         out = io.StringIO()

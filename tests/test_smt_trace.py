@@ -149,11 +149,14 @@ def test_tracer_files_filter_and_duplicates(tmp_path):
     assert [(r["kind"], r["logic"], r["query"], r["status"]) for r in rows[:3]] == [
         ("incremental", "QF_NIA", "", ""), ("standalone", "QF_NIA", "1", "sat"),
         ("standalone", "QF_NIA", "2", "unsat")]
-    assert rows[1]["file"] == ("standalone/amm-int-v2__Swap__call001-rounds__bmc-1__z3"
+    assert rows[0]["file"] == ("QF_NIA/incremental/amm-int-v2__Swap__call001-rounds__bmc-1"
+                               "__z3__QF_NIA.smt2")
+    assert rows[1]["file"] == ("QF_NIA/standalone/amm-int-v2__Swap__call001-rounds__bmc-1__z3"
                                "__q0001__QF_NIA.smt2")
     assert [r["duplicate_of"] for r in rows[3:]] == [r["file"] for r in rows[:3]]
     assert [r["file"] for r in rows[3:]] == ["", "", ""]
-    assert sorted(os.listdir(tmp_path / "standalone")) == sorted(
+    assert sorted(os.listdir(tmp_path)) == [".index", "MANIFEST.csv", "QF_NIA", "sources"]
+    assert sorted(os.listdir(tmp_path / "QF_NIA" / "standalone")) == sorted(
         os.path.basename(r["file"]) for r in rows[1:3])
     text = open(tmp_path / rows[2]["file"]).read()
     assert "(set-logic QF_NIA)" in text and "(set-info :status unsat)" in text
@@ -163,7 +166,7 @@ def test_tracer_incremental(tmp_path):
     tracer = T.Tracer(str(tmp_path), ["QF_NIA", "NIA"])
     tracer.start_task("contracts/bank/bank.sol", "invariants")
     tracer.record(SCRIPT, 3, "free-run", "ic3ia-p3-2", "cvc5", "")
-    [inc] = os.listdir(tmp_path / "incremental")
+    [inc] = os.listdir(tmp_path / "QF_NIA" / "incremental")
     assert inc == "bank-v1__invariants__call003-free-run__ic3ia-p3-2__cvc5__QF_NIA.smt2"
 
 
@@ -175,6 +178,8 @@ def test_standalone_answers_with_z3(tmp_path):
     rows = [r for r in csv.DictReader(open(tmp_path / "MANIFEST.csv"))
             if r["kind"] == "standalone"]
     assert len(rows) == 3
+    # without a filter, the third check-sat (QF_LIA) goes to its own directory
+    assert [r["file"].split("/")[0] for r in rows] == ["QF_NIA", "QF_NIA", "QF_LIA"]
     for r in rows:
         s = z3.Solver()
         s.from_file(str(tmp_path / r["file"]))

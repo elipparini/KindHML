@@ -71,11 +71,11 @@ Options:
   checked with 1, 2, 3, ... users in turn, and the verdict is "true up to m users" if no
   counterexample is found. `any` needs `combined` or `exact` (the latter checks 1, 2, 3, ...
   users only). `--parameterized` is `--users_mode parameterized`.
-- `--smt_trace DIR`: save the SMT-LIB instances of the solver calls into `DIR`: in
-  `incremental/`, the scripts that Kind 2 sends to its solvers (Kind 2's `--smt_trace`),
-  cleaned; in `standalone/`, one script per check-sat, with the assertions in scope and the
-  assumptions asserted (pruned of the inactive activation literals and of the unused
-  declarations, with the same answer), and the queries sent to z3 directly. Each file is named
+- `--smt_trace DIR`: save the SMT-LIB instances of the solver calls into `DIR`, by logic: in
+  `DIR/<logic>/incremental/`, the scripts that Kind 2 sends to its solvers (Kind 2's
+  `--smt_trace`), cleaned; in `DIR/<logic>/standalone/`, one script per check-sat, with the
+  assertions in scope and the assumptions asserted (pruned of the inactive activation literals
+  and of the unused declarations, with the same answer), and the queries sent to z3 directly. Each file is named
   after its origin (`<family>-v<N>__<Property or invariants>__call<k>-<stage>__<engine>__<solver>`,
   then `__q<i>` for the i-th check-sat of a trace, then the logic), its logic is computed from
   its content (e.g. QF_NIA, NIA, QF_LIA), and identical files are written once.
