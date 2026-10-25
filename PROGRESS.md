@@ -1047,9 +1047,9 @@ premise (z3, free states) and at the counterexamples of the instances tried (CEG
 - In the tool (600 s, 8 shards): lending_simple_real_v4 78 s, _v2 95 s, lending_real_v4 177 s;
   lending_real_v2 unknown (its instance comes after the 600 s: a question of scheduling, left
   for later, as the final runs will have a longer limit). lending_simple_int still refuted.
-- Lending regression (before the review fixes, which change only the chain side; 107 of 117
-  rows at the time of the commit): no verdict lost or wrong; gained 3 `Liquidation_attack_any`
-  rows and `Exchange_rate_monotone` v2 and v4 (fuzzing, which varies between runs).
+- Lending regression (before the review fixes, which change only the chain side; all 117
+  rows): no verdict lost or wrong; gained 3 `Liquidation_attack_any` rows and
+  `Exchange_rate_monotone` v2 and v4 (fuzzing, which varies between runs).
 
 ## Done (2026-10-25): option --smt_trace; the NIA instances of the benchmarks (with the user)
 
@@ -1073,6 +1073,21 @@ computed from the content; names tracing back to the task, call, stage, engine a
   (Lustre type error in the state literals of the test: `Map_int` expected, `int` found);
   not fixed.
 
+## Done (2026-10-25): full run at 8afe4bf (server)
+
+Same tasks as the run of p7 (268 tasks, 600 s, 6 shards; `results/server-20261025-8afe4bf.csv`,
+shards in `runs/server/full8/full/`): 187 valid, 71 invalid, 10 unknown (p7: 183, 72, 13); no
+verdict disagrees with the ground truth.
+- Gained (5): the 4 true `Liquidation_attack_any` rows, by chain instances (lending_simple_real
+  _v2 72 s, _v4 110 s, lending_real_v4 174 s, _v2 261 s); lending_real_v2
+  `Health_non_interference` refuted by fuzzing (520 s), the row lost in p7.
+- Lost (2): `Exchange_rate_monotone` of lending_int and lending_real_v3, refuted by fuzzing in
+  p7, unknown here.
+- Unknown (10), all false properties: `Exchange_rate_monotone` (lending_int, lending_real
+  _v2-_v4), `Liquidation_attack_any` (lending_real, _v3, lending_simple_real, _v3), lending_int
+  `Liquidation_defence`, amm_int `Sandwich_slippage`.
+- Rows with the same verdict (253): 3961 s in p7, 3802 s here; median about 1 s in both.
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
@@ -1082,6 +1097,15 @@ computed from the content; names tracing back to the task, call, stage, engine a
   from other properties of the spec (the proposal "chain instances from sibling properties" for
   `Liquidation_attack_any` was rejected). The declared invariants of the spec files, templates
   designed from the use cases, and constants measured on the rows are accepted.
+- From the full run at 8afe4bf (the user: wait for these): (a) lending_simple_int
+  `Liquidation_attack_exists`, always refuted by fuzzing, took 92 s (p7), 227 s (chain3
+  regression), 439 s (8afe4bf): rerun it several times at both commits, to tell noise from a
+  slowdown (the chain side does not apply to it); (b) `Exchange_rate_monotone` of lending_int
+  and lending_real _v2-_v4: each refuted in some of the last four runs, never all in one run;
+  repeated runs of these rows, to measure the rate and whether the seeds or the timing decide;
+  (c) the next technique, to be chosen: fuzzing in parallel with the invariant phase (the false
+  lending-real `Liquidation_attack_any` rows), or cvc5 before z3 for the exact checks over
+  integers (lending_int `Liquidation_defence`).
 
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
