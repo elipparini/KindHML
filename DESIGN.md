@@ -372,6 +372,25 @@ template `f == 0 -> g == 0`, for amm_real_v3 `Deposit_reversibility`), 28 of 29:
 ones valid (most in under 5 s, amm_real `Sandwich_slippage` in 20 s), and the false ones refuted
 in 5-240 s, except amm_int `Sandwich_slippage` (integers, outside `direct.py`).
 
+Scheduling for properties with existentials over methods (2026-10-25; lending
+`Liquidation_attack_any`, whose programs for Kind 2 are large: free-state checks of 2.6-8.5 MB,
+transition systems of 5.6-17 MB). A trace of the rounds showed fuzzing with 3-12 s per round,
+while the rest of the time went to encodings and to Kind 2 runs without any answer:
+* the programs of the free-state checks are made once per side, not at each attempt (3-11 s
+  each, twice per round);
+* a run of Kind 2 needs at least `_kind2_floor` = 1 s per MB of its program: below it, it is not
+  started (measured: at least 1.5 s per MB for any answer on these programs; runs of 1-3 s gave
+  none);
+* a candidate of the fuzzer whose exact check is undecided (its encoding takes 10-15 s) is kept,
+  with its program, and checked again in the next two rounds (at most 2 such candidates);
+* with a program of Kind 2 on the transition system larger than KIND2_LARGE = 4 MB, fuzzing gets
+  the share of Kind 2 (4 budgets) and Kind 2 1 budget, as for the checks by z3 directly: Kind 2
+  gave no answer on these programs in 60 s; the rows it decided in run E had programs of at most
+  0.42 MB.
+With these changes, lending_simple_int `Liquidation_attack_any` is refuted in 445 s (600 s
+limit); the other 4 false rows are still open (on lending-real, the invariant phase alone takes
+about 380 s, and the fuzzer alone needs 140-160 s to find a candidate).
+
 **Random testing** (`fuzz.py`). Kind 2 rarely finds counterexamples through nonlinear
 transitions (on the integer AMM, BMC reaches depth 1 in 60 s, and a counterexample needs a
 constructor, a deposit and a swap). Random transactions, run by the reference interpreter
@@ -405,6 +424,23 @@ evaluation of the guided search, for the variables of those names (2026-10-24, `
 `Fuzzer.guided`; the evaluation converts them to the type of the quantifier and drops those
 that do not fit): the fixed domain of the evaluation misses, e.g., the small amount x of a
 counterexample of amm_real_v4 `Sandwich`.
+
+Boundary values (2026-10-25, `fuzz.boundaries`): a numeric parameter x of a procedure takes,
+with probability 0.3, the value at the current state of a term t compared with x in the requires
+that start the body (`x <= t`, `t >= x`, `x == t`, ...; constants excluded). The requires come
+before any assignment, so t has there the value it has at the call. A random amount almost never
+equals, e.g., the whole debt `sdebt[msg.sender] * idx` of lending-real repay; with boundary
+values, 3 of the 4 lending-real rows of `Exchange_rate_monotone` are refuted at 600 s (before,
+none; the counterexamples repay a whole debt and then redeem the last credits).
+
+Weakened evaluation (2026-10-25, `fuzz.weakened`): for a property with an existential over
+methods, the bounded evaluation of the existential samples calls of every procedure at each
+state, nested up to three times on lending `Liquidation_attack_any`: more than 2 s per state.
+When an evaluation takes longer than SLOW_EVALUATION = 2 s, the fuzzer evaluates instead the
+formula φ⁻ in which each such existential in positive position is replaced by false. φ⁻ implies
+φ (the replaced subformulas are positive), so a state where φ is false is one where φ⁻ is
+false: every candidate of φ is a candidate of φ⁻. A candidate is still confirmed by the exact
+check of φ, so φ⁻ only adds candidates, which cost exact checks.
 
 **Portfolio** (default; `--strategy kind2` gives the previous behaviour). The tool does not
 give up: it runs rounds of the tasks below, one Kind 2 job at a time, each with the round's

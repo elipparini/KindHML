@@ -184,6 +184,9 @@ class Outcome:
 
 STRATEGIES = ("portfolio", "kind2")
 FIRST_BUDGET = 4.0                  # seconds per task in the first round; doubled each round
+PENDING_MAX = 2                     # undecided candidates of the fuzzer kept for later rounds
+PENDING_TRIES = 2                   # and the rounds in which each is checked again
+KIND2_LARGE = 4_000_000             # characters: a large program of Kind 2 (`_rounds`)
 KIND2_SHARE = 4                     # without a time limit, Kind 2 gets 4 budgets per round
 INVGEN_SECONDS = 2.0                # random testing that filters the generated invariants
 STUCK_AFTER = 16.0                  # Houdini drops generated candidates undecided after this
@@ -783,10 +786,12 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     # first exact check, applicable false once one is outside the fragment
     direct_concrete = [numeric, False]
 
-    def exact(checks: Checks, literal: L.LExpr, budget: float) -> Tuple[str, str]:
+    def exact(checks: Checks, literal: L.LExpr, budget: float,
+              kept: Optional[dict] = None) -> Tuple[str, str]:
         """The property at a concrete state (a record literal), exactly: (status, solver), the
         status "invalid" if it is false there. With an existential over numbers, z3 directly
-        first (`_direct_concrete`), then Kind 2 with the time left."""
+        first (`_direct_concrete`), then Kind 2 with the time left. Its Kind 2 program is
+        kept in `kept`, if given, for a later check of the same state."""
         end = time.time() + budget
         status, s = "inapplicable", ""
         if direct_concrete[0]:
@@ -800,8 +805,25 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
         left = end - time.time()
         # Kind 2 only outside the fragment: it decided none of these checks in our runs
         if status == "inapplicable" and left > 1:
-            status, _, s = _free_run(checks.concrete_check(prop, literal), [prop.name], left)
+            if kept is None or "lustre" not in kept:
+                lus = checks.concrete_check(prop, literal)
+                if kept is not None:
+                    kept["lustre"] = lus
+            lus = kept["lustre"] if kept is not None else lus
+            left = end - time.time()        # the encoding took some (12-15 s on lending)
+            status, s = "unknown", ""
+            if left > 1:
+                status, _, s = _free_run(lus, [prop.name], left)
         return status, s
+
+    def fuzz_found(txs: list, st, m: int, s: str) -> Outcome:
+        """The outcome of a candidate of the fuzzer with m users refuted by its exact check."""
+        res = kind2.PropertyResult(prop.name, "invalid", len(txs), "fuzz", time.time() - start)
+        named = {x for tx in txs for x in [tx.sender, tx.contract]
+                 + [v for v in tx.args.values() if isinstance(v, str)]}
+        return scoped(Outcome(prop, res, [], s, "fuzz",
+                              trace="; ".join(describe_tx(tx) for tx in txs)),
+                      m, final=state_paths(st, invs.checks_for(m).enc.system), participants=named)
 
     budget = FIRST_BUDGET
     proof_open, target, engines, kind2_open = True, None, extra_args, side.kind2
@@ -815,6 +837,12 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     premises: List[List[str]] = []
     witnesses: List[list] = []          # the maps of the witness premises of each premise set
     attempts: Optional[List[tuple]] = None
+    # the programs of the attempts, made once: with existentials over methods, each took 3-11 s,
+    # twice per round (lending-simple-real Liquidation_attack_any, 2026-10-25)
+    programs: Dict[tuple, Tuple[str, List[str]]] = {}
+    # the candidates of the fuzzer whose exact check was undecided: [transactions, state, users,
+    # literal and program, tries] (`fuzz_found`)
+    pending: List[list] = []
     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
     while True:
         for task in ("invariants", "proof", "reach", "fuzz", "kind2"):
@@ -843,14 +871,19 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
             # amm_real_v4 Sandwich_slippage, the guided search got 1-2 s per round, too
             # little for a trace, while alone it finds the counterexample at once)
             direct_on = any(v is not None for v in direct_cases.values())
-            if task == "fuzz" and direct_on:
+            # so too when the program of Kind 2 is large: on lending Liquidation_attack_any
+            # (5.6-17 MB, existentials over methods) it gave no answer in 60 s, while the
+            # fuzzer got 3-12 s per round; the rows Kind 2 decided in our runs had programs
+            # of at most 0.42 MB (2026-10-25)
+            large = k2_lustre is not None and len(k2_lustre) > KIND2_LARGE
+            if task == "fuzz" and (direct_on or large):
                 b = KIND2_SHARE * budget if left is None else min(KIND2_SHARE * budget, left)
             if task == "kind2":
                 # With a time limit and linear arithmetic, Kind 2 gets all the time left: it
                 # restarts from scratch at each run, and the other tasks succeed in seconds
                 # or not at all. With nonlinear arithmetic, Kind 2 rarely concludes, and the
                 # rounds go on; so do they if other sides have their rounds.
-                b = (1 if direct_on else KIND2_SHARE) * budget
+                b = (1 if direct_on or large else KIND2_SHARE) * budget
                 if left is not None:
                     b = min(b, left) if nonlinear or not side.alone() else left
             if task == "invariants":
@@ -906,8 +939,10 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                             attempts.remove(a)
                             continue
                     else:
-                        lus, names = invs.checks_for(u).property_check(prop, premises[i],
-                                                                       split, ws)
+                        if (u, i, split, w) not in programs:
+                            programs[u, i, split, w] = invs.checks_for(u).property_check(
+                                prop, premises[i], split, ws)
+                        lus, names = programs[u, i, split, w]
                         status, refuted, s = _free_run(lus, names, b)
                     if status == "valid":
                         return scoped(_valid(prop, "invariants", time.time() - start, s),
@@ -950,6 +985,23 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                             guide = {loc: have[loc] for loc in known if loc in have} or None
             elif task == "fuzz":
                 deadline_fuzz = time.time() + b
+                # the undecided candidates of earlier rounds first, with this larger budget:
+                # on lending-simple-real Liquidation_attack_any, a candidate took 45-160 s to
+                # find and 12-15 s to encode, then Kind 2 refuted it in 31 s
+                for cand in list(pending):
+                    left = deadline_fuzz - time.time()
+                    if left <= 1:
+                        break
+                    txs, st, m, kept = cand[:4]
+                    cand[4] += 1
+                    status, s = exact(invs.checks_for(m), kept["literal"], left, kept)
+                    if status == "invalid":
+                        o = fuzz_found(txs, st, m, s)
+                        if o.status == "invalid":
+                            return o
+                        o.cti, last = last.cti, o
+                    if status != "unknown" or cand[4] >= PENDING_TRIES:
+                        pending.remove(cand)
                 # first towards the counterexample to induction, if any, then at random; the
                 # first search gets half of the time, the last all the time left. A search
                 # gives a few candidates at a time, so it is repeated until its time is over:
@@ -970,20 +1022,16 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                         left = deadline_fuzz - time.time()
                         if left <= 1:
                             break
-                        status, s = exact(checks, state_literal(st, checks.enc.system,
-                                                                checks.enc), left)
+                        kept = {"literal": state_literal(st, checks.enc.system, checks.enc)}
+                        status, s = exact(checks, kept["literal"], left, kept)
                         if status == "invalid":
-                            res = kind2.PropertyResult(prop.name, "invalid", len(txs), "fuzz",
-                                                       time.time() - start)
-                            named = {x for tx in txs for x in [tx.sender, tx.contract]
-                                     + [v for v in tx.args.values() if isinstance(v, str)]}
-                            o = scoped(Outcome(prop, res, [], s, "fuzz",
-                                               trace="; ".join(describe_tx(tx) for tx in txs)),
-                                       m, final=state_paths(st, checks.enc.system),
-                                       participants=named)
+                            o = fuzz_found(txs, st, m, s)
                             if o.status == "invalid":
                                 return o
                             o.cti, last = last.cti, o       # it does not extend: go on
+                        elif status == "unknown" and "lustre" in kept \
+                                and len(pending) < PENDING_MAX:
+                            pending.append([txs, st, m, kept, 0])
             elif task == "reach":
                 lus = invs.checks_for(target_users).reach_check(target)
                 # a property that needs idle users needs the whole final state (the target may
@@ -1280,9 +1328,12 @@ def _free_run(lustre: str, names: List[str], budget: float):
     cases are valid, "invalid" if one is, else "unknown"; the refuted case; the solver)."""
     deadline = time.time() + budget
     valid: set = set()
+    floor = _kind2_floor(lustre)
     for i, s in enumerate(FREE_SOLVERS):
         left = deadline - time.time()
-        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1)
+        if left < floor:
+            break
+        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1, floor)
         out = kind2.run(lustre, b, solver=s, extra_args=LIGHT_ENGINES)
         for p in out.properties:
             if p.name in names and p.status == "invalid":
@@ -1292,6 +1343,17 @@ def _free_run(lustre: str, names: List[str], budget: float):
         if valid >= set(names):
             return "valid", None, s
     return "unknown", None, ""
+
+
+KIND2_SECONDS_PER_MB = 1.0          # `_kind2_floor`
+
+
+def _kind2_floor(lustre: str) -> float:
+    """The least time worth a run of Kind 2 on `lustre`: on programs of 3.5-8.5 MB with
+    existentials over methods (lending, 2026-10-25), it needed at least 1.5 s per MB for any
+    answer, and its runs of 1-3 s (the second solver of `_free_run` in the first rounds) gave
+    none."""
+    return len(lustre) / 1e6 * KIND2_SECONDS_PER_MB
 
 
 def _repeated(search: Callable, fuzzer: Fuzzer, end: float):
@@ -1416,9 +1478,12 @@ def _free_run_cex(lustre: str, name: str, budget: float):
     memory limit killed a process)."""
     deadline = time.time() + budget
     status, res, used, killed = "unknown", None, "", False
+    floor = _kind2_floor(lustre)
     for i, s in enumerate(FREE_SOLVERS):
         left = deadline - time.time()
-        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1)
+        if left < floor:
+            break
+        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1, floor)
         out = kind2.run(lustre, b, solver=s, extra_args=LIGHT_ENGINES, cex=True)
         killed = killed or out.memory_killed
         res = next((p for p in out.properties if p.name == name), None)

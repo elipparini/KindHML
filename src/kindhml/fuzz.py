@@ -23,16 +23,25 @@ search finds a counterexample of Liquidation_attack within 1 s (DESIGN.md, Sect.
 
 from __future__ import annotations
 
+import os
 import random
 import signal
 import time
+from dataclasses import replace
 from fractions import Fraction
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from . import syntax as S
 from .model import NULL, System
-from .reference import FormulaEvaluator, Interpreter, State, Tx, initial_state
+from .reference import FormulaEvaluator, Interpreter, Revert, State, Tx, initial_state
 
+# probability of a boundary value for a numeric parameter that has one (`boundaries`); 0 turns
+# them off. On lending-real, Exchange_rate_monotone is refuted only after a repay of the whole
+# debt sdebt[msg.sender] * idx, which random amounts almost never hit (2026-10-25)
+BOUNDARY = float(os.environ.get("KINDHML_FUZZ_BOUNDARY", "0.3"))
+# a bounded evaluation of a property with an existential over methods in positive position
+# that takes longer is replaced by that of `weakened` for this property (`Fuzzer._violates`)
+SLOW_EVALUATION = 2.0
 INT_DOMAIN = range(-1, 4)       # bounded quantifiers of the evaluation (candidates only)
 MAX_RECORDS = 20                # sampled assignments of the arguments of all procedures
 MAX_STEPS = 12                  # transactions of a trace after the constructors
@@ -56,6 +65,10 @@ class Fuzzer:
         self.rnd = random.Random(seed)
         self.ev = FormulaEvaluator(system, INT_DOMAIN, max_records=MAX_RECORDS, rnd=self.rnd)
         self.seen: dict = {}            # property name -> states already proposed (`states`)
+        self._bounds: dict = {}         # (contract, procedure) -> `boundaries`
+        # property name -> the formula of its bounded evaluation: itself, or `weakened` once too
+        # slow; None while it may still become too slow
+        self._weak: dict = {}
 
     # ------------------------------------------------------------ random values
 
@@ -125,6 +138,22 @@ class Fuzzer:
             sender = self.rnd.choice(self.system.addresses)
         args = {x.name: self.value(x.type, pool) for x in p.params}
         value = self.amount(pool) if p.payable else 0
+        if st is not None and BOUNDARY > 0:
+            key = (c.name, p.name)
+            if key not in self._bounds:
+                self._bounds[key] = boundaries(p)
+            for x in p.params:
+                exprs = self._bounds[key].get(x.name)
+                if exprs and self.rnd.random() < BOUNDARY:
+                    env = {"sender": sender, "value": value, "this": c.name,
+                           "args": dict(args)}
+                    try:
+                        v = _number_of(self.interp.eval(self.rnd.choice(exprs), st, env),
+                                       x.type)
+                    except (Revert, KeyError, TypeError, ZeroDivisionError):
+                        v = None
+                    if v is not None:
+                        args[x.name] = v
         blocks = self.rnd.choice([0, 0, 1, 2, 5, 10]) if self.system.uses_block_num else 0
         return Tx(sender, c.name, (c.name, p.name), args, value, blocks)
 
@@ -193,12 +222,32 @@ class Fuzzer:
 
     def _violates(self, prop: S.Property, st: State, seconds: float) -> bool:
         """Whether the bounded evaluation of the property is false at st; _TooSlow if it
-        takes more than `seconds` (the caller installs `_alarm`)."""
-        signal.setitimer(signal.ITIMER_REAL, seconds)
+        takes more than `seconds` (the caller installs `_alarm`). With an existential over
+        methods in positive position, an evaluation longer than SLOW_EVALUATION switches the
+        property to its `weakened` formula: on lending Liquidation_attack_any (three nested
+        existentials over methods and arguments), one evaluation took more than 60 s, so no
+        candidate reached the exact checks; with the weakened formula, the 5 false rows were
+        refuted by fuzzing alone in 48-188 s (2026-10-25)."""
+        if prop.name not in self._weak:
+            self._weak[prop.name] = None if has_method_existential(prop.formula) else prop.formula
+        formula = self._weak[prop.name] or prop.formula
+        slow = self._weak[prop.name] is None
+        cap = min(seconds, SLOW_EVALUATION) if slow else seconds
+        start = time.time()
+        signal.setitimer(signal.ITIMER_REAL, cap)
         try:
-            return not self.ev.holds(prop.formula, [st])
+            return not self.ev.holds(formula, [st])
         except (ZeroDivisionError, KeyError, TypeError):
             return False        # unspecified values (unguarded division) in a property
+        except _TooSlow:
+            if cap >= seconds:
+                raise
+            self._weak[prop.name] = weakened(prop.formula)
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            left = seconds - (time.time() - start)
+            if left <= 0:
+                raise
+            return self._violates(prop, st, left)
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
 
@@ -309,6 +358,72 @@ class Fuzzer:
         return out
 
 
+def boundaries(p: S.Procedure) -> Dict[str, List[S.Expr]]:
+    """For each numeric parameter x of p, the expressions e compared with x (x <= e, e >= x,
+    x == e, ...) in the requires that come before any other statement of p, other than
+    constants: their values at the state of a call (`Fuzzer.transaction`) are boundary values
+    of x, e.g. the whole debt `sdebt[msg.sender] * idx` for repay(v) of lending-real, which a
+    random amount almost never hits. The requires precede every assignment, so e has the same
+    value there as at the state of the call."""
+    numeric = {x.name for x in p.params if x.type in (S.INT, S.UINT, S.REAL)}
+    out: Dict[str, List[S.Expr]] = {}
+    for s in _statements(p.body):
+        if not isinstance(s, S.Require):
+            break
+        for a, b in _comparisons(s.cond):
+            for x, e in ((a, b), (b, a)):
+                while isinstance(x, S.ToReal):
+                    x = x.arg
+                if (isinstance(x, S.Param) and x.name in numeric and not _constant(e)
+                        and not _mentions(e, x.name)):
+                    out.setdefault(x.name, []).append(e)
+    return out
+
+
+def _statements(s: S.Stmt) -> List[S.Stmt]:
+    if isinstance(s, S.Seq):
+        return [y for x in s.stmts for y in _statements(x)]
+    return [s]
+
+
+def _comparisons(e: S.Expr):
+    if isinstance(e, S.BinOp) and e.op in ("&&", "||", "->"):
+        yield from _comparisons(e.left)
+        yield from _comparisons(e.right)
+    elif isinstance(e, S.UnOp) and e.op == "!":
+        yield from _comparisons(e.arg)
+    elif isinstance(e, S.BinOp) and e.op in ("<", "<=", ">", ">=", "==", "!="):
+        yield e.left, e.right
+
+
+def _constant(e: S.Expr) -> bool:
+    while isinstance(e, (S.ToReal, S.UnOp)):
+        e = e.arg
+    return isinstance(e, (S.IntLit, S.RealLit, S.BoolLit))
+
+
+def _mentions(e, name: str) -> bool:
+    if isinstance(e, S.Param):
+        return e.name == name
+    for f in getattr(e, "__dataclass_fields__", ()):
+        v = getattr(e, f)
+        for x in (v if isinstance(v, tuple) else (v,)):
+            if isinstance(x, S.Expr) and _mentions(x, name):
+                return True
+    return False
+
+
+def _number_of(v, t: S.Type):
+    """v as a value of the number type t, or None."""
+    if isinstance(v, bool) or not isinstance(v, (int, Fraction)):
+        return None
+    if t == S.REAL:
+        return Fraction(v)
+    if Fraction(v).denominator != 1 or (t == S.UINT and v < 0):
+        return None
+    return int(v)
+
+
 def _key(st: State) -> str:
     return repr(sorted(st.fields.items())) + repr(sorted(st.balance.items()))
 
@@ -341,6 +456,33 @@ def distance(st: State, target: Dict[tuple, object]):
 
 def _number(x) -> bool:
     return isinstance(x, (int, Fraction)) and not isinstance(x, bool)
+
+
+def has_method_existential(e: S.Expr) -> bool:
+    """Whether e has an existential over methods in positive position (`weakened`)."""
+    return weakened(e) is not e
+
+
+def weakened(e: S.Expr) -> S.Expr:
+    """e with its existentials over methods in positive position (reached through
+    conjunctions, disjunctions, conclusions of implications and universals) replaced by
+    false: it implies e, so e is false only where it is false, and its bounded evaluation
+    selects candidates for the exact checks without enumerating methods and arguments (e
+    itself if there is no such existential)."""
+    if isinstance(e, S.Quant):
+        if e.kind == "exists" and e.type == S.METHOD:
+            return S.BoolLit(False)
+        if e.kind == "forall":
+            body = weakened(e.body)
+            return e if body is e.body else replace(e, body=body)
+        return e
+    if isinstance(e, S.BinOp) and e.op in ("&&", "||"):
+        left, right = weakened(e.left), weakened(e.right)
+        return e if left is e.left and right is e.right else replace(e, left=left, right=right)
+    if isinstance(e, S.BinOp) and e.op == "->":
+        right = weakened(e.right)
+        return e if right is e.right else replace(e, right=right)
+    return e
 
 
 def has_witness(e: S.Expr, positive: bool = True) -> bool:

@@ -999,6 +999,33 @@ laptop out of memory (2026-10-24, 22:07): no computation runs locally any more.
   false refute them when fuzzing runs alone (48-188 s), not yet in the portfolio. The 4 true
   ones need instances of the whole chain (setPrice; liquidate; setPrice), proved on the instance.
 
+## Done (2026-10-25): the proposals for the open rows of E; full run (server)
+
+Implemented, in the order agreed with the user: ground truth of `Exchange_rate_monotone` (false)
+and `Exchange_rate_monotone_credits` (181f019); a case split on the enumerated fields of the free
+state in direct.py (1865df2); guard terms for the candidate witnesses (6001741); boundary values
+of the fuzzer, its weakened evaluation for existentials over methods, and scheduling for large
+programs (DESIGN.md, Sect. 6: undecided candidates kept, free-state programs made once, a least
+time per MB for Kind 2, KIND2_LARGE).
+- Full run at this code (snapshot p7; all families but the regressions, 268 tasks, 600 s, 6
+  shards; `results/server-20261025-p7.csv`): 183 valid, 72 invalid, 13 unknown; no verdict
+  disagrees with the ground truth. Against E: 14 rows gained a verdict (lending-real
+  `Liquidation_defence` 4, `Liquidation_attack(_exists)` 4, `Exchange_rate_monotone` 2 (v1, v3;
+  v2 was refuted in 22 s in a separate run, unknown here),
+  lending_simple_int `Liquidation_attack_any`, lending-int Nonnegative, Totals,
+  Health_non_interference), plus the 4 new `Exchange_rate_monotone_credits` rows (valid).
+- 2 rows lost a verdict, both found by fuzzing near the limit in E (amm_int `Sandwich_slippage`
+  at 527 s, lending_real_v2 `Health_non_interference` at 422 s). Rerun with 2 shards: HNI
+  refuted in 421 s with boundary values, unknown without; Sandwich_slippage unknown with them
+  (twice), refuted in 519 s without. One run per setting: not enough to say whether boundary
+  values slow Sandwich_slippage.
+- Tests on the server: 1340 passed; the 50 failures are all `test_trans_kind2`, as in the
+  earlier suite runs (server's Kind 2).
+- Still open (13): `Liquidation_attack_any` false (4: lending_real, _v3, lending_simple_real,
+  _v3) and true (4); lending_real_v2 and _v4 `Exchange_rate_monotone`; the 2 rows above;
+  lending_int `Liquidation_defence`. On lending-real, the invariant
+  phase takes about 380 s of the 600 s, and the fuzzer alone needs 140-160 s for a candidate.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates
