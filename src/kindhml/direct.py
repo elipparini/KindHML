@@ -24,13 +24,19 @@ def^i: ite(b != 0, ..a / b.., old). A division written in a property may be ungu
 type checker only warns): then the check is out of the fragment (`NotApplicable`), since d
 would take any value when b = 0, and a proof of the rewritten formula would not be one of the
 original. Formulas with integers, addresses or methods that are not constants are out of the
-fragment too (nlqsat is a procedure for real arithmetic)."""
+fragment too (nlqsat is a procedure for real arithmetic). A field of enumerated type of an
+input record (e.g. the oracle of the lending contracts, an address) is fixed to each of its
+constants in turn, one query per case (`SplitQuery`, at most MAX_CASES): the field ranges over
+exactly these constants, so the formula is valid iff every case is (2026-10-25: the free-state
+checks of Liquidation_attack on lending-real were all outside the fragment because of the
+oracle; split, each case is decided in under 0.1 s)."""
 
 from __future__ import annotations
 
 import itertools
 import os
 import tempfile
+import time
 from dataclasses import dataclass, field
 from fractions import Fraction
 from math import ceil
@@ -42,10 +48,15 @@ from . import kind2
 from . import lustre as L
 
 TACTIC = "(then simplify nlqsat)"
+MAX_CASES = 64                      # cases of the fields of enumerated type (`SplitQuery`)
 
 
 class NotApplicable(Exception):
     """The formula is outside the fragment of this module (the reason is the message)."""
+
+
+class _EnumField(NotApplicable):
+    """A free variable of enumerated type: `prepare` may split the check on it."""
 
 
 @dataclass
@@ -92,14 +103,17 @@ class _Env:
 
 
 class _Translator:
-    def __init__(self, decls: Declarations):
+    def __init__(self, decls: Declarations, fixed: Optional[Dict[str, str]] = None):
         self.decls = decls
         self.free: Dict[str, z3.ExprRef] = {}       # free constants by name: paths and inputs
         self.fresh = itertools.count()
+        self.fixed = fixed or {}                    # fields of enumerated type: their constant
 
     def constant(self, name: str, typ: str):
         if typ in self.decls.structs:
             return _Sym(name, typ)
+        if name in self.fixed:
+            return self.fixed[name]
         if name not in self.free:
             self.free[name] = _scalar(name, typ, self.decls)
         return self.free[name]
@@ -216,6 +230,8 @@ def _scalar(name: str, typ: str, decls: Declarations) -> z3.ExprRef:
         return z3.Int(name)
     if typ == "bool":
         return z3.Bool(name)
+    if typ in decls.enums:
+        raise _EnumField(f"a variable of type {typ} ({name})")
     raise NotApplicable(f"a variable of type {typ} ({name})")
 
 
@@ -483,11 +499,59 @@ class Query:
         return Answer("unknown", note=note)
 
 
-def prepare(formula: L.LExpr, inputs: Sequence[Tuple[str, str]], decls: Declarations) -> Query:
+class SplitQuery:
+    """The cases of a check, one per assignment of constants to the fields of enumerated type
+    of its input records (module docstring): valid when every case is valid, invalid when one
+    is refuted (its model completed with the constants of the case). The cases proved are
+    kept from one call to the next."""
+
+    def __init__(self, cases: List[Tuple[Dict[str, str], Query]]):
+        self.cases = cases
+        self.proved: set = set()
+        self.trivial = all(q.trivial for _, q in cases)
+
+    def run(self, timeout: float) -> Answer:
+        deadline = time.time() + timeout
+        todo = [k for k in range(len(self.cases)) if k not in self.proved]
+        for j, k in enumerate(todo):
+            left = deadline - time.time()
+            if left <= 0.2:
+                return Answer("unknown", note="timeout")
+            fixed, query = self.cases[k]
+            answer = query.run(left / (len(todo) - j))
+            if answer.status == "valid":
+                self.proved.add(k)
+            elif answer.status == "invalid":
+                return Answer("invalid", {**answer.values, **fixed}, answer.missing)
+            else:
+                return answer
+        return Answer("valid")
+
+
+def prepare(formula: L.LExpr, inputs: Sequence[Tuple[str, str]],
+            decls: Declarations) -> "Query | SplitQuery":
     """The check that the Lustre formula `formula`, over the inputs (name, type; records by
-    the names of `decls.structs`), holds for all their values. NotApplicable if the
+    the names of `decls.structs`), holds for all their values; split into cases on the fields
+    of enumerated type of the input records if needed (`SplitQuery`). NotApplicable if the
     formula is outside the fragment of the module docstring."""
-    tr = _Translator(decls)
+    try:
+        return _prepare(formula, inputs, decls, {})
+    except _EnumField:
+        fields = [(f"{n}.{f}", t) for n, rt in inputs if rt in decls.structs
+                  for f, t in decls.structs[rt] if t in decls.enums]
+        size = 1
+        for _, t in fields:
+            size *= len(decls.enums[t])
+        if not fields or size > MAX_CASES:
+            raise
+        choices = [[(path, c) for c in decls.enums[t]] for path, t in fields]
+        return SplitQuery([(dict(case), _prepare(formula, inputs, decls, dict(case)))
+                           for case in itertools.product(*choices)])
+
+
+def _prepare(formula: L.LExpr, inputs: Sequence[Tuple[str, str]], decls: Declarations,
+             fixed: Dict[str, str]) -> Query:
+    tr = _Translator(decls, fixed)
     env = _Env({n: tr.constant(n, t) for n, t in inputs})
     f = tr.run(formula, env)
     if not isinstance(f, z3.BoolRef):
@@ -606,7 +670,10 @@ def parse_values(text: str) -> Dict[str, object]:
 
 
 def literal(v) -> L.LExpr:
-    """A value of `parse_values` as a Lustre literal (the format of `invariants.state_values`)."""
+    """A value of `parse_values`, or a constant of a `SplitQuery` case, as a Lustre literal
+    (the format of `invariants.state_values`)."""
+    if isinstance(v, str):
+        return L.Var(v)                 # an enum constant (A_u1, ...)
     if isinstance(v, bool):
         return L.Bool(v)
     return L.Real(Fraction(v))

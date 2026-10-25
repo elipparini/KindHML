@@ -46,9 +46,25 @@ def test_records_and_enum_constants_are_translated():
     assert set(q.free) == {"s.x"}
 
 
-def test_a_variable_address_is_outside_the_fragment():
+def test_a_field_of_enumerated_type_splits_the_check():
+    """The field ranges over exactly the constants of its type: one query per constant."""
+    q = prepare(L.op("=", L.Proj(s, "who"), L.Var("A_u1")))
+    assert isinstance(q, direct.SplitQuery)
+    assert [fixed for fixed, _ in q.cases] == [{"s.who": "A_null"}, {"s.who": "A_u1"}]
+    assert [case.trivial for _, case in q.cases] == [False, True]
+
+
+def test_too_many_cases_are_outside_the_fragment(monkeypatch):
+    monkeypatch.setattr(direct, "MAX_CASES", 1)
     with pytest.raises(NotApplicable):
         prepare(L.op("=", L.Proj(s, "who"), L.Var("A_u1")))
+
+
+def test_a_variable_address_is_outside_the_fragment():
+    """An address that is not a field of an input record (here a quantified one) is not split."""
+    a = L.Var("a")
+    with pytest.raises(NotApplicable):
+        prepare(L.Quant("exists", (("a", "address"),), L.op("=", a, L.Var("A_u1"))))
 
 
 def test_integers_are_outside_the_fragment():
@@ -177,6 +193,17 @@ def test_existentials_on_free_states():
             assert not answer.missing
             [p] = [val for k, val in model.items() if k.startswith("q_p")]
             assert model["s.Pool_r1"] == p * model["s.Pool_r0"]
+
+
+@pytest.mark.kind2
+def test_a_split_check_is_decided_case_by_case():
+    who = L.Proj(s, "who")
+    valid = prepare(L.op("or", L.op("=", who, L.Var("A_null")), L.op("=", who, L.Var("A_u1"))))
+    assert valid.run(20).status == "valid"
+    # refuted in the case who = A_null: the model has the constant of the case, for s*
+    answer = prepare(L.op("=>", L.op("=", who, L.Var("A_null")), L.op(">", x, ZERO))).run(20)
+    assert answer.status == "invalid" and answer.values["s.who"] == "A_null"
+    assert direct.literal(answer.values["s.who"]) == L.Var("A_null")
 
 
 @pytest.mark.kind2
