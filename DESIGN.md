@@ -387,8 +387,8 @@ while the rest of the time went to encodings and to Kind 2 runs without any answ
   the share of Kind 2 (4 budgets) and Kind 2 1 budget, as for the checks by z3 directly: Kind 2
   gave no answer on these programs in 60 s; the rows it decided in run E had programs of at most
   0.42 MB.
-With these changes, lending_simple_int `Liquidation_attack_any` is refuted in 445 s (600 s
-limit); the other 4 false rows are still open (on lending-real, the invariant phase alone takes
+With these changes, lending_simple_int `Liquidation_attack_any` is refuted in 445 s and 530 s
+in two runs (600 s limit); the other 4 false rows are still open (on lending-real, the invariant phase alone takes
 about 380 s, and the fuzzer alone needs 140-160 s to find a candidate).
 
 **Random testing** (`fuzz.py`). Kind 2 rarely finds counterexamples through nonlinear
@@ -430,8 +430,9 @@ with probability 0.3, the value at the current state of a term t compared with x
 that start the body (`x <= t`, `t >= x`, `x == t`, ...; constants excluded). The requires come
 before any assignment, so t has there the value it has at the call. A random amount almost never
 equals, e.g., the whole debt `sdebt[msg.sender] * idx` of lending-real repay; with boundary
-values, 3 of the 4 lending-real rows of `Exchange_rate_monotone` are refuted at 600 s (before,
-none; the counterexamples repay a whole debt and then redeem the last credits).
+values, lending-real rows of `Exchange_rate_monotone` are refuted at 600 s: 3 of 4 in one run
+(v1-v3, in 22-483 s), 2 in the full run (v1, v3); before, none. The counterexamples repay a
+whole debt and then redeem the last credits; the times vary with the random choices.
 
 Weakened evaluation (2026-10-25, `fuzz.weakened`): for a property with an existential over
 methods, the bounded evaluation of the existential samples calls of every procedure at each
