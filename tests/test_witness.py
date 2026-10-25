@@ -12,6 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LENDING = os.path.join(ROOT, "contracts", "lending-simple-real", "lending_simple_real.sol")
 LOCK = os.path.join(ROOT, "tests", "contracts", "witness", "lock.sol")
 UINT = os.path.join(ROOT, "tests", "contracts", "witness", "uint.sol")
+LENDING_REAL = os.path.join(ROOT, "contracts", "lending-real", "lending_real.sol")
 
 
 def test_an_instance_is_the_explicit_strategy():
@@ -25,12 +26,24 @@ def test_an_instance_is_the_explicit_strategy():
 def test_procedures_with_fewer_combinations_first():
     program, _ = V.load(LENDING)
     texts = [t for t, _ in witness.instances(program, program.prop("Liquidation_defence_exists"))]
-    assert len(texts) == witness.MAX_INSTANCES
-    assert "repay(debt[a])" in texts
-    # the procedures with one parameter (8 terms each) come before those with two
-    first_pair = next((i for i, t in enumerate(texts) if "," in t), len(texts))
-    assert all("," not in t for t in texts[:first_pair])
-    assert texts.index("repay(debt[a])") < first_pair
+    assert len(texts) == witness.MAX_INSTANCES and len(set(texts)) == len(texts)
+    # the guard terms first (repay's require debt[msg.sender] >= v), then the generic ones
+    assert texts.index("repay(debt[a])") < 16
+
+
+def test_guard_terms_give_the_whole_debt():
+    """On lending-real the defence repays the whole debt sdebt[a] * idx: a product, which only
+    the guard of repay (sdebt[msg.sender] * idx >= v) gives."""
+    program, _ = V.load(LENDING_REAL)
+    texts = [t for t, _ in witness.instances(program, program.prop("Liquidation_defence"))]
+    whole = [t for t in texts if t.startswith("repay(") and "sdebt[a]" in t and "idx" in t]
+    assert whole and texts.index(whole[0]) < 16
+
+
+def test_guard_terms_fit_the_type():
+    program, _ = V.load(UINT)
+    c = program.contracts[0]
+    assert witness.guard_terms(program, c.proc("f"), c.proc("f").params[0], None, ["a"]) == []
 
 
 def test_no_instance_without_an_existential_over_a_method():

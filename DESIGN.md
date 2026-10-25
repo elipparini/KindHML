@@ -907,6 +907,16 @@ replace the arguments only if every modality with f is at the state of the exist
 under another modality, where the terms would denote values of a later state), and no
 quantifier in ψ binds a variable of the terms; otherwise there is no instance.
 
+Guard terms (2026-10-25) come before these terms: for a numeric parameter x of p, the terms t
+of the conjuncts `t >= x`, `x <= t` and `x == t` of the requires that start the body of p, with
+msg.sender replaced by the sender of the modality (a contract or an address variable in scope;
+otherwise terms with msg.sender are skipped), if t is built from fields, entries of maps at
+those variables or at contracts, +, - and *, and fits x (a difference is int). Such a guard
+often names the amount a strategy needs: the defence of lending-real is repay(sdebt[a] * idx),
+the whole debt, a product that the terms above do not contain. With them the 4 lending_real
+`Liquidation_defence` rows are proved for every n in about 20 s each (server, 2026-10-25). The
+argument for soundness is unchanged: any term of the right type gives an instance.
+
 With every number of users (combined mode) and no cutoff, a side of `_drive_any`
 (`verify._witness_rounds`) checks the instances that have a cutoff and need no idle user
 (Cor. 7.8) on a free state with the invariants of Houdini (cutoff c_H), one instance per Kind 2

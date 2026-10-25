@@ -15,6 +15,12 @@ the scalar fields of that type (uint ones for an int parameter too, never int on
 parameter: `_fits`); for an address, the address variables in scope, the contracts and
 null; for a boolean, true and false. Only the first such existential in positive position is
 instantiated.
+
+Before them come the guard terms of each procedure (`guard_terms`): the terms t of the
+conjuncts `t >= x`, `x <= t` and `x == t` of the requires that start its body, for a numeric
+parameter x, with msg.sender replaced by the sender of the modality. A guard often names the
+amount that a strategy needs: on lending-real, the defence against liquidation is
+repay(sdebt[a] * idx), the whole debt, which is a product, not a field (2026-10-25).
 """
 
 from __future__ import annotations
@@ -36,6 +42,98 @@ def _fits(u, t) -> bool:
     the naturals, so the instance would not imply the property (a false property was proved
     that way, tests/contracts/witness/uint.sol)."""
     return u == t or (t == S.INT and u == S.UINT)
+
+
+def _type(program: S.Program, e: S.Expr, scope: List[str]) -> Optional[S.Type]:
+    """The type of a term built from the fields of the state, the entries of maps at the
+    address variables in `scope` or at contracts, +, - and *; None for any other term. A
+    difference is int even of uints (it may be negative), as is a sum or a product of an int
+    and a uint."""
+    if isinstance(e, S.Field):
+        t = program.contract(e.contract).field_decl(e.name).type
+        return None if isinstance(t, S.MapType) else t
+    if isinstance(e, S.Index) and isinstance(e.map, S.Field):
+        t = program.contract(e.map.contract).field_decl(e.map.name).type
+        key_ok = ((isinstance(e.key, S.QVar) and e.key.name in scope)
+                  or isinstance(e.key, S.ContractAddr))
+        return t.value if isinstance(t, S.MapType) and key_ok else None
+    if isinstance(e, S.BinOp) and e.op in ("+", "-", "*"):
+        a, b = _type(program, e.left, scope), _type(program, e.right, scope)
+        if a is None or b is None:
+            return None
+        if a == b == S.REAL:
+            return S.REAL
+        if S.REAL in (a, b):
+            return None
+        return S.UINT if a == b == S.UINT and e.op != "-" else S.INT
+    return None
+
+
+def _with_sender(e, sender: S.Expr):
+    """e with msg.sender replaced by `sender`."""
+    if isinstance(e, S.Sender):
+        return sender
+    if not hasattr(e, "__dataclass_fields__") or isinstance(e, (S.Type, S.MapType)):
+        return e
+    changes = {n: _with_sender(getattr(e, n), sender) for n in e.__dataclass_fields__
+               if isinstance(getattr(e, n), S.Expr)}
+    changes = {n: v for n, v in changes.items() if v is not getattr(e, n)}
+    if not changes:
+        return e
+    return type(e)(**{**{n: getattr(e, n) for n in e.__dataclass_fields__}, **changes})
+
+
+def _conjuncts(e: S.Expr) -> List[S.Expr]:
+    if isinstance(e, S.BinOp) and e.op == "&&":
+        return _conjuncts(e.left) + _conjuncts(e.right)
+    return [e]
+
+
+def guard_terms(program: S.Program, p: S.Procedure, x: S.VarDecl, sender: Optional[S.Expr],
+                scope: List[str]) -> List[S.Expr]:
+    """The guard terms of the parameter x of p (module docstring) that fit its type
+    (`_fits`), msg.sender replaced by `sender` (None: terms with msg.sender are skipped)."""
+    stmts = p.body.stmts if isinstance(p.body, S.Seq) else (p.body,)
+    out: List[S.Expr] = []
+    for stmt in stmts:
+        if not isinstance(stmt, S.Require):
+            break
+        for g in _conjuncts(stmt.cond):
+            is_x = lambda e: isinstance(e, S.Param) and e.name == x.name
+            t = None
+            if isinstance(g, S.BinOp) and g.op in (">=", "==") and is_x(g.right):
+                t = g.left
+            elif isinstance(g, S.BinOp) and g.op in ("<=", "==") and is_x(g.left):
+                t = g.right
+            if t is None or (sender is None and _has_sender(t)):
+                continue
+            t = _with_sender(t, sender) if sender is not None else t
+            u = _type(program, t, scope)
+            if u is not None and _fits(u, x.type) \
+                    and pretty.expr(t) not in [pretty.expr(o) for o in out]:
+                out.append(t)
+    return out
+
+
+def _has_sender(e) -> bool:
+    if isinstance(e, S.Sender):
+        return True
+    return any(_has_sender(getattr(e, n)) for n in getattr(e, "__dataclass_fields__", ())
+               if isinstance(getattr(e, n), S.Expr))
+
+
+def _sender(e, fvar: str) -> Optional[S.Expr]:
+    """The sender of the first modality that calls the method variable `fvar`."""
+    if isinstance(e, S.Modal) and isinstance(e.proc, S.QVar) and e.proc.name == fvar:
+        return e.sender
+    for n in getattr(e, "__dataclass_fields__", ()):
+        v = getattr(e, n)
+        for x in (v if isinstance(v, tuple) else (v,)):
+            if isinstance(x, S.Expr):
+                found = _sender(x, fvar)
+                if found is not None:
+                    return found
+    return None
 
 
 def candidates(program: S.Program, t, scope: List[str]) -> List[S.Expr]:
@@ -160,26 +258,47 @@ def instances(program: S.Program, prop: S.Property,
             or _binds(body) & set(scope + [fq.var] + ([aq.var] if aq is not None else [])):
         return []                       # a variable of the terms would be captured
     out: List[Tuple[str, S.Property]] = []
-    # the procedures with fewer combinations of arguments first, so that the limit cuts the
-    # procedures with many parameters, not the simple ones
-    calls = []
-    for c in program.contracts:
-        for p in c.procs:
-            if p.name == S.CONSTRUCTOR:
-                continue
-            choices = [candidates(program, v.type, scope) for v in p.params]
-            if not any(not ch for ch in choices):
-                size = 1
-                for ch in choices:
-                    size *= len(ch)
-                calls.append((size, c, p, choices))
-    for _, c, p, choices in sorted(calls, key=lambda x: x[0]):
+    seen: set = set()
+    # the sender of the call, if a term at the state of the existential: it replaces msg.sender
+    # in the guard terms
+    sender = _sender(body, fq.var)
+    if not (isinstance(sender, S.ContractAddr)
+            or (isinstance(sender, S.QVar) and sender.name in scope)):
+        sender = None
+
+    def calls(guards: bool):
+        """The calls with their choices of terms: with `guards`, those of the procedures with
+        guard terms (the other parameters with the generic terms); the procedures with fewer
+        combinations first, so that the limit cuts the procedures with many parameters."""
+        found = []
+        for c in program.contracts:
+            for p in c.procs:
+                if p.name == S.CONSTRUCTOR:
+                    continue
+                choices = [candidates(program, v.type, scope) for v in p.params]
+                if guards:
+                    own = [guard_terms(program, p, v, sender, scope) for v in p.params]
+                    if not any(own):
+                        continue
+                    choices = [g or ch for g, ch in zip(own, choices)]
+                if all(choices):
+                    size = 1
+                    for ch in choices:
+                        size *= len(ch)
+                    found.append((size, c, p, choices))
+        return sorted(found, key=lambda x: x[0])
+
+    for guards in (True, False):
+        for _, c, p, choices in calls(guards):
             for terms in itertools.product(*choices):
+                text = f"{p.name}({', '.join(pretty.expr(t) for t in terms)})"
+                if text in seen:
+                    continue
+                seen.add(text)
                 mapping = {fq.var: S.ProcConst(c.name, p.name)}
                 new_body = _subst(body, mapping, (c.name, p.name, p),
                                   aq.var if aq is not None else None, tuple(terms))
                 formula = _replace(prop.formula, fq, new_body)
-                text = f"{p.name}({', '.join(pretty.expr(t) for t in terms)})"
                 out.append((text, S.Property(f"{prop.name}__w{len(out)}", formula, None,
                                              prop.pos)))
                 if len(out) >= limit:

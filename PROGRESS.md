@@ -986,6 +986,12 @@ laptop out of memory (2026-10-24, 22:07): no computation runs locally any more.
   proved for every n in under 1 s; witness terms from the requires of the procedure (prototype)
   prove the 4 rows (end to end 48 s on lending_real). lending_int (false): a 9-step counterexample
   exists (cvc5 refutes the exact check in 2 s, z3 not in 60 s); no search reaches such states.
+- **Why the invariant phase of lending-real now ends: the reduction by symmetry (b230f2c).**
+  Measured on the server (lending_real.sol, every n, 1150 s): at cab8313 it ends in 378 s (84
+  proved, for every n >= 5); with KINDHML_SYMMETRY=0 it does not end, nor at ff17998 (the parent
+  of b230f2c) or 9d91616. The step of liquidate with the cutoff 5 is 3.5-3.8 MB without the
+  reduction (undecided after 242 s), 170-330 kB with it (decided by z3 in at most 3.2 s). The
+  cluster run of 2026-10-24 was at b89afee or 3c249a7, both before b230f2c.
 - **Attack rows (13):** direct.py refuses free states with an address field (`oracle`); a case
   split over its values proves the 4 true Liquidation_attack(_exists) rows in 1-2 s after Houdini
   (tested end to end). The 5 false Liquidation_attack_any rows: the bounded evaluation of three
