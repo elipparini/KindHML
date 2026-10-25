@@ -897,7 +897,12 @@ proves the property for every n. `witness.instances` gives the instances of the 
 existential: each procedure p, and terms of the types of its parameters built from the state
 and the address variables in scope (the entries of the maps of that type at those variables,
 the scalar fields of that type; for an address, those variables, the contracts and null; for a
-boolean, true and false), the procedures with fewer combinations first, at most 64. The terms
+boolean, true and false), the procedures with fewer combinations first, at most 64. A term fits a
+parameter if their types are equal, or if the parameter is int and the term uint (uint fields
+are nonnegative in reachable states): an int term for a uint parameter can be negative, the call
+then reverts by its uint guard, while the arguments of the property range over the naturals,
+so the instance would not imply the property (a false property was proved that way,
+`tests/contracts/witness/uint.sol`; fixed on 2026-10-25). The terms
 replace the arguments only if every modality with f is at the state of the existential (not
 under another modality, where the terms would denote values of a later state), and no
 quantifier in ψ binds a variable of the terms; otherwise there is no instance.

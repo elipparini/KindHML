@@ -937,6 +937,62 @@ as C): the 5 rows `Liquidation_defence_exists` of lending-simple-* are valid for
 s; unknown at 300 s before), each by the instance repay(debt[a]), in agreement with the ground
 truth.
 
+## Done (2026-10-24): E, the full run at b0deb54 (server)
+
+All the families but the regressions (264 tasks), every number of users, 600 s per property, 6
+shards on the server: `results/server-20261024-b0deb54.csv` (runs/server/final/e600). 168
+valid, 71 invalid, 25 without verdict; no verdict disagrees with the ground truth. Against the
+241 common rows of results/cluster-20261022-2304.csv and cluster-20261024-0035-lending.csv: 69
+rows gained a verdict (AMM 30: groups 1-2 and C; vault 2: group 2; lending 37, among them the 4
+lending-simple-real `Liquidation_defence_exists` rows, by D), none lost one, none changed. The 25 open rows are all
+lending: `Liquidation_attack_any` (9), `Liquidation_attack(_exists)` with ground truth true (4),
+`Liquidation_defence` on lending-real and lending-int (5), `Exchange_rate_monotone` on
+lending-real (4), and Nonnegative, Totals, Health_non_interference on lending-int (3). The invariant
+phase of lending-real now ends (lending_real_v3: 84 proved, 20 dropped, 331 s); it did not in the
+cluster run of 2026-10-24. Analysis of the open rows: below (2026-10-25).
+
+## Done (2026-10-25): the open rows of E analysed; two bugs fixed (with the user)
+
+Agents, all their runs on the server (scripts and logs in the session scratchpad,
+`e-analysis/`). An earlier attempt, with five agents allowed to run pure Python locally, ran the
+laptop out of memory (2026-10-24, 22:07): no computation runs locally any more.
+
+- **Houdini: duplicated inputs in the steps (fixed).** `Checks._after` quantified the value and
+  the numeric arguments inside the expanded address quantifiers: one input per copy, and
+  `refuted_after` read the last copy. On lending_int (5 users) the constructor (not payable) got
+  value 20, every replay reverted, the per-candidate step decided nothing in 30 s, the
+  undecided rule dropped 151 generated candidates, and the declared Nonnegative and Totals were
+  then refuted: 0 proved. 68 step programs of the AMM, lending and vault files had such
+  duplicates. Fix: the expanded quantifiers innermost. Checked by an independent agent: no
+  change of cutoffs or step counts on the 44 files (110,805 step counts), the replay right for
+  every parameter type. On the server, lending-int at 600 s: Nonnegative, Totals (inductive) and
+  Health_non_interference (invariants, 15 s) proved; no other verdict changed; the test suite
+  passes but `test_trans_kind2` (server's Kind 2). Remaining weakness: the undecided rule can
+  still drop every generated candidate when a replay refutes nothing for another reason.
+- **Candidate witnesses: int terms for uint parameters (unsound, fixed).** `witness.candidates`
+  offered int terms for a uint parameter: a negative value makes the call revert, while the
+  arguments of the property range over the naturals, so the instance did not imply the
+  property; the tool proved a false crafted property (`tests/contracts/witness/uint.sol`).
+  Fix: the same type, or uint for int (uint fields are nonnegative in reachable states). No
+  verdict of E was affected (its 5 proofs by instances have real or int parameters and terms).
+- **Exchange_rate_monotone (lending-real, 4 rows) is false**, against the ground truth: after
+  interest is accrued and repaid, redeeming the last credits resets xr0 to 1 (checked by hand:
+  constructor, deposit0(1), borrow(1/2), accrue, repay(11/20), redeem0(1): xr0 from 21/20 to
+  1). The user decides the ground truth; `forall a f args . << a : Lending.f(args) >> (sc0 > 0 ->
+  xr0 >= old(xr0))` is proved for every n in 2.8 s. Fuzzing with boundary values (a numeric
+  argument takes the value it is compared with in the requires, e.g. `sdebt[msg.sender]*idx`)
+  refutes v1 and v4 in 76 s at 300 s (not adopted yet).
+- **Liquidation_defence (lending-real, 4 rows, true):** the instance repay(sdebt[a] * idx) is
+  proved for every n in under 1 s; witness terms from the requires of the procedure (prototype)
+  prove the 4 rows (end to end 48 s on lending_real). lending_int (false): a 9-step counterexample
+  exists (cvc5 refutes the exact check in 2 s, z3 not in 60 s); no search reaches such states.
+- **Attack rows (13):** direct.py refuses free states with an address field (`oracle`); a case
+  split over its values proves the 4 true Liquidation_attack(_exists) rows in 1-2 s after Houdini
+  (tested end to end). The 5 false Liquidation_attack_any rows: the bounded evaluation of three
+  nested method existentials times out; candidates from φ with those existentials replaced by
+  false refute them when fuzzing runs alone (48-188 s), not yet in the portfolio. The 4 true
+  ones need instances of the whole chain (setPrice; liquidate; setPrice), proved on the instance.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates

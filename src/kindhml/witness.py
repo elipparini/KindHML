@@ -11,7 +11,8 @@ is the property Liquidation_defence, proved for every number of users).
 
 The arguments are terms of the type of each parameter, built from the state and the variables in
 scope: for a number, the entries of the maps of that type at the address variables in scope, and
-the scalar fields of that type; for an address, the address variables in scope, the contracts and
+the scalar fields of that type (uint ones for an int parameter too, never int ones for a uint
+parameter: `_fits`); for an address, the address variables in scope, the contracts and
 null; for a boolean, true and false. Only the first such existential in positive position is
 instantiated.
 """
@@ -27,13 +28,14 @@ from . import syntax as S
 MAX_INSTANCES = 64
 
 
-def _num(t) -> Optional[str]:
-    """The kind of number of a type: 'real', 'int' (int and uint), or None."""
-    if t == S.REAL:
-        return "real"
-    if t in (S.INT, S.UINT):
-        return "int"
-    return None
+def _fits(u, t) -> bool:
+    """Whether a field of type u gives values of the parameter type t in every reachable state:
+    the same type, or a uint for an int (an assignment of a negative number to a uint field
+    reverts, `desugar.py`). An int term for a uint parameter does not fit: a negative value
+    makes the call revert by its uint guard, while the arguments of the property range over
+    the naturals, so the instance would not imply the property (a false property was proved
+    that way, tests/contracts/witness/uint.sol)."""
+    return u == t or (t == S.INT and u == S.UINT)
 
 
 def candidates(program: S.Program, t, scope: List[str]) -> List[S.Expr]:
@@ -43,16 +45,15 @@ def candidates(program: S.Program, t, scope: List[str]) -> List[S.Expr]:
     if t == S.ADDRESS:
         return ([S.QVar(a, S.ADDRESS) for a in scope] + [S.ContractAddr(c.name)
                 for c in program.contracts] + [S.NullLit()])
-    kind = _num(t)
-    if kind is None:
+    if t not in (S.INT, S.UINT, S.REAL):
         return []
     out: List[S.Expr] = []
     for c in program.contracts:
         for f in c.fields:
-            if isinstance(f.type, S.MapType) and _num(f.type.value) == kind:
+            if isinstance(f.type, S.MapType) and _fits(f.type.value, t):
                 out += [S.Index(S.Field(c.name, f.name), S.QVar(a, S.ADDRESS)) for a in scope]
         for f in c.fields:
-            if not isinstance(f.type, S.MapType) and _num(f.type) == kind:
+            if not isinstance(f.type, S.MapType) and _fits(f.type, t):
                 out.append(S.Field(c.name, f.name))
     return out
 

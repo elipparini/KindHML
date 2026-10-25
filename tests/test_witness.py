@@ -11,6 +11,7 @@ from kindhml import witness
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LENDING = os.path.join(ROOT, "contracts", "lending-simple-real", "lending_simple_real.sol")
 LOCK = os.path.join(ROOT, "tests", "contracts", "witness", "lock.sol")
+UINT = os.path.join(ROOT, "tests", "contracts", "witness", "uint.sol")
 
 
 def test_an_instance_is_the_explicit_strategy():
@@ -73,3 +74,19 @@ def test_an_instance_proves_the_property_for_every_number_of_users():
     o = V.verify(program, program.prop("Defence_exists"), V.ANY, 60, users_mode="combined")
     assert o.status == "valid", o.describe()
     assert o.scope.startswith("n >= ") and "for the instance lock(true)" in o.scope
+
+
+def test_no_int_term_for_a_uint_parameter():
+    """f(m[a]) with m of type int is no instance of Revertible: a negative m[a] makes the call of
+    f(uint) revert, while the arguments of the property range over the naturals."""
+    program, _ = V.load(UINT)
+    texts = [t for t, _ in witness.instances(program, program.prop("Revertible"))]
+    assert "f(m[a])" not in texts and "f(k)" not in texts
+    assert "setm(m[a])" in texts and "setm(k)" in texts
+
+
+@pytest.mark.kind2
+def test_a_false_property_is_not_proved_by_an_ill_typed_instance():
+    program, _ = V.load(UINT)
+    o = V.verify(program, program.prop("Revertible"), V.ANY, 60, users_mode="combined")
+    assert o.status != "valid", o.describe()
