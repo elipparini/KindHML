@@ -1,6 +1,7 @@
 """Invariant-assisted checks (`invariants.py`, `verify.verify` with strategy portfolio)."""
 
 import os
+import re
 from fractions import Fraction
 
 import pytest
@@ -258,6 +259,25 @@ def test_refuted_after_an_expanded_address_argument(tmp_path):
     cex = [{"name": "main", "streams": [
         {"name": "s.constructed_C", "instantValues": [[0, True]]}]}]
     assert c.refuted_after(cex, ["Zero"], contract, proc) == {"Zero"}
+
+
+def test_step_has_one_input_per_numeric_variable(tmp_path):
+    """The value and the numeric arguments of the call are inputs of the step once, outside
+    the expanded address quantifiers: inside them, they had one input per copy, and
+    `refuted_after` read one copy only (lending-int: a nonzero value for the constructor, which
+    is not payable, so every replay reverted and Houdini dropped all generated candidates)."""
+    path = tmp_path / "c.sol"
+    path.write_text("contract C { int x; constructor(address o, int s) { require(s > 0); x = s }"
+                    " function f(int n, address a) { x = n } }\n"
+                    "invariant Small { x <= 1 }\n")
+    program, _ = V.load(str(path))
+    c = Checks(program, 3, "inline", ("address", "method"), ghost_sums=True)
+    contract = program.contracts[0]
+    for proc, names in ((contract.procs[0], ["q___arg_s", "q___value"]),
+                        (contract.proc("f"), ["q___arg_n", "q___value"])):
+        (lus, _, _), = c.step_conj_checks(["Small"], only=(contract, proc))
+        inputs = set(re.findall(r"\bq___[A-Za-z0-9_]+", lus))
+        assert sorted(q.rsplit("_", 1)[0] for q in inputs) == names, inputs
 
 
 @pytest.mark.kind2

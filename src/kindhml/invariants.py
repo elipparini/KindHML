@@ -327,7 +327,15 @@ class Checks:
         return self._render(prog, node), about
 
     def _after(self, c: S.Contract, p: S.Procedure, formula: S.Expr) -> S.Expr:
-        """∀a, x̄, v[, δ]. ⟨a : C.p(x̄) $ v @ δ⟩ formula, as a resolved formula."""
+        """∀a, x̄, v[, δ]. ⟨a : C.p(x̄) $ v @ δ⟩ formula, as a resolved formula. The quantifiers
+        that the encoder expands (the sender and the address parameters, when `expand` contains
+        address) are the innermost: the others are then encoded once, each as one input of the check
+        (`hoist`). Inside an expanded quantifier, a quantifier is encoded once per copy, with
+        fresh names (`FormulaEncoder.quant`), and `refuted_after` would read the value of one
+        copy only: on lending-int (5 users), `∀v` had two copies inside the constructor's
+        `oracle_`, the replay read the nonzero one, every replay of the constructor (not
+        payable) reverted, and the undecided step of the constructor then dropped 151
+        generated candidates."""
         sender = S.QVar("__sender", S.ADDRESS)
         args = tuple(S.QVar(f"__arg_{x.name}", x.type) for x in p.params)
         value = S.QVar("__value", self.program.balance_type)
@@ -335,8 +343,10 @@ class Checks:
                   else S.IntLit(0))
         body: S.Expr = S.Modal(sender, c.name, S.ProcConst(c.name, p.name), args, value,
                                blocks, formula)
-        for v in ([sender, value] + list(args) + ([blocks] if isinstance(blocks, S.QVar)
-                                                   else [])):
+        variables = [sender, value] + list(args) + ([blocks] if isinstance(blocks, S.QVar)
+                                                    else [])
+        expanded = [v for v in variables if v.type.name in self.expand]
+        for v in expanded + [v for v in variables if v not in expanded]:
             body = S.Quant("forall", v.name, v.type, body)
         return body
 

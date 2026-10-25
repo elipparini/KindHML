@@ -232,7 +232,12 @@ constructed). The largest inductive subset C is found by Houdini (Flanagan, Lein
   fixed, each query took about 10 s);
 * if it is refuted, its counterexample gives a free state satisfying C and the arguments of
   the call; the reference interpreter runs the call from that state (for every sender),
-  and the candidates false afterwards are not inductive; if none is identified, or the
+  and the candidates false afterwards are not inductive. The value and the numeric
+  arguments are quantified outside the expanded address quantifiers (`Checks._after`), so
+  that each is one input of the query: inside them, each had one input per copy, the replay
+  read one copy only, and on lending-int (5 users) every replay of the constructor got a
+  nonzero value and reverted, so that the undecided step dropped 151 generated candidates,
+  and Houdini ended with none (2026-10-25); if none is identified, or the
   query is not decided, the step of f is checked with one property per candidate
   (slower: the inlined call is copied into every property; on the lending protocol, 71
   candidates were not decided in 64 s that way, while each conjunction takes 1-6 s);
