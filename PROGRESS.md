@@ -1026,6 +1026,31 @@ time per MB for Kind 2, KIND2_LARGE).
   lending_int `Liquidation_defence`. On lending-real, the invariant
   phase takes about 380 s of the 600 s, and the fuzzer alone needs 140-160 s for a candidate.
 
+## Done (2026-10-25): instances of a chain of existentials over methods (with the user)
+
+`Liquidation_attack_any` (three calls of the attacker) had no proof: the witnesses of Sect. 7.8
+fix only the first existential, and only without a cutoff. The user rejected taking the call
+sequences from sibling properties (cheating: a user does not know them); the user's idea of
+scoring the combinations by fuzzing became `chains.py` and `verify._chain_rounds` (DESIGN.md,
+Sect. 7.9): sequences scored by the margin of the conclusion at models of the invariants and the
+premise (z3, free states) and at the counterexamples of the instances tried (CEGIS).
+- E1 (BMC for a reachable premise state, for the false rows): depth 5 in 31-36 s on
+  lending-simple, none in 120 s on lending-real; no faster than the fuzzer, not pursued.
+- E2 (prototype, `runs/scratch-20261025/chain/`): the 4 true rows proved at the first or
+  second instance, 11-34 s after the invariants; in the order of the source, none in 300 s on
+  lending_simple_real_v2 (402 of 6859 instances). Crafted first: `tests/contracts/chain/`.
+- A soundness review by a separate agent (read-only): no false proof for type-checked
+  properties, but the names of the new existentials could capture or clash (contrived
+  identifiers); fixed with fresh names, and the robustness findings fixed (the weakened
+  property no longer blocks the instances, undecided instances are checked again, states from
+  Kind 2 counterexamples, bounds, exceptions). `tests/test_chains.py`: 7 tests.
+- In the tool (600 s, 8 shards): lending_simple_real_v4 78 s, _v2 95 s, lending_real_v4 177 s;
+  lending_real_v2 unknown (its instance comes after the 600 s: a question of scheduling, left
+  for later, as the final runs will have a longer limit). lending_simple_int still refuted.
+- Lending regression (before the review fixes, which change only the chain side; 107 of 117
+  rows at the time of the commit): no verdict lost or wrong; gained 3 `Liquidation_attack_any`
+  rows and `Exchange_rate_monotone` v2 and v4 (fuzzing, which varies between runs).
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run

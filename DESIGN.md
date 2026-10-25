@@ -965,3 +965,46 @@ proved; `experiments/witness/`). A proved instance proves the property for every
 n >= L = max(c_H, u), u the cutoff of its check, and, since it needs no idle user, for every n < L (the proof with L users
 holds for fewer users); the scope names the instance. A refuted instance refutes nothing.
 
+### 7.9 Instances of a chain of existentials over methods (2026-10-25)
+
+`forall xs . premise -> exists f1 args1 ... fk argsk . << s : C.f1(args1) >> ... << s :
+C.fk(argsk) >> body`, k >= 2 (lending `Liquidation_attack_any`, k = 3: some three calls of the
+attacker increase its net worth). Sect. 7.8 instantiates only the first existential, and only
+without a cutoff; this property has one (4 or 5) and no proof with it: its 4 true rows were
+open in run E. An instance fixes the methods g1, ..., gk and the address arguments (terms in
+scope: the variables xs, the contract, null), and keeps the numeric arguments as existential
+variables quantified before the chain: their values are chosen at its start, like those of
+args_i, so the instance implies the property (introduction of the existentials). A proof of
+an instance that has a cutoff and needs no idle user proves the property for every n, as in
+Sect. 7.8.
+
+There are |procedures|^k sequences (1331 on lending-real, 4913 instances on the crafted pool
+with the choices of the address arguments), and a check takes about 1 s, so the order decides.
+`chains.Search` scores the sequences at sample states, and the instances are tried from the
+best (`verify._chain_rounds`, a side of `_drive_any`, now also with a cutoff):
+* sample states: models of C(s) and the premise on a free state (z3; the check of the property
+  weakened to `premise -> false`, whose proof would prove the property), then the
+  counterexamples of the instances tried (counterexample-guided, as CEGIS). They need not be
+  reachable: the proof of an instance is on such free states. Reachable premise states are
+  rare (1 random state in 64,776 on lending-simple-int), and BMC finds one no faster than the
+  fuzzer (depth 5 in 31-36 s on lending-simple; none in 120 s on lending-real);
+* at each state and assignment of xs where the premise holds (at most ENVS = 1), a sequence gets
+  the best margin of body (L - R for L > R) over K = 4 runs of its calls with sampled arguments (the numbers of the
+  state, their halves and doubles, boundary values); margins, not truth values, because random
+  arguments rarely make body true, and then most sequences would tie (robustness of a formula,
+  as in the falsification of cyber-physical systems);
+* rank: first by the number of states with a positive margin, then by the sum of the ranks at
+  each state (margins of different states are not comparable); a new state is scored once.
+Only the contract and the property are used, never other properties of the specification
+(2026-10-25, with the user). Prototype (`runs/scratch-20261025/chain/chain.py`; server, 300 s
+after the invariants): the 4 true rows proved at the first or second instance, 11-34 s after
+the invariants (scoring 1000 sequences at a state takes about 9 s); in the order of the source,
+the crafted pool was proved at instance 1138 (229 s), lending_simple_real_v2 not at all (402 of
+6859 tried); the false rows and `pool_oracle.sol` were not proved (they cannot be: every proof
+is checked by the solver). The prototype scored with K = 8 and ENVS = 2 (9-16 s per state); with
+4 and 1, 2-4 s per state, and lending_real_v2 and lending_simple_real_v2 were proved after 2 and
+3 instances, 14 s and 11 s after the invariants. In the tool, the first round of the side gets
+CHAIN_FIRST_ROUND = 30 s (with 4 s, then 8 s, the instances came 3 rounds later, 330-420 s after
+the invariants, as the rounds of the other sides take 60-100 s there). These values are
+provisional (measured on these rows only).
+

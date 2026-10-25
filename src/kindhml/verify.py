@@ -23,11 +23,13 @@ from .concrete import (describe_tx, python_value, state_from_values, state_liter
 from .cutoff import Cutoff, OutOfFragment, Scanner, idle_users
 from . import direct
 from . import witness
-from .fuzz import Fuzzer, has_witness, locations
+from . import chains
+from .fuzz import Fuzzer, has_witness, locations, weakened as fuzz_weakened
 from .invariants import Checks, describe_state, final_values, python_constant, state_values
 from .invgen import (candidates as invariant_templates, generate as generate_invariants,
                      minimize as minimize_invariants)
 from .model import System
+from .reference import Revert
 from .typecheck import check
 from . import syntax as S
 
@@ -184,6 +186,7 @@ class Outcome:
 
 STRATEGIES = ("portfolio", "kind2")
 FIRST_BUDGET = 4.0                  # seconds per task in the first round; doubled each round
+CHAIN_FIRST_ROUND = 30.0            # seconds of the first round of `_chain_rounds`
 PENDING_MAX = 2                     # undecided candidates of the fuzzer kept for later rounds
 PENDING_TRIES = 2                   # and the rounds in which each is checked again
 KIND2_LARGE = 4_000_000             # characters: a large program of Kind 2 (`_rounds`)
@@ -310,10 +313,15 @@ def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
         return _drive_one(side(c if ghost else n_users, ghost, n_users, cut, climb=True))
     if n_users == ANY:
         wit = None
-        if c is None and users_mode == "combined":
+        # a chain of existentials over methods: its instances also with a cutoff (lending
+        # Liquidation_attack_any has one, 4 or 5, and no proof with it)
+        sh = chains.shape(prop)
+        if (c is None or sh is not None) and users_mode == "combined":
             wit = _Side(cut.steps or 1, True, None, kind2=False, search=False, prop=prop)
-            wit.gen = _witness_rounds(program, prop, context, mode, expand, invgen,
-                                      user_invariants, start, deadline)
+            wit.gen = (_chain_rounds(program, prop, sh, context, mode, expand, invgen,
+                                     user_invariants, start, deadline) if sh is not None
+                       else _witness_rounds(program, prop, context, mode, expand, invgen,
+                                            user_invariants, start, deadline))
         return _drive_any(program, prop, cut, c if users_mode == "combined" else None,
                           side, deadline, wit)
     if c is None or c > n_users:
@@ -455,6 +463,119 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
             k += 1
             if k >= len(pending):
                 k, per = 0, per * 2
+        yield
+        budget *= 2
+    return unknown
+
+
+def _chain_rounds(program: S.Program, prop: S.Property, sh: chains.Shape, context: dict,
+                  mode: str, expand, invgen: bool, user_invariants: bool, start: float,
+                  deadline: Optional[float]) -> Generator[None, None, Outcome]:
+    """Every number of users, a chain of existentials over methods (`chains.py`; DESIGN.md,
+    Sect. 7.9): instances in the order of `chains.Search`, each checked on a free state with the
+    invariants of Houdini (the strongest premise set; z3 directly, else Kind 2), with the
+    budget of the round, which doubles at each round; a counterexample is a new state of the
+    search. The first check is that of the property weakened to `premise -> false`
+    (`fuzz.weakened`): its counterexample is the first state; its proof proves the property,
+    which it implies. As for `_witness_rounds`, a proved instance that has a cutoff and needs
+    no idle user proves the property for every n."""
+    unknown = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
+    cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
+    if cut.steps is None:
+        return unknown
+    cchecks = context[("cutoff checks", id(program), invgen, user_invariants)]
+    scanner = Scanner(System.make(program, 1))
+    invs = _entry(context, program, cut.steps, mode, expand, invgen, user_invariants, True)
+    budget = FIRST_BUDGET
+    while invs.proved is None:          # Houdini (usually done by `prove_invariants`)
+        left = None if deadline is None else deadline - time.time()
+        if left is not None and left <= 1:
+            return unknown
+        invs.attempt(budget if left is None else min(budget, left))
+        budget *= 2
+        yield
+    search = chains.Search(program, prop, sh)
+    cache: Dict[tuple, Optional[_DirectCases]] = {}
+
+    def check(inst: S.Property, b: float):
+        """(status, solver, users of the check, a state where the instance is false or None,
+        its system). "outside": no cutoff, idle users needed, or an error of the encoding or
+        of the solvers: the instance is not checked again."""
+        try:
+            if cchecks.cutoff([inst]).of_property(inst.name) is None \
+                    or scanner.idle_needed(inst.formula) != 0:
+                return "outside", "", None, None, None
+            premises = invs.checks.premises(inst, invs.assumed())[-1]
+            u = max(1, invs.checks.property_count(premises, inst))
+            checks = invs.checks_for(u)
+            status, _, solver, answer = _direct_check(checks, inst, premises, [], b, cache,
+                                                      (inst.name,))
+            values = None
+            if status == "inapplicable":
+                lus, names = checks.property_check(inst, premises)
+                status, res, solver, _ = _free_run_cex(lus, names[0], b)
+                if status == "invalid" and res is not None and res.counterexample:
+                    values = state_values(res.counterexample)
+            elif status == "invalid" and answer is not None:
+                values = {p: direct.literal(v) for p, v in answer.values.items()
+                          if p.startswith("s.")}
+            st = (state_from_values({p: python_constant(v) for p, v in values.items()},
+                                    checks.enc.system, checks.enc) if values else None)
+            return status, solver, u, st, checks.enc.system
+        except EncodingTimeout:
+            raise                           # the time limit: `_step` gives unknown
+        except (OutOfFragment, KindHMLError, NotImplementedError, ValueError, TypeError,
+                KeyError, IndexError, RecursionError):
+            return "outside", "", None, None, None
+
+    weak = S.Property(prop.name + "__premise", fuzz_weakened(prop.formula), None, prop.pos)
+    weak_open = True                    # the weakened property: checked once per round
+    undecided: List[Tuple[str, S.Property]] = []    # instances checked again, with more time
+    exhausted = False
+    budget, first = FIRST_BUDGET, True
+    while weak_open or undecided or not exhausted:
+        # the first round gets CHAIN_FIRST_ROUND: the model of the premise, the scores at two
+        # states and two or three instances; with the budget of 4 s, then 8 s, the proofs of the
+        # 4 true Liquidation_attack_any rows came 3 rounds later, 330-420 s after the invariants
+        # (the rounds of the other sides take 60-100 s there), at the first or second instance
+        end = time.time() + (max(budget, CHAIN_FIRST_ROUND) if first else budget)
+        first = False
+        queue = ([(None, weak)] if weak_open else []) + undecided
+        undecided = []
+        while time.time() < end:
+            if queue:
+                text, inst = queue.pop(0)
+            else:
+                nxt = None if exhausted else search.next()
+                if nxt is None:
+                    exhausted = True
+                    break
+                text, inst = nxt
+            left = None if deadline is None else deadline - time.time()
+            if left is not None and left <= 1:
+                return unknown
+            status, solver, u, st, system = check(inst, budget if left is None
+                                                  else min(budget, left))
+            if status == "valid":
+                low = max(invs.users, u)
+                o = _valid(prop, "invariants", time.time() - start, solver)
+                o.scope = (f"n >= {low} by invariants"
+                           + (f", n < {low} by the proof with {_n(low)}, which holds for"
+                              " fewer users" if low > 1 else "")
+                           + ("; its premise never holds" if inst is weak
+                              else f"; for the instance {text} of {prop.name}"))
+                return o
+            if inst is weak:
+                weak_open = status == "unknown"
+            elif status == "unknown":
+                undecided.append((text, inst))
+            if st is not None:
+                try:
+                    search.add(st, system)
+                except (Revert, KeyError, ZeroDivisionError, TypeError, ValueError,
+                        NotImplementedError, IndexError, RecursionError):
+                    pass                    # a state the interpreter cannot run: not scored
+        undecided = [x for x in queue if x[1] is not weak] + undecided
         yield
         budget *= 2
     return unknown
