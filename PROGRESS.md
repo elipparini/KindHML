@@ -1026,6 +1026,16 @@ time per MB for Kind 2, KIND2_LARGE).
   lending_int `Liquidation_defence`. On lending-real, the invariant
   phase takes about 380 s of the 600 s, and the fuzzer alone needs 140-160 s for a candidate.
 
+## Noted (2026-10-25, with the user): for later
+
+- A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
+  with the declared ones (`results/server-20261025-p7.csv`), to show how much the declared
+  invariants of the spec files contribute.
+- Improvements use only the contract and the property under check: never instances or hints
+  from other properties of the spec (the proposal "chain instances from sibling properties" for
+  `Liquidation_attack_any` was rejected). The declared invariants of the spec files, templates
+  designed from the use cases, and constants measured on the rows are accepted.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates
