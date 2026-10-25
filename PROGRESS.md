@@ -1051,6 +1051,28 @@ premise (z3, free states) and at the counterexamples of the instances tried (CEG
   rows at the time of the commit): no verdict lost or wrong; gained 3 `Liquidation_attack_any`
   rows and `Exchange_rate_monotone` v2 and v4 (fuzzing, which varies between runs).
 
+## Done (2026-10-25): option --smt_trace; the NIA instances of the benchmarks (with the user)
+
+The user asked for the nonlinear integer instances that KindHML produces, through a general
+option. `--smt_trace DIR` and `--smt_trace_logics` (`src/kindHML.py`, `tests/run_all.py`;
+`src/kindhml/smt_trace.py`, README): Kind 2's traces (its flag `--smt_trace`) and the direct
+z3 queries, as cleaned incremental scripts and as one standalone script per check-sat (pruned
+of inactive activation literals and unused declarations, which preserves the answer); logic
+computed from the content; names tracing back to the task, call, stage, engine and solver.
+`tests/test_smt_trace.py`: 28 tests.
+- Kind 2 writes about 1 MB of trace per second of run; recording takes about 0.2 s per MB.
+  The three invgen variants (os, ts, intos) write identical traces: written once.
+- Full run at 709dd1d (600 s, 8 shards, 76 tasks of the int families and bank, vault,
+  price-bet; 35 min): 739 incremental and 4398 standalone QF_NIA/NIA files, 2.9 GB, all from
+  the four int families. Verdicts as in the run of 2026-10-25, except lending-int
+  Exchange_rate_monotone refuted (fuzzing). Every file parses (cvc5); z3 agrees with the
+  recorded answer on the 4160 standalone files it decides in 10 s. The folder is on the server
+  (`~/claude/nia/nia-smt2-20261025/`, and `.tar.gz`, 135 MB); README, manifest and verdicts in
+  `results/nia-smt2-20261025/` (untracked; the laptop disk was full).
+- Found on the way: the 50 tests `test_trans.py::test_trans_kind2` fail at 8afe4bf already
+  (Lustre type error in the state literals of the test: `Map_int` expected, `int` found);
+  not fixed.
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
