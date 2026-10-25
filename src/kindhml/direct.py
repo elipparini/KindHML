@@ -46,6 +46,7 @@ import z3
 
 from . import kind2
 from . import lustre as L
+from . import smt_trace
 
 TACTIC = "(then simplify nlqsat)"
 MAX_CASES = 64                      # cases of the fields of enumerated type (`SplitQuery`)
@@ -482,13 +483,15 @@ class Query:
             return Answer("valid")
         with tempfile.TemporaryDirectory(prefix="kindhml_") as tmp:
             path = os.path.join(tmp, "query.smt2")
+            script = self.smtlib()
             with open(path, "w") as f:
-                f.write(self.smtlib())
+                f.write(script)
             secs = max(1, ceil(timeout))
             raw, err, killed, oom = kind2.run_command([kind2.find_z3(), f"-T:{secs}", path],
                                                       secs + 5)
         lines = [x for x in raw.splitlines() if x.strip()]
         first = lines[0].strip() if lines else ""
+        smt_trace.record_query(script, first if first in ("sat", "unsat") else "unknown")
         if first == "unsat":
             return Answer("valid")
         if first == "sat":

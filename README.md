@@ -71,6 +71,18 @@ Options:
   checked with 1, 2, 3, ... users in turn, and the verdict is "true up to m users" if no
   counterexample is found. `any` needs `combined` or `exact` (the latter checks 1, 2, 3, ...
   users only). `--parameterized` is `--users_mode parameterized`.
+- `--smt_trace DIR`: save the SMT-LIB instances of the solver calls into `DIR`: in
+  `incremental/`, the scripts that Kind 2 sends to its solvers (Kind 2's `--smt_trace`),
+  cleaned; in `standalone/`, one script per check-sat, with the assertions in scope and the
+  assumptions asserted (pruned of the inactive activation literals and of the unused
+  declarations, with the same answer), and the queries sent to z3 directly. Each file is named
+  after its origin (`<family>-v<N>__<Property or invariants>__call<k>-<stage>__<engine>__<solver>`,
+  then `__q<i>` for the i-th check-sat of a trace, then the logic), its logic is computed from
+  its content (e.g. QF_NIA, NIA, QF_LIA), and identical files are written once.
+  `DIR/MANIFEST.csv` has one row per file (origin, logic, answer, duplicates), and
+  `DIR/sources/` the Lustre input of each Kind 2 call. See `src/kindhml/smt_trace.py`.
+- `--smt_trace_logics L1,L2,...`: with `--smt_trace`, save only the files in these logics,
+  e.g. `QF_NIA,NIA` for nonlinear integer arithmetic.
 
 Each property's Lustre file is saved in `out_lus/<contract>_<Property>_<n>_<timeout>.lus`, and its
 verdict in `out_results/<contract>_<Property>_<n>_<timeout>.out`. The verdict is compared with the
@@ -156,6 +168,8 @@ Each task runs in a child process, stopped with its Kind 2 runs at `--task_timeo
 between its steps. A family of `--families` must contain a selected file.
 `tests/run_all.py --out DIR` saves the run in `DIR`: `results.csv` (one row per task),
 `run.log` (the output, with the invariants proved for each file) and `info.txt` (the command,
-the date, the git commit and the versions of Kind 2, Z3 and cvc5).
+the date, the git commit and the versions of Kind 2, Z3 and cvc5). `--smt_trace DIR` and
+`--smt_trace_logics` save the SMT-LIB instances of the run, as for `src/kindHML.py`; the
+shards of a run may share `DIR`.
 
 `tools/gen_parser.sh` regenerates the parser from `src/kindhml/grammar/KindHML.g4`.

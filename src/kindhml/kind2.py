@@ -15,6 +15,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from . import smt_trace
 from .colors import PLAIN, Palette
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -251,7 +252,9 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
         limit = ["--timeout", str(timeout)] if timeout is not None else []
         raw, err, killed, oom_kills = run_command(
             [kind2] + output + solver_args(solver) + limit + ["--output_dir", tmp]
-            + (extra_args or []) + [path], timeout + 10 if timeout is not None else None)
+            + smt_trace.kind2_args() + (extra_args or []) + [path],
+            timeout + 10 if timeout is not None else None)
+        smt_trace.record_kind2(tmp, lustre, solver)
     if save_to:
         with open(save_to, "w") as f:
             f.write(raw)

@@ -48,6 +48,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
 from kindhml import kind2                            # noqa: E402
+from kindhml import smt_trace                        # noqa: E402
 from kindhml import verify as V                     # noqa: E402
 from kindhml.colors import PLAIN, palette           # noqa: E402
 from kindhml.errors import KindHMLError             # noqa: E402
@@ -306,6 +307,13 @@ def main():
     ap.add_argument("--csv", default="")
     ap.add_argument("--out", default="",
                     help="directory where the run is saved (results.csv, run.log, info.txt)")
+    ap.add_argument("--smt_trace", default="", metavar="DIR",
+                    help="save the SMT-LIB instances of the solver calls into DIR (incremental "
+                         "Kind 2 traces and standalone scripts, one per check-sat; "
+                         "src/kindhml/smt_trace.py)")
+    ap.add_argument("--smt_trace_logics", default="", metavar="L1,L2,...",
+                    help="with --smt_trace, keep only the instances in these logics, e.g. "
+                         "QF_NIA,NIA (default: all)")
     args = ap.parse_args()
     if args.task_timeout is None:
         args.task_timeout = 2 * args.timeout + TASK_MARGIN if args.timeout else 0
@@ -334,6 +342,10 @@ def main():
         args.csv = args.csv or os.path.join(args.out, "results.csv")
     selected = select(args)
     say(f"{sum(len(rs) for _, _, rs in selected)} tasks in {len(selected)} files")
+    if args.smt_trace_logics and not args.smt_trace:
+        ap.error("--smt_trace_logics needs --smt_trace")
+    smt_trace.configure(os.path.abspath(args.smt_trace) if args.smt_trace else None,
+                        args.smt_trace_logics or None)
 
     # The CSV is written row by row, so that an interrupted run keeps its partial results.
     fields = ["file", "property", "status", "method", "groundtruth", "check", "wall", "scope"]
@@ -345,6 +357,7 @@ def main():
     tally = {}
     for f, program, properties in selected:
         context: dict = {}
+        smt_trace.start_task(f, "invariants")
         if args.strategy == "portfolio":
             # the invariant phase of the file, with its own time limit
             start = time.time()
@@ -367,6 +380,7 @@ def main():
             def check(prop=prop):
                 """The task, in a child process: its outcome, and the progress of Houdini,
                 which the next tasks continue."""
+                smt_trace.start_task(f, prop.name)
                 try:
                     out = V.verify(program, prop, args.participants, args.timeout,
                                    mode=args.mode, expand=expand, solver=args.solver,

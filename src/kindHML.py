@@ -17,6 +17,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from kindhml import smt_trace                        # noqa: E402
 from kindhml import verify as V                     # noqa: E402
 from kindhml.colors import palette                  # noqa: E402
 from kindhml.encode_formula import METHOD_COPIES, MODES, parse_expand   # noqa: E402
@@ -76,7 +77,16 @@ def main() -> int:
                          " $NO_COLOR is set)")
     ap.add_argument("--out_lus", default="out_lus", help="directory for the Lustre files")
     ap.add_argument("--out_results", default="out_results", help="directory for the verdicts")
+    ap.add_argument("--smt_trace", default="", metavar="DIR",
+                    help="save the SMT-LIB instances of the solver calls into DIR (incremental "
+                         "Kind 2 traces and standalone scripts, one per check-sat; "
+                         "src/kindhml/smt_trace.py)")
+    ap.add_argument("--smt_trace_logics", default="", metavar="L1,L2,...",
+                    help="with --smt_trace, keep only the instances in these logics, e.g. "
+                         "QF_NIA,NIA (default: all)")
     args = ap.parse_args()
+    if args.smt_trace_logics and not args.smt_trace:
+        ap.error("--smt_trace_logics needs --smt_trace")
     args.users_mode = V.users_mode_of(args.users_mode)
     if args.n_of_participants is None:
         if args.strategy == "kind2" or args.users_mode == "parameterized":
@@ -106,6 +116,8 @@ def main() -> int:
     timeout = int(args.timeout) if args.timeout == int(args.timeout) else args.timeout
     os.makedirs(args.out_lus, exist_ok=True)
     context: dict = {}                  # invariants are proved once for all the properties
+    smt_trace.configure(args.smt_trace or None, args.smt_trace_logics or None)
+    smt_trace.start_task(args.contract, "invariants")
     if args.strategy == "portfolio" and not args.only_lus:
         start = time.time()
         limit = (args.invariants_timeout if args.invariants_timeout is not None
@@ -121,6 +133,7 @@ def main() -> int:
             print(f"{name} - {head}{V.invariant_summary(invs, c)} {elapsed}", flush=True)
     code = 0
     for prop in properties:
+        smt_trace.start_task(args.contract, prop.name)
         tag = f"{name}_{prop.name}_{args.n_of_participants}_{timeout}"
         lus_path = os.path.join(args.out_lus, tag + ".lus")
         if args.only_lus:
