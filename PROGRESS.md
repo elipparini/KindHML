@@ -1088,6 +1088,28 @@ verdict disagrees with the ground truth.
   `Liquidation_defence`, amm_int `Sandwich_slippage`.
 - Rows with the same verdict (253): 3961 s in p7, 3802 s here; median about 1 s in both.
 
+## Done (2026-10-26): long runs, 8 h of server time (with the user)
+
+At 2d1bc2e, with z3 5.3.2 and cvc5 1.4.2 (installed in `~/solvers/` on the server, used
+through `$Z3` and the PATH); runs 01:18-08:27 UTC; driver `tools/server/solve.py` (untracked).
+A first start with the old solvers (z3 4.13.0, cvc5 1.1.3-dev) was stopped after one hour.
+- KindHML on the 10 unknown rows of the full run at 8afe4bf (`--timeout` 24288 s, invariant
+  phase at most 1800 s; 10 tasks on 4 cores): 9 refuted by fuzzing, in agreement with the
+  ground truth, after 398-9036 s (amm_int `Sandwich_slippage` 9036 s, lending_real_v2
+  `Exchange_rate_monotone` 5735 s, the four `Liquidation_attack_any` 2036-3611 s); lending_int
+  `Liquidation_defence` still unknown after 24288 s. `results/long-20261026-kindhml.csv`.
+- z3 and cvc5 on the 209 NIA instances without an answer in the traces (418 runs, limits
+  255-10661 s, median 532 s, 3 GB per run): 111 decided (79 by both solvers, 31 by z3 only,
+  1 by cvc5 only; 104 sat, 7 unsat); no disagreement, no failed model check. Every z3 answer
+  took at most 2 s; otherwise z3 hit the 3 GB limit (69 runs, after 22 s median) or the time
+  limit. cvc5's slowest answer: unsat in 1518 s (a BMC query of lending_int
+  `Liquidation_defence`). 98 undecided (65 with z3 out of memory and cvc5 out of time).
+  `results/long-20261026-nia-solvers.csv`; the 73 runs of the first start, with the old
+  solvers, in `results/long-20261026-nia-solvers-oldversions.csv`.
+- cvc5 regression: `lending-simple-int-v1__Liquidation_attack_exists__call005-free-run__ind-1
+  __z3__q0001__NIA.smt2` is sat in 2.9 s with cvc5 1.1.3-dev, and undecided in 60 s with
+  cvc5 1.4.2 (twice each, `--check-models`).
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
