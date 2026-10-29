@@ -1129,6 +1129,75 @@ A first start with the old solvers (z3 4.13.0, cvc5 1.1.3-dev) was stopped after
   lending-real `Liquidation_attack_any` rows), or cvc5 before z3 for the exact checks over
   integers (lending_int `Liquidation_defence`).
 
+## Noted (2026-10-29, with the user): audit items for later
+
+From the soundness audit of 2026-10-25/26 of the tool at 717243a and of the paper
+(KindHML_llm), each item checked by a second, skeptical agent. Items (a)1-(a)3 (null arguments
+in the Houdini queries, `calldataargs` as records, `transfer` as a procedure name) are fixed
+in the commits that follow this note. The rest is for later.
+
+**(b) Paper versus tool** (the tool is consistent with itself; the paper should say it):
+1. The tool checks K -> phi (all contracts constructed), while the verification problem and the
+   corollary speak of every reachable state (logic.tex:380, encoding-fol.tex:588, 631-636,
+   appendix-correctness.tex:239-241; architecture.tex:36-37 says it). Restate the problem or
+   the corollary for K -> phi.
+2. Deviations from Solidity not stated in contracts.tex: integers are unbounded (no overflow
+   revert); `/` and `%` are Euclidean (SMT-LIB div/mod; Solidity truncates); `&&`, `||`, `->`
+   are strict (a division by zero anywhere in a condition reverts); self-transfers and
+   self-calls revert (A5(iv); its comment should say "burn"). Either state them or change the
+   encoding (truncating division by an ite on the signs; definedness following short-circuit
+   evaluation, in encode_trans and in reference.py alike).
+3. Quantified `uint` variables range over the naturals (encode_formula.py:280); logic.tex does
+   not say it, and its type grammar lacks `uint`. (For `calldataargs` components, the paper
+   now says it, with the record semantics.)
+4. The encoding identifies procedures by bare names (encoding-fol.tex:12, 55, 396); the tool uses
+   (contract, procedure) pairs. Same-named procedures of two contracts then share parameter
+   variables in the paper, and method domains differ. Define Methods as pairs (C, f).
+5. `f()` for a method variable f (parameters existentially quantified, typecheck.py:378-391,
+   encode_formula.py:319-325) is not in the logic: document it as sugar, or reject it.
+6. `lastReverted` is accepted in invariants (typecheck.py:155-163), while the paper defines
+   invariants without it. Sound (a call from a contract sender reverts and is among the cases of
+   each step query), but reject it or say so.
+7. architecture.tex:106: Houdini gives an inductive subset, the largest only when every removal
+   comes from an SMT refutation; `refuted_after` judges with a bounded evaluator (int
+   quantifiers over -1..3). Weaken the sentence.
+8. Unguarded divisions in properties only give a warning (typecheck.py:312-315): A3 is not
+   enforced. Reject them, or answer unknown.
+9. Users mode `parameterized` (verify.py:794-896) relies on Lemma 7.6 of DESIGN.md (idle users,
+   normalized balances), not in the paper: add the lemma, or remove the mode.
+10. evaluation.tex:21-41, 116-130 and tool_overview.tex describe the old Kind 2-only pipeline
+    (known): refer to the tool section, and give the method and scope of each verdict.
+11. logic.tex, examples of Sect. sec:logic:example: the Bet listing lacks `require(o != this)`
+    (present in price-bet.sol), so the stated verdicts of liquidity and frontrunning are false
+    for the listing as printed; in winnability, say that the consequent (not the property)
+    fails when the antecedent is false.
+
+**(c) Gaps in the proofs** (conceptually repairable):
+1. Lemma users:cex, and so Cor. users:fewer and Lemma users:instances (appendix-tool.tex), fail
+   when a quantifier occurs inside a term of a modality (sender, value, arguments). In the tool,
+   `idle_needed` (cutoff.py:163-188) ignores such binders; the only effect is a wrong "true up
+   to k users" note on an unknown answer, never a definite verdict. Add the hypothesis (or count
+   such quantifiers as universal), and make `idle_needed` return UNBOUNDED there, as `skolems`
+   does.
+2. Lemma users:symmetry (architecture.tex:204-212, proof appendix-tool.tex:235-247) does not
+   cover the tool's reduction through a modality whose next state is a deterministic term
+   (inline mode, encode_formula.py:368-371). Sound (the transition commutes with permutations of
+   users); state the lemma for formulas invariant under permutations, or list such modalities
+   among the allowed constructs.
+3. Lemma tool:rewriting (architecture.tex:128-143) is stated for a guard inside theta; the tool
+   (direct.py, `check_guards`) takes guards from the context too. State it for C[Q z. theta]
+   with a context that implies b != 0 wherever the value of theta matters.
+4. Lemma 2 (appendix-correctness.tex, statements) does not cover unfolded call bodies: its
+   statement fixes the top-level rho and beta. Generalise to an arbitrary environment with a
+   substitution of FOL terms, by induction on (call depth, statement).
+5. Initial states (contracts.tex:86) do not mention map entries: every field, map entries
+   included, has its default value, as in A5(i) and the proof of Lemma 1.
+
+**(d) Refuted or not reproduced:** chi# is first-order with the single formula for A_n
+(refuted); a generated invariant `owner != null` did not lead to a wrong verdict on the crafted
+example (BMC found the violation first), although the gap fixed in (a)1 applied to generated
+candidates too.
+
 ## Noted (2026-10-14, with the user): invariant generation; the numbers of users for Kind 2
 
 - **Invariant generation from the literature.** The generator is a fixed list of templates
