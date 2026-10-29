@@ -163,7 +163,9 @@ cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the
 * A1 (finite addresses/methods): `n_participants` user addresses from the command line
   (with `--parameterized`, possibly fewer; Sect. 7).
 * A2 (maps indexed by addresses): type checker.
-* A3 (guarded divisions in formulas): type checker (warning or error), def-guards in contracts.
+* A3 (guarded divisions in formulas): def-guards in contracts; in formulas, the type checker
+  adds the guard d != 0 -> ψ around the atom ψ (or the modality whose label divides) of each
+  unguarded division, with a warning (`typecheck.guard_divisions`, 2026-10-29).
 * A4 (acyclic calls): desugaring rejects cycles.
 * A5 (transaction guards): `desugar.py` adds them explicitly.
 * A6 (no `sender`/`value` in formulas): type checker.

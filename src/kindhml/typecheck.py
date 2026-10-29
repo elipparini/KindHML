@@ -163,7 +163,8 @@ class Checker:
 
     def _property(self, r: S.Property) -> S.Property:
         self._bound, self._args_uses = set(), {}
-        formula = self._expect(r.formula, S.BOOL, _Ctx(in_property=True))
+        formula = guard_divisions(self._expect(r.formula, S.BOOL, _Ctx(in_property=True)),
+                                  self.warnings)
         if r.invariant:
             modal = _find(formula, S.Modal)
             if modal is not None:
@@ -318,9 +319,7 @@ class Checker:
             return replace(e, left=self._expect(e.left, S.BOOL, ctx),
                            right=self._expect(e.right, S.BOOL, ctx)), S.BOOL
         if op in ("+", "-", "*", "/", "%", "<", "<=", ">", ">="):
-            if op in ("/", "%") and ctx.in_property and not (
-                    isinstance(e.right, (S.IntLit, S.RealLit)) and e.right.value != 0):
-                self.warnings.append(f"{e.pos}: divisions in properties must be guarded (A3)")
+            # the divisions of properties are guarded afterwards (`guard_divisions`, A3)
             (left, lt), (right, rt) = self._number(e.left, ctx), self._number(e.right, ctx)
             real = S.REAL in (lt, rt)
             if real and op == "%":
@@ -408,6 +407,127 @@ def _find(e, cls):
                 if found is not None:
                     return found
     return None
+
+
+# ---------------------------------------------------------------- guards of divisions (A3)
+#
+# A3: in a formula, every division e / d (or e % d) by a d that is not a nonzero constant is
+# guarded: it lies in ψ of a subformula G -> ψ or G && ψ, where a conjunct of G is d != 0,
+# d > 0 or d < 0 (0 on either side), and no modality and no binder of a variable of d lie
+# between G and the division. A division under old(...) within its atom needs the guard on
+# old(d) (the value of d in that state). `guard_divisions` adds the missing guards: an atom
+# (a formula without connectives, or a modality whose label divides) with unguarded divisions
+# by d1, ..., dk (inner first) becomes d1 != 0 -> (... -> (dk != 0 -> atom)), with a warning.
+
+_NONZERO = {"!=", ">", "<"}
+
+
+def _strip(e: S.Expr) -> S.Expr:
+    while isinstance(e, S.ToReal):
+        e = e.arg
+    return e
+
+
+def _is_zero(e: S.Expr) -> bool:
+    e = _strip(e)
+    return isinstance(e, (S.IntLit, S.RealLit)) and e.value == 0
+
+
+def _key(e: S.Expr) -> str:
+    from . import pretty
+    return pretty.expr(_strip(e))
+
+
+def _qvars(e) -> set:
+    """The names of the variables of e."""
+    out = {e.name} if isinstance(e, S.QVar) else set()
+    for name in getattr(e, "__dataclass_fields__", ()):
+        v = getattr(e, name)
+        for x in (v if isinstance(v, tuple) else (v,)):
+            if isinstance(x, S.Expr):
+                out |= _qvars(x)
+    return out
+
+
+def _facts(e: S.Expr) -> Dict[str, set]:
+    """The terms that the conjuncts of e state nonzero, each with its variables."""
+    if isinstance(e, S.BinOp) and e.op == "&&":
+        return {**_facts(e.left), **_facts(e.right)}
+    if isinstance(e, S.BinOp) and e.op in _NONZERO:
+        if _is_zero(e.right) and not _is_zero(e.left):
+            return {_key(e.left): _qvars(e.left)}
+        if _is_zero(e.left) and not _is_zero(e.right):
+            return {_key(e.right): _qvars(e.right)}
+    return {}
+
+
+def _divisors(e: S.Expr, guards: Dict[str, set], olds: int, out: List[S.BinOp]) -> None:
+    """The divisions of the term e not guarded by `guards`, inner first, each as the guard
+    term d (under `olds` old operators) != 0."""
+    if isinstance(e, S.Old):
+        _divisors(e.arg, guards, olds + 1, out)
+        return
+    for name in getattr(e, "__dataclass_fields__", ()):
+        v = getattr(e, name)
+        for x in (v if isinstance(v, tuple) else (v,)):
+            if isinstance(x, S.Expr):
+                _divisors(x, guards, olds, out)
+    if isinstance(e, S.BinOp) and e.op in ("/", "%"):
+        d = _strip(e.right)
+        if isinstance(d, (S.IntLit, S.RealLit)) and d.value != 0:
+            return
+        term = e.right
+        for _ in range(olds):
+            term = S.Old(term, e.pos)
+        if _key(term) not in guards:
+            zero = S.RealLit(Fraction(0), e.pos) if e.real else S.IntLit(0, e.pos)
+            out.append(S.BinOp("!=", term, zero, e.pos, real=e.real))
+
+
+def _guarded(atom: S.Expr, terms, guards: Dict[str, set], warnings: List[str]) -> S.Expr:
+    """atom under the guards of the unguarded divisions of `terms` (its parts in its state)."""
+    needed: List[S.BinOp] = []
+    for t in terms:
+        _divisors(t, guards, 0, needed)
+    first: Dict[str, S.BinOp] = {}
+    for g in needed:
+        first.setdefault(_key(g.left), g)
+    for k, g in reversed(list(first.items())):   # the innermost division's guard outermost
+        atom = S.BinOp("->", g, atom, g.pos)
+        warnings.append(f"{g.pos}: a division by {k} is not guarded (A3): read under the"
+                        f" guard {k} != 0")
+    return atom
+
+
+def guard_divisions(e: S.Expr, warnings: List[str],
+                    guards: Optional[Dict[str, set]] = None) -> S.Expr:
+    """The resolved formula e with the guards of its unguarded divisions added (A3, above),
+    and a warning for each one."""
+    guards = guards or {}
+    if isinstance(e, S.Quant):
+        inner = {k: v for k, v in guards.items() if e.var not in v}
+        return replace(e, body=guard_divisions(e.body, warnings, inner))
+    if isinstance(e, S.BinOp) and e.op in ("&&", "->"):
+        left = guard_divisions(e.left, warnings, guards)
+        right = guard_divisions(e.right, warnings, {**guards, **_facts(e.left)})
+        return replace(e, left=left, right=right)
+    if isinstance(e, S.BinOp) and e.op == "||":
+        return replace(e, left=guard_divisions(e.left, warnings, guards),
+                       right=guard_divisions(e.right, warnings, guards))
+    if isinstance(e, S.UnOp) and e.op == "!":
+        return replace(e, arg=guard_divisions(e.arg, warnings, guards))
+    if isinstance(e, S.BinOp) and e.op in ("==", "!=") and (
+            _find(e.left, (S.Modal, S.Quant)) or _find(e.right, (S.Modal, S.Quant))):
+        # formulas compared: their atoms are guarded in their own states
+        return replace(e, left=guard_divisions(e.left, warnings, guards),
+                       right=guard_divisions(e.right, warnings, guards))
+    if isinstance(e, S.Modal):
+        # the label is evaluated in the current state, the body in the next one
+        modal = replace(e, body=guard_divisions(e.body, warnings, {}))
+        terms = (e.sender, *e.args, e.value) + ((e.blocks,) if isinstance(e.blocks, S.Expr)
+                                                 else ())
+        return _guarded(modal, terms, guards, warnings)
+    return _guarded(e, (e,), guards, warnings)
 
 
 def check_property(program: S.Program, prop: S.Property) -> S.Property:

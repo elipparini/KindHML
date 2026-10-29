@@ -194,6 +194,12 @@ class Scanner:
                          else self._args(e)[1] if e.type == S.ARGS else 0)
                 inner = self.idle_needed(e.body, positive)
             else:
+                if any(_has_binder(x) for x in (e.sender, e.proc, e.value, e.blocks)
+                       + tuple(e.args)):
+                    # a quantifier inside a term: its value may change with the added users,
+                    # and so may the transaction (an audit found Lemma 7.5 stated without
+                    # this case, 2026-10-25)
+                    return UNBOUNDED
                 # h(): its parameters are existential in e (DESIGN.md, Sect. 4)
                 universal = positive
                 count = (self.addr_params.get(e.contract, 0)

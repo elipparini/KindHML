@@ -11,7 +11,7 @@ from kindhml import syntax as S
 from kindhml import verify as V
 from kindhml.builder import parse, parse_expr
 from kindhml.concrete import state_from_values, state_literal, state_paths
-from kindhml.cutoff import OutOfFragment, Scanner, idle_users
+from kindhml.cutoff import UNBOUNDED, OutOfFragment, Scanner, idle_users
 from kindhml.encode_trans import Encoder
 from kindhml.errors import KindHMLError
 from kindhml.invariants import Checks
@@ -85,6 +85,16 @@ def test_skolem_constants(text, skolems, dual):
 def test_idle_users_needed(text, needed):
     program, _ = check(parse(SOURCE))
     assert Scanner(System.make(program, 1)).idle_needed(formula(text)) == needed
+
+
+def test_idle_users_quantifier_in_a_term():
+    """A quantifier inside a term of a modality may change its value when users are added, and
+    so the transaction: a counterexample does not extend (audit of 2026-10-25)."""
+    source = SOURCE.replace("function g()", "function b(bool z) { x = 1 }\n    function g()")
+    program, _ = check(parse(source))
+    f = check_property(program, S.Property("R", parse_expr(
+        "<< null : C . b(forall a : address . m[a] >= 0) >> x == 0"))).formula
+    assert Scanner(System.make(program, 1)).idle_needed(f) == UNBOUNDED
 
 
 def test_idle_users():

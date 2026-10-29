@@ -240,6 +240,53 @@ contract C {
     rejects("true", "'transfer' is reserved", contract)
 
 
+# ---------------------------------------------------------------- guards of divisions (A3)
+
+def guarded(property_body: str):
+    """The resolved formula of a property, and the warnings on its divisions."""
+    program, warnings = check(parse(BANK + "property R { " + property_body + " }"))
+    return program.properties[0].formula, [w for w in warnings if "(A3)" in w]
+
+
+def is_guard(e, divisor: str) -> bool:
+    """e is `divisor != 0 -> ...`."""
+    return (isinstance(e, S.BinOp) and e.op == "->" and isinstance(e.left, S.BinOp)
+            and e.left.op == "!=" and pretty.expr(e.left.left) == divisor
+            and isinstance(e.left.right, S.IntLit) and e.left.right.value == 0)
+
+
+def test_unguarded_division_gets_a_guard():
+    f, warnings = guarded("forall a : int . forall b : int . a / b > 1")
+    assert is_guard(f.body.body, "b") and len(warnings) == 1
+
+
+def test_guarded_divisions_unchanged():
+    for body in ("forall a : int . forall b : int . b > 0 -> a / b > 1",
+                 "forall a : int . forall b : int . (b != 0 && a > 0) -> a % b >= 0",
+                 "forall a : int . forall b : int . 0 < b && a / b > 1",
+                 "forall a : int . a / 2 > 1"):
+        f, warnings = guarded(body)
+        assert warnings == [] and pretty.expr(f).count("!= 0") == body.count("!= 0"), body
+
+
+def test_division_in_a_label_guards_the_modality():
+    f, warnings = guarded("forall b : int . << null : Bank . withdraw(10 / b) $ 0 >> true")
+    assert is_guard(f.body, "b") and isinstance(f.body.right, S.Modal) and len(warnings) == 1
+
+
+def test_guard_does_not_cross_a_modality():
+    f, warnings = guarded("forall b : int . b != 0 -> << null : Bank . deposit() $ 1 >>"
+                          " funds[null] / b > 0")
+    assert is_guard(f.body.right.body, "b") and len(warnings) == 1
+
+
+def test_division_under_old_guarded_in_its_state():
+    f, warnings = guarded("<< null : Bank . deposit() $ 1 >> old(10 / funds[null]) > 0")
+    guard = f.body
+    assert isinstance(guard, S.BinOp) and guard.op == "->" and isinstance(guard.left.left, S.Old)
+    assert len(warnings) == 1
+
+
 def test_wrong_number_of_arguments():
     rejects("<< null : Bank . withdraw() $ 0 >> true", "requires 1 argument")
 
