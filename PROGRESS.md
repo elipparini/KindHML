@@ -1110,6 +1110,35 @@ A first start with the old solvers (z3 4.13.0, cvc5 1.1.3-dev) was stopped after
   __z3__q0001__NIA.smt2` is sat in 2.9 s with cvc5 1.1.3-dev, and undecided in 60 s with
   cvc5 1.4.2 (twice each, `--check-models`).
 
+## Done (2026-10-29): three soundness fixes from the audit of 2026-10-25 (with the user)
+
+The audit (seven auditor agents, each checked by a skeptical one; reproductions on crafted
+contracts on the server) found three tool defects; the other items are in "Noted (2026-10-29)".
+- **Null arguments** (3dc6690). The steps of Houdini (query Q_f) let the address parameters
+  range over the addresses but null, while a transaction may pass null (only the sender cannot
+  be null): a false invariant `owner != null` was proved inductive, and a false property valid
+  from it. The parameters now range over null too (`Quant.nullable`); the paper says so
+  (architecture.tex, Q_f and the symmetry lemma). Test `tests/contracts/null_argument.sol`.
+- **calldataargs as records** (08be759). Decided with the user: a value of type calldataargs is
+  a record with one value per parameter of every procedure, as the encoding already read it; the
+  paper's semantics (sequences filtered by well-typedness) and its assumption ass:args (A7) are
+  replaced by it (logic.tex, fig_logSem.tex, appendix-correctness.tex). The type checker no
+  longer rejects a variable used in several modalities. Tests `args_records.sol`,
+  `args_shared.sol`.
+- **`transfer`** (9ce3fc9). `D.transfer(5)` was always an ether transfer, even when D declares a
+  procedure transfer (a true property reported false); the name is now rejected.
+- Paper edits left uncommitted in the paper repository, for the user to review.
+
+Checks on the server (`~/claude/fix-audit`): each new test fails at 717243a and passes now;
+pytest: 1401 passed, 53 failed, all `test_trans_kind2` (the known parser error of the server's
+Kind 2 on the test's check node). Full run (268 tasks, 600 s, 6 shards;
+`results/server-20261029-9ce3fc9.csv`): 187 valid, 72 invalid, 9 unknown, no verdict against
+the ground truth. The invariant phases prove the same candidates as at 8afe4bf in every file:
+no benchmark invariant needed null to be excluded. Three rows changed, all decided by fuzzing
+and known to vary between runs: `Exchange_rate_monotone` of lending_int and lending_real_v3
+refuted (unknown at 8afe4bf), lending_real_v2 `Health_non_interference` unknown (refuted at
+8afe4bf in 520 s). The 265 other rows: 9220 s at 8afe4bf, 9494 s here.
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
