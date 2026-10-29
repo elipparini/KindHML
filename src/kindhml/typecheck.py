@@ -3,8 +3,9 @@
 Contracts: the (typed version of the) language of Fig. `fig:contracts:syntax`.
 Rules: the typing judgement Γ, n ⊢ e : T of the logic, where n is the modal depth
 (`old(e)` at depth n needs e at depth n-1), plus assumptions A2 (maps indexed by
-addresses), A6 (no `sender`/`value` in formulae) and A7 (each `args` variable is used in
-exactly one modality).
+addresses) and A6 (no `sender`/`value` in formulae). A variable of type `args` denotes a
+record with one value per parameter of every procedure, so it may be used in several modalities
+(the assumption A7 of a single one was dropped on 2026-10-29).
 
 `check(program)` returns a resolved program: `Name`, `Member`, `FunCall` are replaced by
 the nodes they denote (see `syntax.py`). An int used as a real is wrapped in `ToReal` (an
@@ -58,7 +59,8 @@ class Checker:
         self.amount = program.balance_type      # type of balances, values and amounts
         self.warnings: List[str] = []
         # Per property: quantified names (unique within a property, so a name identifies its
-        # binder) and the number of modalities using each `args` variable (A7).
+        # binder) and the number of modalities using each `args` variable (for the warning
+        # on unused ones).
         self._bound: set = set()
         self._args_uses: Dict[str, int] = {}
 
@@ -383,9 +385,6 @@ class Checker:
                 and ctx.env.get(e.args[0].name) == S.ARGS:
             a = e.args[0].name
             self._args_uses[a] = self._args_uses.get(a, 0) + 1
-            if self._args_uses[a] > 1:
-                raise _err(f"variable '{a}' of type calldataargs is used in more than one"
-                           " modality (A7)", e)
             return (S.QVar(a, S.ARGS, e.args[0].pos),)
         raise _err("a procedure given by a variable of type method takes a single argument"
                    " of type calldataargs", e)

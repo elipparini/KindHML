@@ -220,9 +220,10 @@ def test_sender_in_property_A6():
     rejects("msg.sender == null", "A6")
 
 
-def test_args_in_two_modalities_A7():
-    rejects("forall f : method . forall x : calldataargs . "
-            "<< null : Bank . f(x) $ 0 >> << null : Bank . f(x) $ 0 >> true", "A7")
+def test_args_in_two_modalities():
+    """A record of arguments may be used in several modalities (A7 dropped on 2026-10-29)."""
+    checked("property R { forall f : method . forall x : calldataargs . "
+            "<< null : Bank . f(x) $ 0 >> << null : Bank . f(x) $ 0 >> true }")
 
 
 def test_wrong_number_of_arguments():

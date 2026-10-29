@@ -17,7 +17,7 @@ source .sol --(ANTLR: grammar/KindHML.g4)--> parse tree --(builder)--> AST
 | Module | Paper counterpart |
 |---|---|
 | `grammar/KindHML.g4`, `builder.py`, `ast.py` | Fig. `fig:contracts:syntax`, logic syntax (Section "logic") |
-| `typecheck.py` | typing judgement Γ,n ⊢ e : T of the logic; assumptions A3, A6, A7 |
+| `typecheck.py` | typing judgement Γ,n ⊢ e : T of the logic; assumptions A3, A6 |
 | `desugar.py` | `initPay`; `require(¬constructed_C)`/`require(constructed_C)`; `def(s)` guards (A3, App. `app:correctness:transition`); unfolding of contract calls (A4) |
 | `encode_trans.py` | `Init`; levels and `S^i(s)` (Table `tab:statement-to-fol`); `Trans_f`, `Trans_C`, `Trans`, `Revert` |
 | `encode_formula.py` | modal tree and `Φ^{V,E}` |
@@ -167,7 +167,9 @@ cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the
 * A4 (acyclic calls): desugaring rejects cycles.
 * A5 (transaction guards): `desugar.py` adds them explicitly.
 * A6 (no `sender`/`value` in formulas): type checker.
-* A7 (each `args` variable in exactly one modality): type checker.
+* A7 (each `args` variable in exactly one modality): dropped on 2026-10-29. A value of type
+  `args` is a record with one component per parameter of every procedure (the paper's
+  semantics since then), so several modalities may use the same variable.
 
 ## 4. Choices of the tool and deviations from the paper
 
