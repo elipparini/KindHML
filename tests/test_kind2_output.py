@@ -1,6 +1,7 @@
 """Reading Kind 2's JSON and plain-text outputs (no Kind 2 needed)."""
 
-from kindhml.kind2 import format_counterexample, parse_output, parse_text
+from kindhml import kind2
+from kindhml.kind2 import format_counterexample, parse_output, parse_text, parse_version
 
 RAW = """[
 {
@@ -102,6 +103,53 @@ def test_text_output():
                    "S": ("unknown", None, None, None, None)}
     assert out.errors == ['Runtime error in inductive step: '
                           'Invalid_argument("Ltree.fold : quantified term")', "Wallclock timeout."]
+
+
+TEXT_V3 = """ kind2 v3.0.0
+
+================================================================================
+Analyzing main
+<Success> Property _lemma_balances_nonnegative is valid by property directed reachability (IA) after 5.041s.
+
+<Note> Incomplete analysis result: Not all properties could be proven invariant
+
+--------------------------------------------------------------------------------
+Summary of Properties:
+--------------------------------------------------------------------------------
+Arbitrage_exists: true up to 0 steps
+  (s.constructed_AMM =>
+  ((forall (q_p_1: real) true and
+     forall
+       (q_p_3: real)
+       ((q_p_3 > 0.0) => exists (q_x_4: real) (q_x_4 > 0.0))))
+_lemma_balances_nonnegative: valid (k=1)
+  (s.AMM_r0 >= 0.0)
+================================================================================
+
+<Timeout> Wallclock timeout.
+"""
+
+
+def test_text_output_of_v3():
+    """Kind 2 v3.0.0 writes "Summary of Properties:" and, unless --show_props false, the
+    expression of each property under its line (an output of v3.0.0, the expressions cut)."""
+    for text in (TEXT_V3, "\n".join(line for line in TEXT_V3.splitlines()
+                                    if not line.startswith("  "))):
+        out = parse_text(text)
+        got = {p.name: (p.status, p.k, p.engine, p.true_up_to) for p in out.properties}
+        assert got == {"_lemma_balances_nonnegative": ("valid", 1, "ic3ia", None),
+                       "Arbitrage_exists": ("unknown", None, None, 0)}
+        assert out.timed_out
+
+
+def test_version(monkeypatch):
+    assert parse_version(" kind2 v3.0.0\n") == (3, 0, 0)
+    assert parse_version(" kind2 v2.3.0-ge8216dd\n") == (2, 3, 0)
+    assert parse_version("") == (0, 0, 0)
+    monkeypatch.setattr(kind2, "version", lambda path: (3, 0, 0))
+    assert kind2.text_args("kind2")[-2:] == ["--show_props", "false"]
+    monkeypatch.setattr(kind2, "version", lambda path: (2, 3, 0))
+    assert "--show_props" not in kind2.text_args("kind2")
 
 
 def test_method_names_the_engine():

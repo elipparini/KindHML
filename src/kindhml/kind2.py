@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -40,6 +41,34 @@ def find_kind2() -> str:
         if c and os.path.isfile(c) and os.access(c, os.X_OK):
             return c
     raise FileNotFoundError("Kind 2 not found: set $KIND2 or put the binary in kind2/kind2")
+
+
+_VERSION = re.compile(r"\bv(\d+)\.(\d+)\.(\d+)")
+
+
+def parse_version(text: str) -> Tuple[int, ...]:
+    """The version in the output of `kind2 --version` ("kind2 v3.0.0", or "kind2
+    v2.3.0-ge8216dd" for a development build after v2.3.0), or (0, 0, 0)."""
+    m = _VERSION.search(text)
+    return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+
+
+@functools.lru_cache(maxsize=None)
+def version(kind2: str) -> Tuple[int, ...]:
+    """The version of the Kind 2 binary `kind2`, read once per binary."""
+    try:
+        out = subprocess.run([kind2, "--version"], capture_output=True, text=True, timeout=30)
+        return parse_version(out.stdout + out.stderr)
+    except (OSError, subprocess.SubprocessError):
+        return (0, 0, 0)
+
+
+def text_args(kind2: str) -> List[str]:
+    """Options of the plain-text output read by `parse_text`. From v3.0.0, the summary also
+    prints the expression of each property (megabytes for large properties), unless
+    --show_props false, an option that earlier versions reject."""
+    return (["--color", "false", "--print_cex", "false"]
+            + (["--show_props", "false"] if version(kind2) >= (3,) else []))
 
 
 @dataclass
@@ -248,7 +277,7 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
         path = os.path.join(tmp, "task.lus")
         with open(path, "w") as f:
             f.write(lustre)
-        output = ["-json"] if cex else ["--color", "false", "--print_cex", "false"]
+        output = ["-json"] if cex else text_args(kind2)
         limit = ["--timeout", str(timeout)] if timeout is not None else []
         raw, err, killed, oom_kills = run_command(
             [kind2] + output + solver_args(solver) + limit + ["--output_dir", tmp]
@@ -354,9 +383,9 @@ _TIMEOUT = re.compile(r"Wallclock timeout|Lib\.TimeoutWall")
 
 
 def parse_text(raw: str, stderr: str = "") -> Kind2Output:
-    """Kind 2's plain-text output (options --color false --print_cex false). The answer
-    for a property is printed as soon as it is found, and the final summary gives the
-    depth up to which an undecided property holds."""
+    """Kind 2's plain-text output (options of `text_args`). The answer for a property is
+    printed as soon as it is found, and the final summary gives the depth up to which an
+    undecided property holds (its heading is "Summary of Properties:" from v3.0.0)."""
     if not raw.strip():
         return _no_output(raw, stderr)
     props: dict = {}
@@ -380,7 +409,7 @@ def parse_text(raw: str, stderr: str = "") -> Kind2Output:
                 p.true_up_to = int(up_to)
         elif line.startswith(("<Error>", "<Timeout>")):
             errors.append(line.split("> ", 1)[1])
-        elif line.startswith("Summary of properties:"):
+        elif line.lower().startswith("summary of properties:"):
             summary = True
     return Kind2Output(list(props.values()), errors, raw, timed_out=timed_out)
 

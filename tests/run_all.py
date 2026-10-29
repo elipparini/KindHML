@@ -87,6 +87,10 @@ def write_info(path: str, args):
         kind2_version = command_output([kind2.find_kind2(), "--version"])
     except FileNotFoundError:
         kind2_version = "not found"
+    try:
+        z3 = kind2.find_z3()            # the z3 given to Kind 2 (`kind2.solver_args`)
+    except FileNotFoundError:
+        z3 = "z3"
     dirty = command_output(["git", "status", "--porcelain", "--untracked-files=no"])
     lines = [
         f"command: {' '.join(sys.argv)}",
@@ -96,7 +100,7 @@ def write_info(path: str, args):
         + (" (with uncommitted changes)" if dirty else ""),
         f"python: {sys.version.split()[0]}",
         f"kind2: {kind2_version}",
-        f"z3: {command_output(['z3', '--version'])}",
+        f"z3: {command_output([z3, '--version'])} ({z3})",
         f"cvc5: {command_output(['cvc5', '--version'])}",
         "options: " + ", ".join(f"{k}={v}" for k, v in sorted(vars(args).items())),
     ]
