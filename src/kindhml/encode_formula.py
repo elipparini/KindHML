@@ -209,8 +209,10 @@ class FormulaEncoder:
             e, node.state, None, other=lambda x: self.phi(x, node, env)))
 
     def quant(self, e: S.Quant, node: Node, env) -> L.LExpr:
-        """∀x:T.ψ and ∃x:T.ψ. Addresses range over all addresses but null (DESIGN.md);
-        uint over the naturals; args over records of ParamVars (one scalar per ParamVar)."""
+        """∀x:T.ψ and ∃x:T.ψ. Addresses range over all addresses but null (DESIGN.md), and
+        over null too when `nullable` (the parameters of the steps of Houdini); uint over the
+        naturals; args over records of ParamVars (one scalar per ParamVar)."""
+        nullable = e.nullable and e.type == S.ADDRESS
         if e.type == S.ARGS:
             comps = {}
             decls, guards = [], []
@@ -228,10 +230,15 @@ class FormulaEncoder:
                 self._copies = outer * len(values)
             if e.kind == "forall" and e.type == S.ADDRESS and self._sym is not None:
                 scoped = self._reduced()
+                keep = self._sym
             else:
                 # a method quantifier keeps the reduction around it if universal
                 keep = self._sym if e.kind == "forall" else None
                 scoped = [(v, keep) for v in values]
+            if nullable:
+                # null is fixed by every permutation of the users: one more value, which
+                # binds no user
+                scoped.append((L.Var(addr_const(NULL)), keep))
             try:
                 parts = [self._with(sym, lambda v=v: self.phi(e.body, node, {**env, e.var: v}))
                          for v, sym in scoped]
@@ -241,12 +248,12 @@ class FormulaEncoder:
         elif e.kind == "exists":
             name = self.fresh(f"q_{e.var}")
             decls = [(name, base_type(e.type))]
-            guards = self.domain(L.Var(name), e.type, address_quantifier=True)
+            guards = self.domain(L.Var(name), e.type, address_quantifier=not nullable)
             body = self._with(None, lambda: self.phi(e.body, node, {**env, e.var: L.Var(name)}))
         else:
             name = self.fresh(f"q_{e.var}")
             decls = [(name, base_type(e.type))]
-            guards = self.domain(L.Var(name), e.type, address_quantifier=True)
+            guards = self.domain(L.Var(name), e.type, address_quantifier=not nullable)
             body = self.phi(e.body, node, {**env, e.var: L.Var(name)})
         return self.quantify(e.kind, decls, guards, body)
 

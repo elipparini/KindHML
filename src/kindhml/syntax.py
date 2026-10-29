@@ -171,6 +171,7 @@ class Quant(Expr):
     type: Type
     body: Expr
     pos: Pos = _pos()
+    nullable: bool = False  # address quantifier ranging over null too (only built by the tool)
 
 
 @dataclass(frozen=True)

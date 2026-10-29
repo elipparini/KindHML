@@ -185,6 +185,9 @@ Choices first recorded as `\CL` notes and now stated in the paper (after M5, wit
    except `null`; method quantifiers over the procedures other than the constructors (a
    constructor can still be named explicitly in a modality). The predicate `is_EOA(e)`
    (tool only, not in the paper) holds iff `e` is neither `null` nor a contract address.
+   A transaction may pass `null` as an address argument: in the steps of Houdini (query
+   Q_f), the address parameters range over `null` too (`Quant.nullable`), and only the
+   sender excludes it.
 
 Deviations, still recorded as `\CL` notes in the paper where relevant:
 

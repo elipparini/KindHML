@@ -247,7 +247,8 @@ class Checks:
         conjunction step: its free state s satisfies all the candidates (the premise), and
         the reference interpreter runs the call, with the arguments of the counterexample
         (inputs after `hoist`), for every sender (the sender is expanded, not an input). An
-        address argument that is not an input (expanded, A1) takes every address in turn;
+        address argument that is not an input (expanded, A1) takes every address in turn,
+        null included;
         any other argument missing from the counterexample takes the default of its type.
         Every choice is sound: a candidate false after a concrete call from s is refuted.
         In parameterized mode, each sum(m) of s is the state variable σ_m, which also counts
@@ -270,7 +271,7 @@ class Checks:
             if f"arg_{x.name}" in inputs:
                 choices.append([inputs[f"arg_{x.name}"]])
             elif x.type == S.ADDRESS:
-                choices.append([a for a in system.addresses if a != NULL])
+                choices.append(list(system.addresses))
             else:
                 choices.append([default(x.type, system)])
         tx = dict(value=inputs.get("value", 0), blocks=inputs.get("blocks", 0))
@@ -335,7 +336,9 @@ class Checks:
         copy only: on lending-int (5 users), `∀v` had two copies inside the constructor's
         `oracle_`, the replay read the nonzero one, every replay of the constructor (not
         payable) reverted, and the undecided step of the constructor then dropped 151
-        generated candidates."""
+        generated candidates. A transaction may pass null as an address argument, so the
+        address parameters range over null too (`nullable`); the sender does not, since null
+        sends no transaction (an audit found a false invariant proved without null)."""
         sender = S.QVar("__sender", S.ADDRESS)
         args = tuple(S.QVar(f"__arg_{x.name}", x.type) for x in p.params)
         value = S.QVar("__value", self.program.balance_type)
@@ -347,7 +350,7 @@ class Checks:
                                                     else [])
         expanded = [v for v in variables if v.type.name in self.expand]
         for v in expanded + [v for v in variables if v not in expanded]:
-            body = S.Quant("forall", v.name, v.type, body)
+            body = S.Quant("forall", v.name, v.type, body, nullable=v in args)
         return body
 
     def premises(self, prop: S.Property, invariants: List[str]) -> List[List[str]]:
