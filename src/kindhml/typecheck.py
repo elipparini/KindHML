@@ -94,6 +94,12 @@ class Checker:
         for f in c.fields:
             if f.name in RESERVED:
                 raise _err(f"'{f.name}' is a reserved name", f)
+        for p in c.procs:
+            # `e.transfer(n)` is an ether transfer (builder.visitCallStmt): a procedure of
+            # this name could not be called (an audit found a call silently made a transfer)
+            if p.name == "transfer":
+                raise _err("'transfer' is reserved for ether transfers: it cannot name a"
+                           " procedure", p)
         procs = tuple(self._procedure(c, p) for p in c.procs)
         return replace(c, procs=procs)
 

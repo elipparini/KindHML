@@ -226,6 +226,20 @@ def test_args_in_two_modalities():
             "<< null : Bank . f(x) $ 0 >> << null : Bank . f(x) $ 0 >> true }")
 
 
+def test_procedure_named_transfer():
+    """`D.transfer(5)` is an ether transfer: it would never call D's procedure transfer."""
+    contract = """
+contract D {
+    int n;
+    function transfer(int a) { n = n + a }
+}
+contract C {
+    function f() { D.transfer(5) }
+}
+"""
+    rejects("true", "'transfer' is reserved", contract)
+
+
 def test_wrong_number_of_arguments():
     rejects("<< null : Bank . withdraw() $ 0 >> true", "requires 1 argument")
 
