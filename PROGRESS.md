@@ -1163,6 +1163,46 @@ refuted (unknown at 8afe4bf), lending_real_v2 `Health_non_interference` unknown 
   into SystemExit, reported as a failure (pytest went on, 1988 s in all). No disagreement: alone
   the case skips (its first state needs more than 90 minutes without the 3 s budget).
 
+## Done (2026-10-29): Kind 2 v3.0.0 (with the user)
+
+Goal: the release v3.0.0 of Kind 2 (`~/solvers/kind2-3.0.0/kind2` on the server) in place of
+the snapshot v2.3.0-ge8216dd, with comparable performance; both with z3 5.3.2 and cvc5 1.4.2.
+The solver drivers of Kind 2, the booleans of its JSON output and the layout of its
+`--smt_trace` files are the same in both versions.
+- **Output** (a62d9ae). v3.0.0 writes "Summary of Properties:" and, unless `--show_props false`
+  (an option the snapshot rejects), the expression of each property under its summary line.
+  `kind2.version` reads the version of a binary once.
+- **BMC** (b192a58). From v3.0.0 (Kind 2 commit dd7a25e5, no reason given),
+  `--bmc_check_unroll` is false: BMC no longer sends a plain check-sat (initial state, then
+  each unrolling) before its check-sat-assuming. On a check on free values of amm_real_v4
+  `Sandwich` (153 KB, BMC and IND, z3), the snapshot refutes the property at k = 0 in 0.1 s;
+  v3.0.0 has no answer in 60 s (three runs each). z3 5.3.2 alone on the recorded query:
+  0.1 s with the two check-sat, no answer in 60 s without them. KindHML passes
+  `--bmc_check_unroll true` to v3.0.0 and later (`kind2.default_args`).
+- **Tests** (all, 1672). The snapshot: 53 failed, all `test_trans_kind2` (its parser rejects a
+  node call with a map argument: a Map_int type error), 1424 passed. v3.0.0: none failed, 1477
+  passed; with b192a58, none failed, 1474 passed. The skips (184-187) are all
+  `test_formula` cases with no state checked within 3 s; they depend on the load only.
+- **Full run** at a62d9ae (268 tasks, 600 s, both binaries at once, 4 shards each;
+  `results/server-20261029-a62d9ae-kind2-{snapshot,3.0.0}.csv`). Snapshot: 187 valid,
+  69 invalid, 12 unknown; v3.0.0: 187, 70, 11; no verdict against the ground truth. One change:
+  lending_simple_real_v2 `Health_non_interference` refuted by BMC (200 s). Rows with the same
+  verdict (256): 4380 s and 4501 s (ratio 1.028; median ratio per row 1.000). Invariant phase:
+  the same invariants in all 128 entries; 3858 s and 3733 s.
+- **Reruns** of the 16 rows more than 2 times slower or faster, twice per binary (4 runs at
+  once, 1 shard each), then the same at b192a58. The differences that reproduce all came from
+  the BMC default, e.g. amm_real_v4 `Sandwich` (15 s by fuzzing; 150 s and 316 s by BMC, and
+  unknown once), amm_int `Deposit_reversibility` (20 s; 57 s), lending_int
+  `Deposit_reversibility` (108 s; 10 s). With b192a58, v3.0.0 matches the reruns of the
+  snapshot on each row (same method, time within 2 s), except three: amm_real_v5
+  `Sandwich_slippage` (16-136 s with either binary: the race between numbers of users);
+  amm_real_v5 `Deposit_reversibility` (in its 5 runs, full run included, the snapshot: fuzzing
+  in 11-13 s three times, reach in 5 s twice; v3.0.0: reach in 4-5 s each time);
+  lending_simple_real_v2 `Health_non_interference`, refuted by BMC in each of the 5 runs of
+  v3.0.0 (193-445 s), and in 1 of the 5 runs of the snapshot (454 s).
+- `tools/server/env.sh` now selects Kind 2 v3.0.0, z3 5.3.2 and cvc5 1.4.2. Not done: a full
+  run at b192a58.
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
