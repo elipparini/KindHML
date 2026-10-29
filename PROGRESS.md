@@ -1139,6 +1139,28 @@ and known to vary between runs: `Exchange_rate_monotone` of lending_int and lend
 refuted (unknown at 8afe4bf), lending_real_v2 `Health_non_interference` unknown (refuted at
 8afe4bf in 520 s). The 265 other rows: 9220 s at 8afe4bf, 9494 s here.
 
+## Done (2026-10-29): items (b) of the audit (with the user)
+
+- **Divisions in formulas** (998f007): the type checker adds the guard of each unguarded
+  division (A3): `d != 0 -> psi` around its atom psi, or around the modality whose label
+  divides (under old, the guard is on old(d)), with a warning; a guard is recognized as
+  d != 0, d > 0 or d < 0 in a premise or an earlier conjunct, with no modality and no binder
+  of a variable of d in between. Before, every division gave a warning and an unguarded one
+  was encoded with the unspecified SMT division. In the benchmarks, only lending-simple
+  `Liquidation_attack` gets a guard (`2 * c1[b]`, implied by its premise `c1[b] > 0`).
+- **Idle users and terms** (998f007, gap (c)1): `idle_needed` is unbounded when a quantifier
+  occurs in a term of a modality (a counterexample then does not extend).
+- Paper (uncommitted, for the user): A3 restated and the enforcement in architecture.tex;
+  Lemma users:idle (Lemma 7.6) with its proof in appendix-tool.tex, and the hypothesis on terms
+  in users:cex; Houdini "aims at" the largest inductive subset; the Bet listing requires
+  `o != this`.
+- Tests: the full suite on a server snapshot that also held another session's uncommitted
+  edits (fuzz, chains, invgen): all pass but the known `test_trans_kind2`, and
+  `test_a_true_chain_property_is_proved_by_an_instance` (passes alone, in 246 s of its 300 s).
+  An earlier run reported `test_formula_matches_reference[lending_simple_int-
+  Health_non_interference-inline-q]` failed, with its message lost; alone it skips (no state
+  within its 3 s budget): not explained yet.
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
@@ -1200,6 +1222,11 @@ in the commits that follow this note. The rest is for later.
     (present in price-bet.sol), so the stated verdicts of liquidity and frontrunning are false
     for the listing as printed; in winnability, say that the consequent (not the property)
     fails when the antecedent is false.
+
+Status of (b), decided with the user on 2026-10-29: items 1-4 and 6 are pedantic (no action);
+5 (`f()`) is a convenience of the tool, not an inconsistency (no action); 7, 8, 9 and the Bet
+listing of 11 are done (see "Done (2026-10-29): items (b) of the audit"); 10: the user will
+rewrite the Evaluation section; the winnability wording of 11 is left.
 
 **(c) Gaps in the proofs** (conceptually repairable):
 1. Lemma users:cex, and so Cor. users:fewer and Lemma users:instances (appendix-tool.tex), fail
