@@ -148,8 +148,10 @@ def test_version(monkeypatch):
     assert parse_version("") == (0, 0, 0)
     monkeypatch.setattr(kind2, "version", lambda path: (3, 0, 0))
     assert kind2.text_args("kind2")[-2:] == ["--show_props", "false"]
+    assert kind2.default_args("kind2") == ["--bmc_check_unroll", "true"]
     monkeypatch.setattr(kind2, "version", lambda path: (2, 3, 0))
     assert "--show_props" not in kind2.text_args("kind2")
+    assert kind2.default_args("kind2") == []
 
 
 def test_method_names_the_engine():

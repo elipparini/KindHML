@@ -71,6 +71,15 @@ def text_args(kind2: str) -> List[str]:
             + (["--show_props", "false"] if version(kind2) >= (3,) else []))
 
 
+def default_args(kind2: str) -> List[str]:
+    """Options that restore, in later versions, the defaults of the snapshot v2.3.0-ge8216dd.
+    From v3.0.0, BMC no longer checks that each unrolling is satisfiable before it searches
+    for a falsification (--bmc_check_unroll false): z3 then first gets a check-sat-assuming,
+    on which it can get stuck (amm_real_v4 Sandwich: a free check refuted at k = 0 in 0.1 s
+    after the plain check-sat, no answer in 60 s without it; z3 5.3.2, 2026-10-29)."""
+    return ["--bmc_check_unroll", "true"] if version(kind2) >= (3,) else []
+
+
 @dataclass
 class PropertyResult:
     name: str
@@ -280,7 +289,8 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
         output = ["-json"] if cex else text_args(kind2)
         limit = ["--timeout", str(timeout)] if timeout is not None else []
         raw, err, killed, oom_kills = run_command(
-            [kind2] + output + solver_args(solver) + limit + ["--output_dir", tmp]
+            [kind2] + output + default_args(kind2) + solver_args(solver) + limit
+            + ["--output_dir", tmp]
             + smt_trace.kind2_args() + (extra_args or []) + [path],
             timeout + 10 if timeout is not None else None)
         smt_trace.record_kind2(tmp, lustre, solver)
