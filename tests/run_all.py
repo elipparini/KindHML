@@ -47,6 +47,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
+from kindhml import fix_hash_seed                    # noqa: E402
 from kindhml import kind2                            # noqa: E402
 from kindhml import smt_trace                        # noqa: E402
 from kindhml import verify as V                     # noqa: E402
@@ -431,4 +432,5 @@ def main():
 
 
 if __name__ == "__main__":
+    fix_hash_seed()
     main()

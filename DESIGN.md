@@ -450,6 +450,26 @@ formula φ⁻ in which each such existential in positive position is replaced by
 false: every candidate of φ is a candidate of φ⁻. A candidate is still confirmed by the exact
 check of φ, so φ⁻ only adds candidates, which cost exact checks.
 
+Reproducibility (2026-10-29). The seeds are fixed (`Fuzzer` "kindhml", `chains.Search` "c1"),
+but one generator per fuzzer was shared by the guided search, the unguided search and the
+samples of the bounded evaluation, each cut by time budgets and alarms: after the first cut,
+the traces of two runs differed. Now each trace of the fuzzer has a generator of its own,
+seeded by (seed, stream, index), where the stream is the search and the property
+(`candidates:P`, `guided:P`, `states:P`, `invariants`), and each bounded evaluation one seeded
+by its trace and its index in the trace (`Fuzzer._start`); the scores of the k-th state of
+`chains.Search` use a generator seeded by k. The i-th trace of a stream is then the same in
+every run and in every process (the command line checks the properties of a file in one
+process): two runs differ only in how far each stream goes, in the switches to φ⁻, and in
+what the solvers decide within their time limits (Kind 2 runs its engines in parallel). In two
+runs at once of the 53 rows refuted by fuzzing (600 s, 4 shards each), the counterexamples were
+the same in 43 of the 48 rows refuted by both; 3 of the other 5 were found with another number
+of users: the sides of `_drive_any` take turns by time, and the first counterexample wins. The
+entry points run with PYTHONHASHSEED=0 (`kindhml.fix_hash_seed`), a safeguard: with the
+seeds 1 and 2, the Lustre programs of all 370 properties, the candidate invariants and the
+traces were the same. The filter of the generated invariants (`invgen.generate`) is still
+bounded by time (2 s): on 11 of the 53 files, candidates were still removed after 2 s, so
+the candidates of Houdini depend on the speed of the machine.
+
 **Portfolio** (default; `--strategy kind2` gives the previous behaviour). The tool does not
 give up: it runs rounds of the tasks below, one Kind 2 job at a time, each with the round's
 budget (4 s, doubled at each round), until a task gives a verdict or the time limit expires

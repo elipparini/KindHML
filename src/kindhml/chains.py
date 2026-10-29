@@ -144,12 +144,13 @@ class Search:
             self.taken |= {p.name for p in c.procs} | {f.name for f in c.fields}
         self.seqs = (list(itertools.product(procs, repeat=len(sh.chain)))
                      if len(procs) ** len(sh.chain) <= MAX_SEQUENCES else [])
-        self.rnd = random.Random(seed)
+        self.seed = seed
+        self.rnd = random.Random(seed)          # the generator of the current state (`add`)
         self.total = [0] * len(self.seqs)       # the sums of the ranks
         self.wins = [0] * len(self.seqs)        # the states with a positive margin
         self.best: Dict[int, Tuple[int, dict, list]] = {}   # best rank, env, arguments
         self.tried: set = set()
-        self.states = 0
+        self.states = 0                         # the states given to `add`
 
     def envs(self, ev: FormulaEvaluator, st: State) -> List[dict]:
         """The assignments of the universals (users and contracts) where the premise holds."""
@@ -166,7 +167,10 @@ class Search:
 
     def add(self, st: State, system: System) -> int:
         """Scores the sequences at a new state; returns the number of assignments of the
-        universals where the premise holds (0: the state is not used)."""
+        universals where the premise holds (0: the state is not used). The draws at the k-th
+        state come from a generator seeded by the seed and k, as in `fuzz.Fuzzer._start`."""
+        self.rnd = random.Random(f"{self.seed}:{self.states}")
+        self.states += 1
         ev = FormulaEvaluator(system, range(-1, 4), max_records=fuzz.MAX_RECORDS, rnd=self.rnd)
         envs = self.envs(ev, st)
         for env in envs[:ENVS]:
@@ -178,7 +182,6 @@ class Search:
                     self.wins[i] += 1
                 if args is not None and rank > self.best.get(i, (-1,))[0]:
                     self.best[i] = (rank, env, args)
-        self.states += 1
         return len(envs)
 
     def _run(self, ev: FormulaEvaluator, st: State, env: dict, seq) -> tuple:

@@ -19,6 +19,15 @@ transactions, the one whose state is closest to s* is taken. s* itself may be un
 but the reachable states near it often violate the property too: on lending-simple-int,
 1 random state in 64,776 satisfies the premise of the liquidation attacks, and the guided
 search finds a counterexample of Liquidation_attack within 1 s (DESIGN.md, Sect. 6).
+
+The random choices are reproducible (`Fuzzer._start`): the draws of a trace come from a
+generator of its own, seeded by the seed of the fuzzer, the stream of the trace (the search
+and the property, e.g. `candidates:P`) and its index in the stream; the samples of a bounded
+evaluation come from one seeded by the trace and the index of the evaluation in it. So the
+i-th trace of a stream is the same in every run, whatever the time limits cut before, the
+draws of the other searches, or the properties checked before by the same fuzzer: two runs
+differ only in how far each stream goes, and in the switches to `weakened`, which depend on
+time.
 """
 
 from __future__ import annotations
@@ -62,13 +71,27 @@ class Fuzzer:
     def __init__(self, system: System, seed: str = "kindhml"):
         self.system = system
         self.interp = Interpreter(system)
-        self.rnd = random.Random(seed)
-        self.ev = FormulaEvaluator(system, INT_DOMAIN, max_records=MAX_RECORDS, rnd=self.rnd)
+        self.seed = seed
+        self.rnd = random.Random(seed)  # the generator of the current trace (`_start`)
+        self.ev = FormulaEvaluator(system, INT_DOMAIN, max_records=MAX_RECORDS,
+                                   rnd=random.Random(seed))
         self.seen: dict = {}            # property name -> states already proposed (`states`)
         self._bounds: dict = {}         # (contract, procedure) -> `boundaries`
         # property name -> the formula of its bounded evaluation: itself, or `weakened` once too
         # slow; None while it may still become too slow
         self._weak: dict = {}
+        self._started: Dict[str, int] = {}  # stream -> traces started
+        self._trace = seed                  # the seed of the current trace
+        self._evaluations = 0               # bounded evaluations in the current trace
+
+    def _start(self, stream: str):
+        """Starts the next trace of `stream`: its draws come from a generator seeded by the
+        seed, the stream and the index of the trace in the stream (see the module docstring)."""
+        i = self._started.get(stream, 0)
+        self._started[stream] = i + 1
+        self._trace = f"{self.seed}:{stream}:{i}"
+        self.rnd = random.Random(self._trace)
+        self._evaluations = 0
 
     # ------------------------------------------------------------ random values
 
@@ -159,9 +182,11 @@ class Fuzzer:
 
     # ------------------------------------------------------------ traces
 
-    def traces(self) -> Iterator[Tuple[List[Tx], State]]:
-        """The states of a random trace, each with the transactions that reach it: the
-        constructors first, then up to 12 random transactions (reverted ones left out)."""
+    def traces(self, stream: str = "traces") -> Iterator[Tuple[List[Tx], State]]:
+        """The states of the next random trace of `stream`, each with the transactions that
+        reach it: the constructors first, then up to 12 random transactions (reverted ones
+        left out)."""
+        self._start(stream)
         amount = self.system.program.balance_type
         st = initial_state(self.system, {a: abs(self.number(amount))
                                          for a in self.system.addresses if a != NULL},
@@ -204,7 +229,7 @@ class Fuzzer:
         old = signal.signal(signal.SIGALRM, _alarm)
         try:
             while time.time() < deadline and len(out) < limit:
-                for txs, st in self.traces():
+                for txs, st in self.traces(f"candidates:{prop.name}"):
                     left = deadline - time.time()
                     if left <= 0 or len(out) >= limit:
                         break
@@ -233,6 +258,8 @@ class Fuzzer:
         formula = self._weak[prop.name] or prop.formula
         slow = self._weak[prop.name] is None
         cap = min(seconds, SLOW_EVALUATION) if slow else seconds
+        self.ev.rnd = random.Random(f"{self._trace}:{self._evaluations}")
+        self._evaluations += 1
         start = time.time()
         signal.setitimer(signal.ITIMER_REAL, cap)
         try:
@@ -289,7 +316,7 @@ class Fuzzer:
         old = signal.signal(signal.SIGALRM, _alarm)
         try:
             while methods and time.time() < deadline and len(out) < limit:
-                start = self.constructed()
+                start = self.constructed(f"guided:{prop.name}")
                 if start is None:
                     continue
                 txs, st = start
@@ -330,10 +357,11 @@ class Fuzzer:
             signal.signal(signal.SIGALRM, old)
         return out
 
-    def constructed(self) -> Optional[Tuple[List[Tx], State]]:
-        """The first state of a random trace where all contracts are constructed, with its
-        transactions, or None."""
-        for txs, st in self.traces():
+    def constructed(self, stream: str = "traces") -> Optional[Tuple[List[Tx], State]]:
+        """The first state of the next random trace of `stream` where all contracts are
+        constructed, with its transactions, or None; the draws that follow (e.g. the steps of
+        `_guided`) belong to that trace."""
+        for txs, st in self.traces(stream):
             if all(st.constructed.values()):
                 return txs, st
         return None
@@ -346,7 +374,7 @@ class Fuzzer:
         deadline = time.time() + seconds
         while time.time() < deadline and len(out) < limit:
             last = None
-            for txs, st in self.traces():
+            for txs, st in self.traces(f"states:{prop.name}"):
                 if all(st.constructed.values()):
                     last = (txs, st)
             if last is None:

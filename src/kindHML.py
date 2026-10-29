@@ -17,6 +17,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from kindhml import fix_hash_seed                    # noqa: E402
 from kindhml import smt_trace                        # noqa: E402
 from kindhml import verify as V                     # noqa: E402
 from kindhml.colors import palette                  # noqa: E402
@@ -166,4 +167,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    fix_hash_seed()
     sys.exit(main())

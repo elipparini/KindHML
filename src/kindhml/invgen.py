@@ -286,7 +286,7 @@ def generate(program: S.Program, fuzzer: Fuzzer,
     alive = list(properties)
     deadline = time.time() + seconds
     while time.time() < deadline and alive:
-        for _, st in fuzzer.traces():
+        for _, st in fuzzer.traces("invariants"):
             if not all(st.constructed.values()):
                 continue
             keep = []
