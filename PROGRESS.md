@@ -1158,8 +1158,10 @@ refuted (unknown at 8afe4bf), lending_real_v2 `Health_non_interference` unknown 
   edits (fuzz, chains, invgen): all pass but the known `test_trans_kind2`, and
   `test_a_true_chain_property_is_proved_by_an_instance` (passes alone, in 246 s of its 300 s).
   An earlier run reported `test_formula_matches_reference[lending_simple_int-
-  Health_non_interference-inline-q]` failed, with its message lost; alone it skips (no state
-  within its 3 s budget): not explained yet.
+  Health_non_interference-inline-q]` failed. Explained: that run was started under
+  `timeout 1200`; its SIGTERM reached the test, and the handler of kind2.py (line 27) turned it
+  into SystemExit, reported as a failure (pytest went on, 1988 s in all). No disagreement: alone
+  the case skips (its first state needs more than 90 minutes without the 3 s budget).
 
 ## Noted (2026-10-25, with the user): for later
 
