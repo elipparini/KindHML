@@ -1139,6 +1139,26 @@ and known to vary between runs: `Exchange_rate_monotone` of lending_int and lend
 refuted (unknown at 8afe4bf), lending_real_v2 `Health_non_interference` unknown (refuted at
 8afe4bf in 520 s). The 265 other rows: 9220 s at 8afe4bf, 9494 s here.
 
+## Done (2026-10-30): items (c)2, (c)4, (c)5 of the audit (with the user)
+
+Proof gaps of the paper; the tool was already right in each case, so the work is in the paper
+(left uncommitted for the user's review) and in tests of the cases the new statements cover.
+- (c)5: initial states give every field its default value, map entries included
+  (contracts.tex); there, rho binds sender, value and this (the text said balance).
+- (c)2: Lemma users:symmetry admits modal operators on the path: the encoding of a modal
+  operator is its body with the terms chi_v in place of the next state, and these terms name no
+  user (maps as function symbols, `sum(m)` invariant under the permutations of the users).
+  Test: `test_reduction_through_a_modality_keeps_validity` (tests/test_symmetry.py): with 4
+  users, the reduced and full encodings of three properties with a forall under a modality are
+  valid on the same states (all maps with entries in {0, 1}, closed under the permutations).
+- (c)4: Lemma statements is stated for frames (the terms for sender, value and the parameters,
+  over the levels up to the call point) and environments that agree with them; the call case
+  uses the frame of the callee; Lemma transition uses the frame of the transaction.
+  Test: tests/contracts/call_frame.sol (`Run_reads_the_caller_frame`, true): the callee pays
+  the caller back before storing its parameters msg.sender, msg.value and balance. A mutated
+  encoder that evaluates the arguments in the callee's frame fails its differential tests
+  (test_trans, test_formula: 4 failures); the current code passes them and the end-to-end test.
+
 ## Done (2026-10-29): items (b) of the audit (with the user)
 
 - **Divisions in formulas** (998f007): the type checker adds the guard of each unguarded
@@ -1379,6 +1399,13 @@ rewrite the Evaluation section; the winnability wording of 11 is left.
    substitution of FOL terms, by induction on (call depth, statement).
 5. Initial states (contracts.tex:86) do not mention map entries: every field, map entries
    included, has its default value, as in A5(i) and the proof of Lemma 1.
+
+Status of (c) on 2026-10-30: 1 is done (see "Done (2026-10-29): items (b) of the audit"); 2, 4
+and 5 are done (see "Done (2026-10-30): items (c)2, (c)4, (c)5 of the audit"); 3 is left: the
+user will go over it first. The proposal: a semantic notion of guarded formula (its value in
+Kleene's strong three-valued logic, with a/0 undefined, is always defined), the rewriting lemma
+for the whole rewriting of `direct.py` (all the terms of a body at once, guards anywhere on the
+path), and a lemma that the syntactic condition of `check_guards` implies the semantic one.
 
 **(d) Refuted or not reproduced:** chi# is first-order with the single formula for A_n
 (refuted); a generated invariant `owner != null` did not lead to a wrong verdict on the crafted

@@ -2,14 +2,22 @@
 `symmetric`; DESIGN.md, Sect. 7.7): a universal address quantifier in positive position needs
 one value per pattern of equalities with the users bound around it."""
 
+import itertools
 import re
+from fractions import Fraction
 
 import pytest
 
 from kindhml import lustre as L
 from kindhml import verify as V
 from kindhml.builder import parse
+from kindhml.concrete import state_literal
+from kindhml.encode_formula import FormulaEncoder
+from kindhml.encode_trans import Encoder
 from kindhml.invariants import Checks
+from kindhml.lustre_eval import Evaluator
+from kindhml.model import System
+from kindhml.reference import initial_state
 from kindhml.typecheck import check
 
 SOURCE = """
@@ -116,3 +124,46 @@ def test_a_disjunction_is_still_refuted_on_free_states():
     assert V._free_run(lus, names, 30)[0] == "invalid"
     lus, names = c.property_check(p.prop("Pairs"), [], split=True)
     assert V._free_run(lus, names, 30)[0] == "valid"
+
+
+MODAL = """
+pragma balance real;
+contract C {
+    mapping (address => real) m;
+    function set(real v) { m[msg.sender] = v }
+}
+property Own {
+    forall a : address . is_EOA(a) -> << a : C.set(1.0) >> forall b : address . (b == a -> m[b] == 1.0)
+}
+property Others {
+    forall a : address . is_EOA(a) -> << a : C.set(0.0) >> forall b : address . (is_EOA(b) -> m[b] == 0.0)
+}
+property Two {
+    forall a : address . is_EOA(a) -> << a : C.set(0.0) >> forall b : address . forall c : address .
+        ((is_EOA(b) && is_EOA(c) && b != a && c != a) -> m[b] == m[c])
+}
+"""
+
+
+def test_reduction_through_a_modality_keeps_validity():
+    """Lemma `lem:users:symmetry` through modal operators (inline mode): with 4 users, the
+    reduced and the full encodings of each property are valid on the same set of states, all
+    the maps with entries in {0, 1}, a set closed under the permutations of the users (Others
+    and Two are refuted only by users other than the sender)."""
+    p = check(parse(MODAL))[0]
+    system = System.make(p, 4)
+    enc = Encoder(system)
+    ev = Evaluator(enc.program()[0])
+    states = []
+    for values in itertools.product((0, 1), repeat=len(system.addresses)):
+        st = initial_state(system, {})
+        st.constructed["C"] = True
+        st.fields[("C", "m")] = {a: Fraction(v) for a, v in zip(system.addresses, values)}
+        states.append(ev.eval(state_literal(st, system, enc), {}))
+    for name, expected in (("Own", True), ("Others", False), ("Two", False)):
+        fe = FormulaEncoder(enc, "inline", ("address", "method"))
+        full = fe.prop(p.prop(name), L.Var("s"), False)
+        reduced = fe.prop(p.prop(name), L.Var("s"), True)
+        assert users_in(reduced) < users_in(full), name
+        for goal in (full, reduced):
+            assert all(ev.eval(goal, {"s": s}) for s in states) == expected, name
