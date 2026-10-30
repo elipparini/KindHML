@@ -136,12 +136,19 @@ def test_the_rewriting_is_an_equivalence_for_guarded_divisions():
     values of the free constants (z3, in process, on small formulas)."""
     r = direct._Rewriter()
     a, b, p = z3.Reals("a b p")
-    t = z3.Real("t")
+    t, s = z3.Reals("t s")
     formulas = [
         z3.Exists([t], z3.If(z3.Not(b + t == 0), a / (b + t), p) > 1),
         z3.ForAll([t], z3.If(t > 0, t, -t) + z3.If(z3.Not(b == 0), a / b, 0) >= p),
         z3.Exists([t], z3.And(t > 0, z3.If(z3.Not(t * b == 0),
                                           (a / (t * b)) * z3.If(a > 0, a, 1), 0) > p)),
+        # the guard is outside the quantifier that binds the variable of a / b
+        z3.Exists([t], z3.And(t == p, z3.Implies(z3.Not(b == 0),
+                                                 z3.Exists([s], z3.And(s > t, s * b < a / b))))),
+        # p / (a / b) becomes p / v with v for the inner a / b, while its guard a / b != 0 is
+        # outside, with another variable for its a / b (Lemma `lem:tool:rewriting`)
+        z3.Exists([t], z3.And(t == p, z3.Not(b == 0), z3.Not(a / b == 0),
+                              z3.Exists([s], z3.And(s > t, s < p / (a / b))))),
     ]
     grid = [z3.RealVal(v) for v in ("-1", "0", "1/2", "2")]
     for f in formulas:

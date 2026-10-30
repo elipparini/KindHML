@@ -1158,6 +1158,15 @@ Proof gaps of the paper; the tool was already right in each case, so the work is
   the caller back before storing its parameters msg.sender, msg.value and balance. A mutated
   encoder that evaluates the arguments in the callee's frame fails its differential tests
   (test_trans, test_formula: 4 failures); the current code passes them and the end-to-end test.
+- (c)3, as short as possible (the user: division by zero is of no interest to the readers): the
+  main text only refers to the appendix; there, the divisions of a query are guarded if its
+  truth value does not depend on the values of the divisions by zero (which may differ between
+  occurrences and depend on the variables in scope), and Lemma tool:rewriting covers the whole
+  rewriting of `direct.py` in one step. That the syntactic check `check_guards` ensures this
+  is stated without proof (an argument by a smallest undefined division would do). Test: two
+  formulas added to `test_the_rewriting_is_an_equivalence_for_guarded_divisions`, with the
+  guard outside the quantifier that binds the variable of the division, and with a divisor
+  a / b whose guard is outside (it gets another variable there).
 
 ## Done (2026-10-29): items (b) of the audit (with the user)
 
@@ -1401,11 +1410,8 @@ rewrite the Evaluation section; the winnability wording of 11 is left.
    included, has its default value, as in A5(i) and the proof of Lemma 1.
 
 Status of (c) on 2026-10-30: 1 is done (see "Done (2026-10-29): items (b) of the audit"); 2, 4
-and 5 are done (see "Done (2026-10-30): items (c)2, (c)4, (c)5 of the audit"); 3 is left: the
-user will go over it first. The proposal: a semantic notion of guarded formula (its value in
-Kleene's strong three-valued logic, with a/0 undefined, is always defined), the rewriting lemma
-for the whole rewriting of `direct.py` (all the terms of a body at once, guards anywhere on the
-path), and a lemma that the syntactic condition of `check_guards` implies the semantic one.
+and 5 are done (see "Done (2026-10-30): items (c)2, (c)4, (c)5 of the audit"); 3 is done too,
+in the short form chosen by the user (same section).
 
 **(d) Refuted or not reproduced:** chi# is first-order with the single formula for A_n
 (refuted); a generated invariant `owner != null` did not lead to a wrong verdict on the crafted
