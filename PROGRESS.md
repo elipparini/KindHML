@@ -1198,10 +1198,54 @@ The solver drivers of Kind 2, the booleans of its JSON output and the layout of 
   `Sandwich_slippage` (16-136 s with either binary: the race between numbers of users);
   amm_real_v5 `Deposit_reversibility` (in its 5 runs, full run included, the snapshot: fuzzing
   in 11-13 s three times, reach in 5 s twice; v3.0.0: reach in 4-5 s each time);
-  lending_simple_real_v2 `Health_non_interference`, refuted by BMC in each of the 5 runs of
-  v3.0.0 (193-445 s), and in 1 of the 5 runs of the snapshot (454 s).
-- `tools/server/env.sh` now selects Kind 2 v3.0.0, z3 5.3.2 and cvc5 1.4.2. Not done: a full
-  run at b192a58.
+  lending_simple_real_v2 `Health_non_interference`, refuted by BMC (with z3) in 7 of the 8 runs
+  of v3.0.0 (193-454 s; two later reruns at once, refuted once), and in 1 of the 5 runs of the
+  snapshot (454 s).
+- **Full run at fe61a8e** (b192a58 and this entry; the same setting as at a62d9ae;
+  `results/server-20261029-fe61a8e-kind2-{snapshot,3.0.0}.csv`). Snapshot: 187 valid,
+  69 invalid, 12 unknown; v3.0.0: 187, 70, 11 (lending_simple_real_v2
+  `Health_non_interference` refuted by BMC, 199 s); no verdict against the ground truth. Rows
+  with the same verdict (256): 4147 s and 4224 s (ratio 1.019; median ratio per row 1.000).
+  Noise, the snapshot at a62d9ae against the snapshot here: the same verdicts, ratio 0.947. Rows
+  more than 2 times slower or faster: 3, from races between numbers of users (e.g. amm_real
+  `Sandwich_slippage`, 41 s and 135 s; on it and on amm_real_v5 `Sandwich_slippage`, the runs
+  of each binary show all three outcomes of the race: the proof with 4 users in 16-44 s, one by
+  one in 98-104 s, the proof with 1 user in 135-144 s).
+  Invariant phase: the same invariants in all 128 entries; 3663 s and 3732 s.
+- `tools/server/env.sh` now selects Kind 2 v3.0.0, z3 5.3.2 and cvc5 1.4.2.
+
+## Done (2026-10-30): cvc5 with MBQI only, an experiment (server time given by the user)
+
+Not adopted in the tool: the decision is the user's. Kind 2 fixes the options of cvc5
+(`CVC5Driver.ml`: `--incremental --ext-rew-prep=use --mbqi --full-saturate-quant`, the same in
+v3.0.0) and has no option to add any; adopting the change needs a wrapper passed through
+`--cvc5_bin`. The experiment used one, `~/claude/cvc5wrap/bin/cvc5` on the server, first on the
+PATH: cvc5 1.4.2 with `--no-cegqi --no-sygus-inst` added, the strategy of cvc5's portfolio on the
+open instances (`results/smt-solvers-20261029/`).
+- **Solver check.** cvc5 1.4.2 on the 98 open NIA instances (z3 and cvc5 undecided in the long
+  runs; 82 from z3 calls of `_free_run`), 60 s each: with Kind 2's options, none solved; with the
+  two options added, 83 solved, all sat, 80 in less than 1 s; none solved only with Kind 2's
+  options (`results/smt-solvers-20261029/cvc5-options-20261029.csv`).
+- **Integer families** (42 tasks, 600 s, v3.0.0, at fe61a8e; two variants at once, 4 shards
+  each): with the wrapper, the same verdicts as the full run at fe61a8e, and amm_int
+  `Sandwich_slippage` refuted by fuzzing (28 s; unknown in the 4 full runs without the wrapper,
+  refuted in the long runs of 2026-10-26 after 9036 s). Rows with the same verdict (39): 1647 s
+  and 1161 s; e.g. amm_simple_int `Sandwich_slippage` 376 s to 9 s (reach), amm_int
+  `Swap_reversibility` 85 s to 17 s, `Arbitrage_exists` 49 s to 20 s. The second variant, cvc5
+  also first in `_free_run` (`FREE_SOLVERS`), changed the rows little (1182 s), but slowed the
+  invariant phase (lending_int 514 s to 1760 s), whose checks use the same order: dropped.
+  `results/server-20261030-fe61a8e-int-cvc5-mbqi{,-cvc5-first}.csv`.
+- **Full run** with the wrapper (268 tasks, 600 s, 8 shards alone: the load of the 4 + 4 runs
+  at fe61a8e; `results/server-20261030-fe61a8e-kind2-3.0.0-cvc5-mbqi.csv`): 187 valid,
+  71 invalid, 10 unknown; no verdict against the ground truth. Against v3.0.0 at fe61a8e:
+  amm_int `Sandwich_slippage` refuted (27 s, the third run with the wrapper out of three) and
+  lending_simple_real `Liquidation_attack_any` refuted by fuzzing (545 s; it varies between
+  runs); lending_simple_real_v2 `Health_non_interference` unknown. Two reruns of the latter with
+  and two without the wrapper, at once: refuted by BMC with z3 in both with the wrapper
+  (455-456 s), in one of the two without: a race, not the wrapper. Rows with the same verdict
+  (256): 4224 s and 3563 s (ratio 0.843); integer families (39 rows) 0.699, real families
+  (217) 0.936. Noise between the two runs of the snapshot on the same rows: 0.993 (integer),
+  0.919 (real). Invariant phase: the same invariants; 3732 s and 3608 s.
 
 ## Noted (2026-10-25, with the user): for later
 
