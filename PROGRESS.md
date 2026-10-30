@@ -1247,6 +1247,51 @@ open instances (`results/smt-solvers-20261029/`).
   (217) 0.936. Noise between the two runs of the snapshot on the same rows: 0.993 (integer),
   0.919 (real). Invariant phase: the same invariants; 3732 s and 3608 s.
 
+## Done (2026-10-30): an unattended queue on the server (server time given by the user)
+
+At 9bf85f9 (code of fe61a8e), with the solvers of `env.sh`, 8 shards, 600 s per task; from
+02:41 to 07:31 UTC; no run reached its safety limit. Everything is in `results/night-20261030/`:
+README.txt, SUMMARY.txt, flaky-table.md, one CSV per run, and the scripts (`driver.sh`;
+`stop.sh`, which keeps the rows finished). The wrapper is the cvc5 wrapper of the entry above.
+- **kw2: a second full run with the wrapper.** 187 valid, 72 invalid, 9 unknown; no verdict
+  against the ground truth.
+  - Against `kw`: one change, lending_simple_real_v2 `Health_non_interference` refuted by BMC
+    (198 s). Rows with the same verdict (258): ratio 0.987.
+  - Against `k2fix` (without the wrapper): amm_int `Sandwich_slippage` refuted (28 s) and
+    lending_simple_real `Liquidation_attack_any` refuted (526 s). Rows with the same verdict
+    (257): ratio 0.842; integer families 0.701 (`kw`: 0.699), real families 0.926.
+- **nouser: a full run with `--no_user_invariants`**, without the wrapper, against `k2fix`.
+  187 valid, 69 invalid, 12 unknown; no verdict against the ground truth.
+  - Every valid verdict is kept. 34 rows proved "inductive" (the property among the proved
+    invariants) are proved "by invariants" instead.
+  - One verdict is lost: amm_real_v4 `Sandwich`, refuted by fuzzing in 16 s in `k2fix`, is
+    unknown here. Cause not checked.
+  - Rows with the same verdict (256): 4407 s and 5033 s (ratio 1.142; median ratio per row
+    0.987).
+  - Invariant phase: 3732 s and 2597 s. 70 of 117 entries prove a different number of
+    invariants; the 30 listed all prove fewer, by the number of declared invariants (e.g.
+    amm_int 34 to 32).
+- **flaky: the 15 rows whose verdict varies** (`flaky.csv`), 3 runs without the wrapper and 3
+  with it. The table also has the five full runs at a62d9ae and fe61a8e (`k2fix`, `k2new`,
+  `kw`, `kw2`, and `k2old2` with the snapshot). For v3.0.0, rows decided without / with the
+  wrapper, of 5 runs each:
+  - decided in every run: lending_int `Exchange_rate_monotone` (fuzzing, 352-394 s) and
+    lending_simple_int `Liquidation_attack_exists` (fuzzing, 189-196 s);
+  - decided in none of the 11 runs: lending_int `Liquidation_defence`;
+    `Exchange_rate_monotone` of lending_real v1-v4; `Liquidation_attack_any` of lending_real,
+    lending_real_v3 and lending_simple_int; lending_real_v2 `Health_non_interference`;
+  - amm_int `Sandwich_slippage`: 0/5 and 5/5 (27-37 s);
+  - lending_simple_real `Liquidation_attack_any`: 3/5 and 5/5 (526-571 s, close to the
+    limit);
+  - lending_simple_real_v2 `Health_non_interference`: 5/5 and 4/5 (BMC, 198-448 s);
+  - lending_simple_real_v3 `Liquidation_attack_any`: refuted in each of the 5 full runs
+    (519-559 s), and in none of the 6 runs of the 15 rows. Its file proves the same invariants
+    in both kinds of run, but its invariant phase took 132-149 s in the 6 runs against 79 s in
+    `kw2`. The runs of the 15 rows are heavier (8 shards of long lending rows), so a
+    counterexample found at 520-560 s passes the limit. The per-file context shared by the
+    properties of a file holds only the invariants and the cutoffs (`_entry`, `cutoff_of`),
+    not results of other properties.
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
