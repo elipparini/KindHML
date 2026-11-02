@@ -1321,6 +1321,28 @@ README.txt, SUMMARY.txt, flaky-table.md, one CSV per run, and the scripts (`driv
     properties of a file holds only the invariants and the cutoffs (`_entry`, `cutoff_of`),
     not results of other properties.
 
+## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
+
+The user asked whether Kind 2 could be dropped. Decision: keep it as it is for now. The roles
+of Kind 2 in the full run `k2fix` (257 decided rows), from the solver tags of its logs:
+- one-step checks through Kind 2 (BMC and IND at depth 0-1 on a free system): 119 proofs by
+  invariants, 31 confirmations of fuzzing, and most of the 34 "inductive" (Houdini steps);
+- the same checks by z3 directly (`direct.py`, nlqsat): 34 proofs, 13 confirmations;
+- BMC on the transition system: 21 refutations of the "reach" search;
+- Kind 2's own search on the transition system: 5 refutations (4 BMC, 1 IC3QE), no proof.
+  price-bet v2-v4 `Winnability` and `Liquidity`, vault_v3
+  `Two_steps_drainability_non_inflation` and lending_simple_real_v2
+  `Health_non_interference` were refuted only this way.
+
+The plan for later, if the solver calls are to be controlled fully:
+- keep Kind 2 for BMC on the transition system (reach, the Kind 2 search), where incremental
+  solving matters;
+- send the one-step checks to the solvers directly, by extending `direct.py` beyond its
+  fragment.
+
+Dropping Kind 2 completely would need a complete SMT encoding (now only a fragment) and a
+BMC. It would also lose an independent, mature checker of our encoding.
+
 ## Noted (2026-10-25, with the user): for later
 
 - A full run with `--no_user_invariants` (only generated invariant candidates), next to the run
