@@ -26,7 +26,8 @@ Each task runs in a child process, stopped at the hard limit --task_timeout (def
 check is only checked between its steps, and a step can take hours (the encoding of a
 property with nested modalities).
 
-With --out DIR, the run is saved in DIR: results.csv (one row per task), run.log (the
+With --out DIR, the run is saved in DIR: results.csv (one row per task; for a refuted
+property, the column transactions gives those of its counterexample), run.log (the
 output of the run, with the invariants proved for each file) and info.txt (the command,
 the date, the git commit and the versions of the tools).
 """
@@ -355,7 +356,9 @@ def main():
                         args.smt_trace_logics or None)
 
     # The CSV is written row by row, so that an interrupted run keeps its partial results.
-    fields = ["file", "property", "status", "method", "groundtruth", "check", "wall", "scope"]
+    # transactions: those of the counterexample of a refuted property (empty otherwise)
+    fields = ["file", "property", "status", "method", "groundtruth", "check", "wall", "scope",
+              "transactions"]
     out_csv = open(args.csv, "w", newline="") if args.csv else None
     writer = csv.DictWriter(out_csv, fieldnames=fields) if out_csv else None
     if writer:
@@ -396,15 +399,17 @@ def main():
                                    user_invariants=not args.no_user_invariants,
                                    users_mode=args.users_mode)
                     found = (out.groundtruth_check(), out.describe(), out.describe(C),
-                             out.status, out.method, out.scope)
+                             out.status, out.method, out.scope,
+                             out.result.k if out.status == "invalid" else None)
                 except KindHMLError as e:
                     found = ("error", f"{prop.name}: error: {e}",
-                             f"{C.bold(prop.name)}: {C.magenta('error:')} {e}", "error", "", "")
+                             f"{C.bold(prop.name)}: {C.magenta('error:')} {e}", "error", "", "",
+                             None)
                 return found, V.houdini_progress(context)
 
             how, value = isolated(check, args.task_timeout)
             if how == "done":
-                (gt, desc, colored, status, method, scope), progress = value
+                (gt, desc, colored, status, method, scope, transactions), progress = value
                 V.resume_houdini(context, progress)
             else:
                 why = (f"stopped at the limit of the task ({args.task_timeout:g} s)"
@@ -412,6 +417,7 @@ def main():
                 gt, status, method, scope = ("unknown" if how == "stopped" else "error",
                                              "unknown" if how == "stopped" else "error",
                                              "", why)
+                transactions = None
                 desc = f"{prop.name}: {status} ({why})"
                 colored = f"{C.bold(prop.name)}: {C.magenta(status)} ({why})"
             wall = time.time() - start
@@ -422,7 +428,8 @@ def main():
                 writer.writerow({"file": os.path.relpath(f, ROOT), "property": prop.name,
                                  "status": status, "method": method,
                                  "groundtruth": prop.groundtruth, "check": gt,
-                                 "wall": round(wall, 2), "scope": scope})
+                                 "wall": round(wall, 2), "scope": scope,
+                                 "transactions": transactions})
                 out_csv.flush()
         if args.print_invariants or LOG:
             # always in the log; on the screen with --print_invariants

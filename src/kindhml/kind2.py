@@ -84,7 +84,8 @@ def default_args(kind2: str) -> List[str]:
 class PropertyResult:
     name: str
     status: str                 # 'valid', 'invalid', 'unknown', 'timeout', 'error'
-    k: Optional[int] = None     # valid: induction depth; invalid: counterexample length
+    k: Optional[int] = None     # valid: induction depth; invalid: the steps of the
+                                # counterexample after its initial state
     engine: Optional[str] = None
     time: Optional[float] = None
     true_up_to: Optional[int] = None
@@ -97,7 +98,12 @@ class PropertyResult:
             k = f" (k={self.k})" if self.k is not None else ""
             return f"{status}{k} by {self.engine}{t}"
         if self.status == "invalid":
-            return f"{status} after {self.k} steps{t}"
+            # a step of the transition system s = Init -> pre Trans(s, t) is a transaction,
+            # constructor calls included (Kind 2's k, text and JSON outputs alike: a trace of 3
+            # instants has k = 2); the fuzzer counts its transactions the same way
+            k = (f" after {self.k} transaction{'' if self.k == 1 else 's'}"
+                 if self.k is not None else "")
+            return f"{status}{k}{t}"
         if self.true_up_to is not None:
             return f"{status}, true up to {self.true_up_to} steps{t}"
         return f"{status}{t}"
@@ -475,7 +481,9 @@ def _property(o: dict) -> PropertyResult:
 
 
 def format_counterexample(cex: list, main: str = "main", c: Palette = PLAIN) -> str:
-    """The streams of the main node, one column per step (inputs t, ib and the state s)."""
+    """The streams of the main node, one column per step (inputs t, ib and the state s). The
+    transaction t of a step leads to the state of the next one: that of the last step is not
+    taken, and its cells are blank."""
     rows, steps = [], 0
     for block in cex:
         if block.get("name") != main:
@@ -489,8 +497,9 @@ def format_counterexample(cex: list, main: str = "main", c: Palette = PLAIN) -> 
     width = max(len(n) for n, _ in rows)
     lines = [c.bold(" " * width + "".join(f" | step {k:<6}" for k in range(steps)))]
     for name, values in sorted(rows, key=lambda r: (not r[0].startswith("t."), r[0])):
-        lines.append(name.ljust(width) + "".join(f" | {_value(values.get(k, '')):<11}"
-                                                 for k in range(steps)))
+        shown = steps - 1 if name.startswith("t.") else steps
+        lines.append(name.ljust(width) + "".join(
+            f" | {_value(values.get(k, '')) if k < shown else '':<11}" for k in range(steps)))
     return "\n".join(lines)
 
 

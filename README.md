@@ -32,6 +32,12 @@ python3 src/kindHML.py contracts/bank/bank.sol Additivity 2 60
 python3 src/kindHML.py contracts/vault/vault_v2.sol ALL 2 30 --cex
 ```
 
+A refuted property is reported as `invalid after N transactions`: `N` is the number of
+transactions of the counterexample found, from the initial state, constructor calls included.
+When the counterexample comes from bounded model checking (method `kind2-BMC`), no
+counterexample with the same number of users has fewer transactions; with the other methods
+(`reach`, `fuzz`, Kind 2's other engines), one may have.
+
 Options:
 
 - `--only_lus`: only write the Lustre encoding.
@@ -166,7 +172,8 @@ users (`--participants any`). `--list` prints the selected tasks without running
 Each task runs in a child process, stopped with its Kind 2 runs at `--task_timeout` seconds
 (default 2 x `--timeout` + 300; 0: no limit), since the time limit of a check is only checked
 between its steps. A family of `--families` must contain a selected file.
-`tests/run_all.py --out DIR` saves the run in `DIR`: `results.csv` (one row per task),
+`tests/run_all.py --out DIR` saves the run in `DIR`: `results.csv` (one row per task; the
+column `transactions` gives the transactions of the counterexample of a refuted property),
 `run.log` (the output, with the invariants proved for each file) and `info.txt` (the command,
 the date, the git commit and the versions of Kind 2, Z3 and cvc5). `--smt_trace DIR` and
 `--smt_trace_logics` save the SMT-LIB instances of the run, as for `src/kindHML.py`; the

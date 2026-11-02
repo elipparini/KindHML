@@ -46,6 +46,36 @@ def test_complete_output():
     assert out.errors == []
 
 
+COUNTER = """[
+{
+  "objectType" : "property",
+  "name" : "P",
+  "isCandidate" : "false",
+  "runtime" : {"unit" : "sec", "timeout" : false, "value" : 0.051},
+  "k" : 2,
+  "answer" : {"source" : "bmc", "value" : "falsifiable"},
+  "counterExample" :
+  [{"blockType" : "node", "name" : "main", "streams" :
+    [{"name" : "x", "type" : "int", "class" : "output",
+      "instantValues" : [[0, 0], [1, 1], [2, 2]]}]}]
+}
+]
+"""
+
+
+def test_transactions_of_a_counterexample():
+    """k is the number of steps after the initial state, i.e. of transactions: x = 0 -> pre x +
+    1 with the property x < 2 is refuted with k = 2 (output of Kind 2 v3.0.0, abridged; the
+    text output of v2.3.0 and v3.0.0 says "for k=2" too)."""
+    p = parse_output(COUNTER).properties[0]
+    assert (p.status, p.k) == ("invalid", 2)
+    assert p.describe() == "invalid after 2 transactions, 0.051s"
+    q = next(p for p in parse_text(TEXT).properties if p.name == "Q")
+    assert q.describe() == "invalid after 3 transactions, 2.842s"
+    assert kind2.PropertyResult("P", "invalid", 1).describe() == "invalid after 1 transaction"
+    assert kind2.PropertyResult("P", "invalid").describe() == "invalid"
+
+
 def test_truncated_output_keeps_complete_objects():
     for cut in range(len(RAW)):
         names = [p.name for p in parse_output(RAW[:cut]).properties]
@@ -222,8 +252,24 @@ def test_counterexample_with_reals():
     """Kind 2 writes a real as {"num": n, "den": d} (output of Kind 2 v2.3.0)."""
     cex = [{"name": "main", "streams": [
         {"name": "t.value", "type": "real",
-         "instantValues": [[0, {"num": 0, "den": 1}], [1, {"num": 3, "den": 2}]]},
-        {"name": "s.revert", "type": "bool", "instantValues": [[0, False], [1, True]]}]}]
+         "instantValues": [[0, {"num": 0, "den": 1}], [1, {"num": 3, "den": 2}],
+                           [2, {"num": 1, "den": 1}]]},
+        {"name": "s.revert", "type": "bool",
+         "instantValues": [[0, False], [1, True], [2, False]]}]}]
     rows = format_counterexample(cex).splitlines()
-    assert rows[1].split() == ["t.value", "|", "0", "|", "3/2"]
-    assert rows[2].split() == ["s.revert", "|", "False", "|", "True"]
+    assert rows[1].split() == ["t.value", "|", "0", "|", "3/2", "|"]
+    assert rows[2].split() == ["s.revert", "|", "False", "|", "True", "|", "False"]
+
+
+def test_the_last_transaction_is_blank():
+    """A counterexample with k transactions has k + 1 steps; the transaction of the last step
+    is not taken, and its cells are blank (the inputs ib and the state are shown)."""
+    cex = [{"name": "main", "streams": [
+        {"name": "t.sender", "type": "address", "instantValues": [[0, "A_u1"], [1, "A_u2"]]},
+        {"name": "ib.k_u1", "type": "int", "instantValues": [[0, 5], [1, 0]]},
+        {"name": "s.revert", "type": "bool", "instantValues": [[0, False], [1, False]]}]}]
+    rows = format_counterexample(cex).splitlines()
+    assert rows[0].split() == ["|", "step", "0", "|", "step", "1"]
+    assert rows[1].split() == ["t.sender", "|", "A_u1", "|"]
+    assert rows[2].split() == ["ib.k_u1", "|", "5", "|", "0"]
+    assert rows[3].split() == ["s.revert", "|", "False", "|", "False"]
