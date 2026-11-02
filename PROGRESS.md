@@ -1321,6 +1321,61 @@ README.txt, SUMMARY.txt, flaky-table.md, one CSV per run, and the scripts (`driv
     properties of a file holds only the invariants and the cutoffs (`_entry`, `cutoff_of`),
     not results of other properties.
 
+## Done (2026-11-02): cvc5 with MBQI alone, for the free checks of integer existentials (with the user)
+
+Plan approved by the user: A, the cvc5 options in the tool; B, a file-based path for cvc5's
+portfolio or yicesQS. The user chose to test a cheap variant of B first. Commit 1ca4c9c;
+DESIGN.md, "Solvers".
+- **A, for every cvc5 call** (wrapper `src/kindhml/bin/cvc5-mbqi` passed with `--cvc5_bin`): the
+  full suite had one failure. `test_cutoff.py::test_any_number_of_users_without_cutoff`:
+  Kind 2's search no longer proved additivity `P1_true` with 1 user in 20 s. Alone, it failed
+  twice with the wrapper and passed twice without it. Its induction queries need CEGQI, which
+  the wrapper turns off. The full runs `kw` and `kw2` did not show this, because Kind 2's
+  search proves none of the benchmark rows.
+- **A, narrowed (1ca4c9c).** `cvc5-mbqi` is a solver name of its own. It is used only in the
+  checks on free values (proof forms and exact checks of `_rounds`) of a property with an
+  existential over integers (`has_witness(..., types=(INT, UINT))`; 30 rows: amm-int 5,
+  amm-simple-int 4, bank 12, lending-int 1, lending-simple-int 1, price-bet 4, vault 3).
+  Kind 2's search, Houdini and the other checks keep Kind 2's options. The suite passes; the
+  stub of `test_fuzz_pending.py` takes the new argument of `_free_run`.
+- **B: smoke checks** on 7 such checks of the AMM int properties (without premises), as
+  `direct.py` would translate them (no rewriting), written as NIA scripts:
+  - `cvc5 --use-portfolio` answered sat on all 7 in at most 0.1 s, but printed no model, so it
+    cannot serve these checks;
+  - `--mbqi --no-cegqi --no-sygus-inst` (and `--mbqi-enum ...`) alone: all 7 in at most 0.1 s,
+    with models; yicesQS: all 7, with models;
+  - `--enum-inst --nl-ext-tplanes` and `--sygus-inst`: 1 of 7; Kind 2's options: none in 20 s;
+    z3: 4 of 7.
+
+  So the full B was not built. Its gain would mostly have been the 3/4 of the budget that
+  z3, the first solver of `_free_run`, spent on these checks.
+- **Paired full runs at 1ca4c9c** (268 tasks, 600 s, 4 + 4 shards at once, like `k2fix` and
+  `k2old2`). They differ only in the order of the solvers of these checks: `mf` (`cvc5-mbqi`,
+  then z3; the default) and `zf` (z3, then `cvc5-mbqi`).
+  `results/server-20261102-1ca4c9c-{cvc5mbqi-first,z3-first}.csv`, the comparison in
+  `...-compare.txt`, the 30 rows in `server-20261102-int-witness-rows.csv`.
+  - Both: 187 valid, 71 invalid, 10 unknown; no verdict against the ground truth. Against
+    `k2fix`: amm_int `Sandwich_slippage` refuted (reach; `mf` 38 s, `zf` 146 s).
+  - Time on the rows with the same verdict, split by whether the change applies (the other
+    rows give the noise):
+
+    | runs | 30 rows with an integer existential | 228 other rows |
+    |---|---|---|
+    | `k2fix` → `zf` | 0.613 | 1.081 |
+    | `k2fix` → `mf` | 0.598 | 1.134 |
+    | `zf` → `mf` | 0.858 | 1.049 |
+    | `k2old2` → `k2fix` (noise) | 1.012 | 1.021 |
+  - By kind of verdict, `mf` against `zf`:
+    - refutations faster with `cvc5-mbqi` first: amm_int `Sandwich_slippage` 146 to 38 s,
+      `Arbitrage_exists` 21 to 7 s, lending_int `Liquidation_attack` 301 to 117 s,
+      lending_simple_int `Liquidation_attack_exists` 189 to 87 s, bank_v4
+      `No_frontrun_deposit` 22 to 2 s;
+    - proofs faster with z3 first: vault `Two_steps_drainability` 26 s against 147 s, vault_v3
+      24 s against 89 s, bank `Reversibility_deposit` 0.5 s against 3.6 s;
+    - slower refutations with `cvc5-mbqi` first: amm_int `Deposit_reversibility` 23 s against
+      132 s (this row varied over 10-181 s in earlier runs) and `Swap_additivity` 11 s against
+      23 s.
+
 ## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
 
 The user asked whether Kind 2 could be dropped. Decision: keep it as it is for now. The roles
