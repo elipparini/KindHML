@@ -513,19 +513,20 @@ def weakened(e: S.Expr) -> S.Expr:
     return e
 
 
-def has_witness(e: S.Expr, positive: bool = True) -> bool:
-    """Whether e has an existential quantifier over int, uint or real in positive position
-    (or a universal one in negative position)."""
+def has_witness(e: S.Expr, positive: bool = True,
+                types: Tuple[str, ...] = (S.INT, S.UINT, S.REAL)) -> bool:
+    """Whether e has an existential quantifier over one of `types` (default: int, uint or
+    real) in positive position (or a universal one in negative position)."""
     if isinstance(e, S.Quant):
-        if e.type in (S.INT, S.UINT, S.REAL) and (e.kind == "exists") == positive:
+        if e.type in types and (e.kind == "exists") == positive:
             return True
-        return has_witness(e.body, positive)
+        return has_witness(e.body, positive, types)
     if isinstance(e, S.UnOp) and e.op == "!":
-        return has_witness(e.arg, not positive)
+        return has_witness(e.arg, not positive, types)
     if isinstance(e, S.BinOp) and e.op == "->":
-        return has_witness(e.left, not positive) or has_witness(e.right, positive)
+        return has_witness(e.left, not positive, types) or has_witness(e.right, positive, types)
     if isinstance(e, S.BinOp) and e.op in ("&&", "||"):
-        return has_witness(e.left, positive) or has_witness(e.right, positive)
+        return has_witness(e.left, positive, types) or has_witness(e.right, positive, types)
     if isinstance(e, S.Modal):
-        return has_witness(e.body, positive)
+        return has_witness(e.body, positive, types)
     return False

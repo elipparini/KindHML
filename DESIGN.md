@@ -158,6 +158,33 @@ counterexamples; on many valid properties cvc5 is faster. `--solver auto` (defau
 cvc5 for at most half of the budget and then, if it gives no verdict, z3 for the rest
 (benchmarks with a budget of 120 s: 3 min 51 s in total, against about 16 min for z3 first).
 
+**cvc5 with MBQI alone** (solver `cvc5-mbqi`, `kind2.cvc5_mbqi`, 2026-11-02). Kind 2 runs
+cvc5 with fixed options (`--incremental --ext-rew-prep=use --mbqi --full-saturate-quant`), and
+has no option to add any. For the solver `cvc5-mbqi`, KindHML passes Kind 2 a wrapper
+(`--cvc5_bin`, `src/kindhml/bin/cvc5-mbqi`) that adds `--no-cegqi --no-sygus-inst`:
+model-based instantiation alone. This is the strategy that cvc5's portfolio uses for quantified
+nonlinear integer arithmetic. The portfolio itself is off in incremental mode, the only mode
+Kind 2 uses: `--portfolio-dry-run` lists one empty strategy. On files, `--use-portfolio` answers
+but prints no model.
+
+The two options trade proofs for models, so `cvc5-mbqi` is used only where the hard queries are
+satisfiable: in the checks on free values of a property with an existential over integers
+(`verify.INT_WITNESS_SOLVERS`, first, then z3). Kind 2's search on the transition system,
+Houdini and the other checks keep Kind 2's options. Measurements (cvc5 1.4.2):
+* on the 98 queries of our benchmarks that z3 and cvc5 left open in the long runs (all
+  satisfiable), 60 s each: none solved with Kind 2's options, 83 with the wrapper; on 7 checks on
+  free values of the AMM int properties (no premises), the wrapper decided all 7 in 0.1 s, with
+  models, Kind 2's options none in 20 s, z3 4 (2026-11-02);
+* with the wrapper for every cvc5 call, in two full runs (PROGRESS.md 2026-10-30): no verdict
+  lost; amm_int `Sandwich_slippage` refuted (unknown without); 0.70 of the time on the integer
+  families;
+* but with the wrapper for every cvc5 call, Kind 2's search no longer proved the regression
+  property additivity `P1_true` with 1 user in 20 s (`test_cutoff.py`, twice; with Kind 2's
+  options, twice proved): its induction queries need CEGQI.
+
+`KINDHML_CVC5_OPTIONS=kind2` makes `cvc5-mbqi` cvc5 with Kind 2's options;
+`KINDHML_INT_WITNESS_SOLVERS` sets the solvers of those checks (default `cvc5-mbqi,z3`).
+
 ## 3. Assumptions of the paper (A1–A7) and how they are enforced
 
 * A1 (finite addresses/methods): `n_participants` user addresses from the command line

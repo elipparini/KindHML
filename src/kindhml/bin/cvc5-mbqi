@@ -1,0 +1,11 @@
+#!/bin/sh
+# cvc5 for Kind 2 with MBQI alone: Kind 2's options (--mbqi --full-saturate-quant ...) and
+# --no-cegqi --no-sygus-inst, the strategy of cvc5's portfolio for quantified nonlinear
+# integer arithmetic that also works in incremental mode (DESIGN.md, "Solvers").
+# kind2.py passes this script to Kind 2 with --cvc5_bin, and the cvc5 to run in
+# KINDHML_CVC5_REAL.
+: "${KINDHML_CVC5_REAL:?the cvc5 binary, set by kindhml.kind2}"
+case "$1" in
+    --version|--help|-V) exec "$KINDHML_CVC5_REAL" "$@" ;;
+esac
+exec "$KINDHML_CVC5_REAL" "$@" --no-cegqi --no-sygus-inst

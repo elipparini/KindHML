@@ -250,7 +250,7 @@ def kill_runs(pid: int, alive: bool) -> None:
             pass
 
 
-SOLVERS = ("z3", "cvc5")
+SOLVERS = ("z3", "cvc5", "cvc5-mbqi")
 
 
 def find_z3() -> str:
@@ -263,13 +263,46 @@ def find_z3() -> str:
     raise FileNotFoundError("z3 not found: set $Z3 or pip install z3-solver")
 
 
+def find_cvc5() -> Optional[str]:
+    """$CVC5, then cvc5 on the PATH; None if neither exists."""
+    for c in (os.environ.get("CVC5"), shutil.which("cvc5")):
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+# cvc5 with MBQI alone (solver "cvc5-mbqi"), the script passed to Kind 2 with --cvc5_bin
+CVC5_WRAPPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "cvc5-mbqi")
+
+
+def cvc5_mbqi() -> bool:
+    """Whether the solver "cvc5-mbqi" is cvc5 through `CVC5_WRAPPER`, which adds --no-cegqi
+    --no-sygus-inst to Kind 2's options: MBQI alone, the strategy of cvc5's portfolio for
+    quantified nonlinear integer arithmetic (the portfolio itself is off in incremental mode,
+    the only mode Kind 2 uses). It finds models that Kind 2's options do not, and loses proofs
+    that need CEGQI (DESIGN.md, "Solvers"). KINDHML_CVC5_OPTIONS=kind2: "cvc5-mbqi" is cvc5
+    with Kind 2's options, as "cvc5"."""
+    return os.environ.get("KINDHML_CVC5_OPTIONS", "mbqi") != "kind2" and find_cvc5() is not None
+
+
 def solver_args(solver: str) -> List[str]:
-    """Kind 2 options selecting the SMT solver (z3: `find_z3`)."""
-    if solver == "cvc5":
+    """Kind 2 options selecting the SMT solver (z3: `find_z3`; cvc5: Kind 2's options;
+    cvc5-mbqi: `cvc5_mbqi`)."""
+    if solver == "cvc5-mbqi" and cvc5_mbqi():
+        return ["--smt_solver", "cvc5", "--cvc5_bin", CVC5_WRAPPER]
+    if solver in ("cvc5", "cvc5-mbqi"):
         return ["--smt_solver", "cvc5"]
     if solver == "z3":
         return ["--smt_solver", "z3", "--z3_bin", find_z3()]
     raise ValueError(f"unknown solver {solver}")
+
+
+def solver_env(solver: str) -> Optional[dict]:
+    """The environment of Kind 2 for `solver`: with `CVC5_WRAPPER`, the cvc5 it runs; None
+    (this process's environment) otherwise."""
+    if solver == "cvc5-mbqi" and cvc5_mbqi():
+        return {**os.environ, "KINDHML_CVC5_REAL": find_cvc5()}
+    return None
 
 
 def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] = None,
@@ -292,7 +325,7 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
             [kind2] + output + default_args(kind2) + solver_args(solver) + limit
             + ["--output_dir", tmp]
             + smt_trace.kind2_args() + (extra_args or []) + [path],
-            timeout + 10 if timeout is not None else None)
+            timeout + 10 if timeout is not None else None, solver_env(solver))
         smt_trace.record_kind2(tmp, lustre, solver)
     if save_to:
         with open(save_to, "w") as f:
@@ -308,17 +341,18 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
     return out
 
 
-def run_command(cmd: List[str], timeout: Optional[float]) -> Tuple[str, str, bool, int]:
+def run_command(cmd: List[str], timeout: Optional[float],
+                env: Optional[dict] = None) -> Tuple[str, str, bool, int]:
     """Run a solver command (Kind 2, or z3 for `direct.py`) in a systemd scope named after
-    this process (so that `kill_runs` finds it), with the memory limit of `memory_limit_mb`.
-    It is killed, with every process it started, after `timeout` seconds (None: no limit).
-    Returns (stdout, stderr, whether it was killed at the timeout, processes killed by the
-    memory limit)."""
+    this process (so that `kill_runs` finds it), with the memory limit of `memory_limit_mb`,
+    in the environment `env` (None: this process's). It is killed, with every process it
+    started, after `timeout` seconds (None: no limit). Returns (stdout, stderr, whether it was
+    killed at the timeout, processes killed by the memory limit)."""
     scope = _memory_scope()
     unit = f"kindhml-{os.getpid()}-{uuid.uuid4().hex[:8]}" if scope else None
     prefix = scope + [f"--unit={unit}"] if scope else []
     proc = subprocess.Popen(prefix + cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, start_new_session=True,
+                            text=True, start_new_session=True, env=env,
                             preexec_fn=None if scope else _limit_memory)
     watcher = _Watcher(proc.pid)
     watcher.start()

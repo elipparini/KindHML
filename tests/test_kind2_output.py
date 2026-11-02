@@ -1,5 +1,8 @@
 """Reading Kind 2's JSON and plain-text outputs (no Kind 2 needed)."""
 
+import os
+import subprocess
+
 from kindhml import kind2
 from kindhml.kind2 import format_counterexample, parse_output, parse_text, parse_version
 
@@ -152,6 +155,34 @@ def test_version(monkeypatch):
     monkeypatch.setattr(kind2, "version", lambda path: (2, 3, 0))
     assert "--show_props" not in kind2.text_args("kind2")
     assert kind2.default_args("kind2") == []
+
+
+def test_cvc5_with_mbqi_alone(monkeypatch, tmp_path):
+    """The solver "cvc5-mbqi" is cvc5 through the wrapper, which adds --no-cegqi
+    --no-sygus-inst, unless KINDHML_CVC5_OPTIONS=kind2 or no cvc5 is found; "cvc5" keeps
+    Kind 2's options."""
+    cvc5 = tmp_path / "cvc5"
+    cvc5.write_text("#!/bin/sh\necho \"$@\"\n")
+    cvc5.chmod(0o755)
+    monkeypatch.setenv("CVC5", str(cvc5))
+    monkeypatch.delenv("KINDHML_CVC5_OPTIONS", raising=False)
+    assert kind2.solver_args("cvc5") == ["--smt_solver", "cvc5"]
+    assert kind2.solver_env("cvc5") is None
+    args = kind2.solver_args("cvc5-mbqi")
+    assert args == ["--smt_solver", "cvc5", "--cvc5_bin", kind2.CVC5_WRAPPER]
+    assert os.access(kind2.CVC5_WRAPPER, os.X_OK)
+    env = kind2.solver_env("cvc5-mbqi")
+    assert env["KINDHML_CVC5_REAL"] == str(cvc5)
+    out = subprocess.run([kind2.CVC5_WRAPPER, "--lang=smt2", "--incremental"], env=env,
+                         capture_output=True, text=True).stdout.split()
+    assert out == ["--lang=smt2", "--incremental", "--no-cegqi", "--no-sygus-inst"]
+    out = subprocess.run([kind2.CVC5_WRAPPER, "--version"], env=env,
+                         capture_output=True, text=True).stdout.split()
+    assert out == ["--version"]
+    assert kind2.solver_env("z3") is None
+    monkeypatch.setenv("KINDHML_CVC5_OPTIONS", "kind2")
+    assert kind2.solver_args("cvc5-mbqi") == ["--smt_solver", "cvc5"]
+    assert kind2.solver_env("cvc5-mbqi") is None
 
 
 def test_method_names_the_engine():

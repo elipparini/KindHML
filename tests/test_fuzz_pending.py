@@ -16,14 +16,14 @@ def test_an_undecided_candidate_is_refuted_in_a_later_round(monkeypatch):
     real = V._free_run
     seen, retried = set(), []
 
-    def free_run(lus, names, budget):
+    def free_run(lus, names, budget, solvers=V.FREE_SOLVERS):
         if "at a concrete state" not in lus:
             return "unknown", None, ""
         if lus not in seen:
             seen.add(lus)
             return "unknown", None, ""
         retried.append(lus)
-        return real(lus, names, budget)
+        return real(lus, names, budget, solvers)
 
     monkeypatch.setattr(V, "_free_run", free_run)
     monkeypatch.setattr(V, "kind2_search", lambda prop, *a, **k: V.Outcome(

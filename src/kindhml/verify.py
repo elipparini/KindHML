@@ -195,6 +195,11 @@ INVGEN_SECONDS = 2.0                # random testing that filters the generated 
 STUCK_AFTER = 16.0                  # Houdini drops generated candidates undecided after this
 LIGHT_ENGINES = ["--enable", "BMC", "--enable", "IND"]
 FREE_SOLVERS = ("z3", "cvc5")       # z3 first: nlsat for nonlinear real queries
+# the checks on free values of a property with an existential over integers: cvc5 with MBQI
+# alone (`kind2.cvc5_mbqi`), whose hard queries are satisfiable (DESIGN.md, "Solvers"); z3
+# timed out on 3 of 7 such checks of the AMM, cvc5-mbqi decided all 7 in 0.1 s (2026-11-02)
+INT_WITNESS_SOLVERS = tuple(os.environ.get("KINDHML_INT_WITNESS_SOLVERS",
+                                           "cvc5-mbqi,z3").split(","))
 # parameterized mode: the budget of each step confirming that a counterexample found extends
 # to more users (its final state, its check with other balances), even after the time limit
 CONFIRM_SECONDS = 10.0
@@ -902,6 +907,9 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     # an existential over numbers in positive position: Kind 2 leaves the checks on free
     # values undecided, z3 directly may decide them (`direct.py`)
     numeric = has_witness(prop.formula)
+    # the solvers of its checks on free values through Kind 2 (Houdini keeps FREE_SOLVERS)
+    free_solvers = (INT_WITNESS_SOLVERS if has_witness(prop.formula, types=(S.INT, S.UINT))
+                    else FREE_SOLVERS)
     direct_cases: Dict[tuple, Optional[_DirectCases]] = {}
     # whether the exact checks go to z3 directly: [tried, applicable]; tried false until the
     # first exact check, applicable false once one is outside the fragment
@@ -934,7 +942,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
             left = end - time.time()        # the encoding took some (12-15 s on lending)
             status, s = "unknown", ""
             if left > 1:
-                status, _, s = _free_run(lus, [prop.name], left)
+                status, _, s = _free_run(lus, [prop.name], left, free_solvers)
         return status, s
 
     def fuzz_found(txs: list, st, m: int, s: str) -> Outcome:
@@ -1064,7 +1072,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                             programs[u, i, split, w] = invs.checks_for(u).property_check(
                                 prop, premises[i], split, ws)
                         lus, names = programs[u, i, split, w]
-                        status, refuted, s = _free_run(lus, names, b)
+                        status, refuted, s = _free_run(lus, names, b, free_solvers)
                     if status == "valid":
                         return scoped(_valid(prop, "invariants", time.time() - start, s),
                                       max(invs.users, u), u)
@@ -1442,19 +1450,20 @@ def _valid(prop: S.Property, method: str, elapsed: float, solver: str = "") -> O
                    solver, method)
 
 
-def _free_run(lustre: str, names: List[str], budget: float):
+def _free_run(lustre: str, names: List[str], budget: float,
+              solvers: Tuple[str, ...] = FREE_SOLVERS):
     """A check on free values, with properties `names` (the cases of a property), with
-    FREE_SOLVERS (3/4 of the budget for the first, which usually decides or gives up fast,
-    the rest for the second). Returns ("valid" if all
+    `solvers` in turn (3/4 of the budget for the first, which usually decides or gives up
+    fast, the rest for the second). Returns ("valid" if all
     cases are valid, "invalid" if one is, else "unknown"; the refuted case; the solver)."""
     deadline = time.time() + budget
     valid: set = set()
     floor = _kind2_floor(lustre)
-    for i, s in enumerate(FREE_SOLVERS):
+    for i, s in enumerate(solvers):
         left = deadline - time.time()
         if left < floor:
             break
-        b = max(left * 3 / 4 if i < len(FREE_SOLVERS) - 1 else left, 1, floor)
+        b = max(left * 3 / 4 if i < len(solvers) - 1 else left, 1, floor)
         out = kind2.run(lustre, b, solver=s, extra_args=LIGHT_ENGINES)
         for p in out.properties:
             if p.name in names and p.status == "invalid":

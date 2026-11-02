@@ -101,7 +101,9 @@ def write_info(path: str, args):
         f"python: {sys.version.split()[0]}",
         f"kind2: {kind2_version}",
         f"z3: {command_output([z3, '--version'])} ({z3})",
-        f"cvc5: {command_output(['cvc5', '--version'])}",
+        f"cvc5: {command_output([kind2.find_cvc5() or 'cvc5', '--version'])}"
+        + f" ({kind2.find_cvc5()}; cvc5-mbqi: "
+        + ("MBQI alone, through the wrapper)" if kind2.cvc5_mbqi() else "Kind 2's options)"),
         "options: " + ", ".join(f"{k}={v}" for k, v in sorted(vars(args).items())),
     ]
     with open(path, "w") as f:
