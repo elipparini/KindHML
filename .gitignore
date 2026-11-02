@@ -11,3 +11,37 @@ out_lus/
 out_results/
 tmp/
 runs/
+
+# Local notes and the tools of the experiments on the server (they contain its address)
+EXPRESSIVENESS.md
+SERVER.md
+tools/server/
+
+# Results of ongoing work, kept locally: only finished results are committed
+results/cluster-20261021-2221.csv
+results/cluster-20261022-2304.csv
+results/cluster-20261024-0035-lending.csv
+results/long-20261026-kindhml.csv
+results/long-20261026-nia-instances.csv
+results/long-20261026-nia-solvers-oldversions.csv
+results/long-20261026-nia-solvers.csv
+results/nia-smt2-20261025.tar.zst
+results/nia-smt2-20261025/
+results/night-20261030/
+results/old/
+results/server-20261024-b0deb54.csv
+results/server-20261025-8afe4bf.csv
+results/server-20261025-p7.csv
+results/server-20261029-9ce3fc9.csv
+results/server-20261029-a62d9ae-kind2-3.0.0.csv
+results/server-20261029-a62d9ae-kind2-snapshot.csv
+results/server-20261029-fe61a8e-kind2-3.0.0.csv
+results/server-20261029-fe61a8e-kind2-snapshot.csv
+results/server-20261030-fe61a8e-int-cvc5-mbqi-cvc5-first.csv
+results/server-20261030-fe61a8e-int-cvc5-mbqi.csv
+results/server-20261030-fe61a8e-kind2-3.0.0-cvc5-mbqi.csv
+results/server-20261102-1ca4c9c-compare.txt
+results/server-20261102-1ca4c9c-cvc5mbqi-first.csv
+results/server-20261102-1ca4c9c-z3-first.csv
+results/server-20261102-int-witness-rows.csv
+results/smt-solvers-20261029/
