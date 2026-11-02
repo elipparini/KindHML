@@ -1375,6 +1375,11 @@ DESIGN.md, "Solvers".
     - slower refutations with `cvc5-mbqi` first: amm_int `Deposit_reversibility` 23 s against
       132 s (this row varied over 10-181 s in earlier runs) and `Swap_additivity` 11 s against
       23 s.
+- **Decided with the user:**
+  - keep the default order (`cvc5-mbqi`, then z3): no verdict lost in either order, and the
+    difference between the orders is small compared with the gain over `k2fix`;
+  - no time slice for `cvc5-mbqi` (it would be one more tuned constant);
+  - the file-based path for cvc5's portfolio or yicesQS is left for later.
 
 ## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
 
