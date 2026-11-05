@@ -24,6 +24,7 @@ from .cutoff import Cutoff, OutOfFragment, Scanner, idle_users
 from . import direct
 from . import witness
 from . import chains
+from . import extend
 from .fuzz import Fuzzer, has_witness, locations, weakened as fuzz_weakened
 from .invariants import Checks, describe_state, final_values, python_constant, state_values
 from .invgen import (candidates as invariant_templates, generate as generate_invariants,
@@ -111,6 +112,9 @@ DEFAULT_EXPAND = ("address", "method")
 
 
 LEMMAS = os.environ.get("KINDHML_LEMMAS", "1") != "0"
+# the completion of fuzzer states by the solver (`extend.py`); KINDHML_COMPLETION=0 turns it
+# off (comparisons)
+COMPLETION = os.environ.get("KINDHML_COMPLETION", "1") != "0"
 
 
 def lustre_for(program: S.Program, prop: S.Property, n_users: int, mode: str = DEFAULT_MODE,
@@ -945,12 +949,13 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                 status, _, s = _free_run(lus, [prop.name], left, free_solvers)
         return status, s
 
-    def fuzz_found(txs: list, st, m: int, s: str) -> Outcome:
-        """The outcome of a candidate of the fuzzer with m users refuted by its exact check."""
-        res = kind2.PropertyResult(prop.name, "invalid", len(txs), "fuzz", time.time() - start)
+    def fuzz_found(txs: list, st, m: int, s: str, method: str = "fuzz") -> Outcome:
+        """The outcome of a candidate of the fuzzer with m users refuted by its exact check
+        (method "extend": a state of the fuzzer completed by the solver, `extend.py`)."""
+        res = kind2.PropertyResult(prop.name, "invalid", len(txs), method, time.time() - start)
         named = {x for tx in txs for x in [tx.sender, tx.contract]
                  + [v for v in tx.args.values() if isinstance(v, str)]}
-        return scoped(Outcome(prop, res, [], s, "fuzz",
+        return scoped(Outcome(prop, res, [], s, method,
                               trace="; ".join(describe_tx(tx) for tx in txs)),
                       m, final=state_paths(st, invs.checks_for(m).enc.system), participants=named)
 
@@ -972,6 +977,11 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     # the candidates of the fuzzer whose exact check was undecided: [transactions, state, users,
     # literal and program, tries] (`fuzz_found`)
     pending: List[list] = []
+    # the completion of fuzzer states by the solver (`extend.py`): on nonlinear contracts (on
+    # linear ones, BMC towards the counterexample to induction finds the narrow states), on
+    # the sides without ghost sums; None for a property it does not apply to
+    complete_on = COMPLETION and nonlinear and not ghost
+    completions: Dict[int, Optional[extend.Completion]] = {}
     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
     while True:
         for task in ("invariants", "proof", "reach", "fuzz", "kind2"):
@@ -1125,12 +1135,19 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                     cand[4] += 1
                     status, s = exact(invs.checks_for(m), kept["literal"], left, kept)
                     if status == "invalid":
-                        o = fuzz_found(txs, st, m, s)
+                        o = fuzz_found(txs, st, m, s, kept.get("method", "fuzz"))
                         if o.status == "invalid":
                             return o
                         o.cti, last = last.cti, o
                     if status != "unknown" or cand[4] >= PENDING_TRIES:
                         pending.remove(cand)
+                # with a completion (`extend.py`), the searches get half of the time left,
+                # the completion the other half
+                if complete_on and users not in completions:
+                    completions[users] = extend.Completion.make(invs.checks_for(users), prop)
+                completing = complete_on and completions[users] is not None
+                end_searches = (deadline_fuzz if not completing
+                                else time.time() + (deadline_fuzz - time.time()) / 2)
                 # first towards the counterexample to induction, if any, then at random; the
                 # first search gets half of the time, the last all the time left. A search
                 # gives a few candidates at a time, so it is repeated until its time is over:
@@ -1145,10 +1162,10 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                             if guide else []) + [(users, lambda f, t: f.candidates(prop, t))]
                 for k, (m, search) in enumerate(searches):
                     checks = invs.checks_for(m)
-                    end = (deadline_fuzz if k == len(searches) - 1
-                           else time.time() + (deadline_fuzz - time.time()) / 2)
+                    end = (end_searches if k == len(searches) - 1
+                           else time.time() + (end_searches - time.time()) / 2)
                     for txs, st in _repeated(search, invs.fuzzer_for(m), end):
-                        left = deadline_fuzz - time.time()
+                        left = end_searches - time.time()
                         if left <= 1:
                             break
                         kept = {"literal": state_literal(st, checks.enc.system, checks.enc)}
@@ -1161,6 +1178,28 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                         elif status == "unknown" and "lustre" in kept \
                                 and len(pending) < PENDING_MAX:
                             pending.append([txs, st, m, kept, 0])
+                if completing:
+                    # states of the fuzzer completed by one transaction found by the solver;
+                    # the transaction is run by the interpreter, and the property checked
+                    # exactly at the new state
+                    comp, fuzzer = completions[users], invs.fuzzer_for(users)
+                    checks = invs.checks_for(users)
+                    for txs, st, tx in comp.candidates(fuzzer, deadline_fuzz):
+                        nxt = fuzzer.interp.step(st, tx)
+                        left = deadline_fuzz - time.time()
+                        if nxt.revert or left <= 1:
+                            continue
+                        kept = {"literal": state_literal(nxt, checks.enc.system, checks.enc),
+                                "method": "extend"}
+                        status, s = exact(checks, kept["literal"], left, kept)
+                        if status == "invalid":
+                            o = fuzz_found(txs + [tx], nxt, users, s, "extend")
+                            if o.status == "invalid":
+                                return o
+                            o.cti, last = last.cti, o
+                        elif status == "unknown" and "lustre" in kept \
+                                and len(pending) < PENDING_MAX:
+                            pending.append([txs + [tx], nxt, users, kept, 0])
             elif task == "reach":
                 lus = invs.checks_for(target_users).reach_check(target)
                 if b < _kind2_floor(lus):
