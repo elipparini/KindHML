@@ -141,9 +141,27 @@ class Inliner:
     def __init__(self, functions: Dict[str, L.Function]):
         self.functions = functions
 
-    def run(self, e: L.LExpr, env: Dict[str, L.LExpr]) -> L.LExpr:
+    def run(self, e: L.LExpr, env: Dict[str, L.LExpr], memo: Optional[dict] = None) -> L.LExpr:
+        """e with the variables of `env` substituted and the calls inlined. The results are
+        kept by the identity of the node and of the environment (`memo`, one per top-level
+        call; the entries keep both alive, so that their ids are not reused): the terms of
+        nested modalities share subterms, which were substituted again at each occurrence
+        (completion queries of lending_int_v2 Health_non_interference: 6.3 million calls, 18 of
+        the 19 s of an encoding, 2026-11-05). An environment is not changed while a call uses
+        it: the equations of an inlined function each get a copy of the local environment."""
+        if memo is None:
+            memo = {}
+        key = (id(e), id(env))
+        hit = memo.get(key)
+        if hit is not None and hit[0] is e and hit[1] is env:
+            return hit[2]
+        out = self._run(e, env, memo)
+        memo[key] = (e, env, out)
+        return out
+
+    def _run(self, e: L.LExpr, env: Dict[str, L.LExpr], memo: dict) -> L.LExpr:
         tick()
-        r = lambda x: self.run(x, env)
+        r = lambda x: self.run(x, env, memo)
         if isinstance(e, L.Var):
             return env.get(e.name, e)
         if isinstance(e, (L.Int, L.Real, L.Bool)):
@@ -168,7 +186,7 @@ class Inliner:
                 return L.Call(e.fn, tuple(args))
             local = {n: a for (n, _), a in zip(f.inputs, args)}
             for n, body in f.equations:
-                local[n] = self.run(body, local)
+                local[n] = self.run(body, dict(local), memo)
             return local[f.outputs[0][0]]
         if isinstance(e, L.Quant):
             return L.Quant(e.kind, e.vars, r(e.body))

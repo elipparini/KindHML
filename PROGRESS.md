@@ -1419,6 +1419,20 @@ DESIGN.md, "Solvers".
   `Liquidation_attack_any` (600 s): after the first failure, `kind2_search` starts no run on
   the 15-17 MB programs; the free checks of 2.7 MB double their budget at each failure (3, 6,
   12, 24 s); the fuzzer got 146 s instead of about 120 s; the row is still unknown.
+- **Where the time of a check on one state goes** (completion queries of the prototype of (c),
+  lending_int_v2 `Health_non_interference`, 200-400 kB programs): Kind 2 1.9-3.4 s per run;
+  z3 alone on all the scripts of the same run (`--smt_trace`) 0.15-0.56 s. So 80-95% of the
+  time is Kind 2's own work (process, front end, translation, engines at depth 0).
+- **Encoder** (profile of the same queries): two caches, the programs unchanged (same
+  hashes of the free-state check, the exact check and the transition system for the 67
+  properties of 8 files):
+  - the levels of a procedure (`FormulaEncoder._levels`), computed again for each of the
+    1899 modalities of a query (30 of 70 s);
+  - the substitution of `Inliner.run`, memoized by the identity of the node and of the
+    environment (shared subterms were substituted again at each occurrence; 6.3 million
+    calls, 18 of 19 s).
+  The encoding of those 67 x 3 programs: 122 s before, 95 s with the first cache, 44 s
+  with both. Tests on the server: all pass (5 shards).
 
 ## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
 

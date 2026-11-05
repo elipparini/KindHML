@@ -113,6 +113,10 @@ class FormulaEncoder:
         self.mode = mode
         self.expand, self.method_copies = parse_expand(expand)
         self.inliner = Inliner({f.name: f for f in enc.helpers()})
+        # (contract, procedure) -> (number of levels, the levels in terms of s, t and the
+        # earlier levels): they depend only on the procedure, and each modality used to
+        # compute them again (`_levels`)
+        self._levels_cache: Dict[Tuple[str, str], Tuple[int, Dict[int, L.LExpr]]] = {}
         self._fresh = 0
         self._copies = 1          # copies made by the expanded method quantifiers around
         # reduction by symmetry (`symmetric` of `prop`): the users bound by the reduced
@@ -389,9 +393,8 @@ class FormulaEncoder:
             procs = [contract.proc(e.proc.proc)] if e.proc.contract == contract.name else []
         else:
             procs = list(contract.procs)
-        t = L.Var("t")
-        bodies = [(p, desugar.procedure(self.system, contract, p)) for p in procs]
-        depth = max((Encoder.length(b) for _, b in bodies), default=0)
+        coded = [(p, self._levels(contract, p)) for p in procs]
+        depth = max((m for _, (m, _) in coded), default=0)
         levels, decls = [], []
         for _ in range(depth):
             lv, d = self.state_vars("l")
@@ -401,9 +404,7 @@ class FormulaEncoder:
         run = lambda x: self.inliner.run(x, env)
         revert = run(L.call("revert_state", L.Var("s")))
         relation = eq(nxt, revert)                     # default: Revert
-        for p, body in reversed(bodies):
-            m = Encoder.length(body)
-            terms = self.enc.levels(body, 0, t)
+        for p, (m, terms) in reversed(coded):
             steps = [eq(levels[k - 1], run(terms[k])) for k in range(1, m + 1)]
             reverted = L.disj([L.proj(levels[k - 1], REVERT) for k in range(1, m + 1)])
             result = ite(reverted, revert, levels[m - 1])
@@ -411,6 +412,18 @@ class FormulaEncoder:
             relation = ite(eq(L.proj(tx, "fx"), L.Var(proc_const(contract.name, p.name))),
                            branch, relation)
         return relation, decls
+
+    def _levels(self, contract: S.Contract, p: S.Procedure) -> Tuple[int, Dict[int, L.LExpr]]:
+        """The number of levels of a transaction calling p, and the levels S^0 in terms of s,
+        t and the earlier levels (`Encoder.levels`), computed once per procedure: on the
+        completion queries of lending_int_v2 Health_non_interference, the modalities
+        computed them again 1899 times, 30 of the 70 s of the encoding (2026-11-05)."""
+        key = (contract.name, p.name)
+        if key not in self._levels_cache:
+            body = desugar.procedure(self.system, contract, p)
+            self._levels_cache[key] = (Encoder.length(body),
+                                       self.enc.levels(body, 0, L.Var("t")))
+        return self._levels_cache[key]
 
     def trans_term(self, e: S.Modal, state: L.LExpr, tx: L.LExpr) -> L.LExpr:
         """χ(SVars^V, TVars^E): the next state as a term, obtained by substituting the levels
@@ -423,9 +436,7 @@ class FormulaEncoder:
         revert = self.inliner.run(L.call("revert_state", L.Var("s")), {"s": state})
         result = revert
         for p in reversed(procs):
-            body = desugar.procedure(self.system, contract, p)
-            m = Encoder.length(body)
-            terms = self.enc.levels(body, 0, L.Var("t"))
+            m, terms = self._levels(contract, p)
             env = {"s": state, "t": tx}
             for k in range(1, m + 1):
                 env[f"l{k}"] = self.inliner.run(terms[k], env)
