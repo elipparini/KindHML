@@ -507,11 +507,24 @@ the proposed one (verdict method `extend`). φ must not use `old`, `lastReverted
 `block.number` outside its modalities (`extend.applicable`): they would denote the added
 transaction.
 
-The states: those of random traces whose abstract key is new. The key of a state has, for
-each entry of the fields (and balances) read by φ, its sign (its value, for addresses and
-booleans) and whether it differs from its value just after the constructors. On lending_int_v4,
-the states with a debt, collateral and an accrued index come early, without naming these
-fields; without the keys (each new projection on these fields), no counterexample in 300 s.
+The states, in alternating batches:
+* if the free-state check gave a counterexample to induction s*, the closest state to s* of
+  each random trace walking towards it (as `Fuzzer._guided`), with a distance relative to the
+  values of s* (`extend.distance`: each difference divided by max(1, |value|)). The absolute
+  distance of `fuzz.distance` let one large value decide: s* of lending_int_v4
+  `Health_non_interference` has xr0 = 1 where the reachable states have 1000. Prototype, 2
+  users, 4 seeds: lending_int_v4 in 6-39 s with the relative distance, 97 s (1 seed) with the
+  absolute one, against 86 s, 111 s and twice nothing in 600 s with keys only;
+  lending_int_v2 in 13-148 s against 32-40 s. Only the properties whose free-state check
+  fails have an s* (not those with existentials over methods, checked through witnesses);
+* the states of random traces whose abstract key has fewer than `per_key` states taken. The
+  key of a state has, for each entry of the fields (and balances) read by φ, its sign (its
+  value, for addresses and booleans) and whether it differs from its value just after the
+  constructors. On lending_int_v4, the states with a debt, collateral and an accrued index
+  come early, without naming these fields; without the keys (each new projection on these
+  fields), no counterexample in 300 s. The keys are finitely many (302 on that row with 2
+  users, all seen in 600 s, after which the completion had no state left): `per_key` starts
+  at 1 and is doubled when a batch finds no state.
 Prototype, 2 users, the queries alone after the invariants (server): lending_int_v2
 `Health_non_interference` in 39 s, _v4 in 300 s (unknown after 1 h before), _v4
 `Liquidation_defence` in 155 s (unknown after 1 h), lending_simple_int `Liquidation_attack_any`
@@ -532,6 +545,18 @@ The lending_int rows refuted by the prototype stayed open: on lending_int_v2
 `Health_non_interference`, the completion got 14 s with 2 users (79 states), 14 s with 3,
 6.5 s with 4 and 4.5 s with 5, while Kind 2 on the transition system took 323 s without an
 answer (the prototype found the counterexample after 62 states, 39 s).
+
+So (2026-11-05, with the user), on nonlinear contracts, once a run of Kind 2 on the transition
+system has ended without a verdict, the task gets 1 budget per round and fuzzing (with the
+completion) KIND2_SHARE budgets, as for large programs and direct checks (`_rounds`,
+`kind2_failed`); a run that decides is not affected, and linear contracts are unchanged. In
+the last full run (2026-11-02) this task decided 5 rows (price-bet 3, vault 1,
+lending-simple-real 1). A completion on fewer sides (the smallest number of users only) was
+considered and rejected: a property may hold with few users and fail only with more.
+With this share and the states closest to s*, on the same 18 rows (600 s, 6 shards): 12
+refuted (8 before), none lost; lending_int_v2 and _v4 `Health_non_interference` in 199 s and
+196 s, lending_int_v4 `Liquidation_defence` in 554 s (all `extend`), lending_int_v3
+`Liquidation_defence` in 224 s (`fuzz`).
 
 Reproducibility (2026-10-29). The seeds are fixed (`Fuzzer` "kindhml", `chains.Search` "c1"),
 but one generator per fuzzer was shared by the guided search, the unguided search and the

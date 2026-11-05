@@ -1441,6 +1441,21 @@ DESIGN.md, "Solvers".
   lending-real), none wrong; the lending_int rows stay open: the completion got about 39 s of
   600 s over 4 sides, Kind 2 on the transition system 323 s (trace of lending_int_v2
   `Health_non_interference`).
+- **With the user: B and the states closest to the counterexample to induction.** C (the
+  completion on the smallest side only) rejected by the user: a property may hold with few
+  users and fail only with more. c9d4730: on nonlinear contracts, after a run of Kind 2 on
+  the transition system without a verdict, it gets 1 budget and fuzzing KIND2_SHARE.
+  e7ec21b: batches of states closest to s* (relative distance) alternate with batches by
+  key; a key admits `per_key` states, doubled when a batch finds none (302 keys on
+  lending_int_v4, all seen in 600 s). Prototype, 4 seeds: lending_int_v4 `Health_non_interference`
+  6-39 s against 86 s, 111 s and twice none with keys only.
+- **The 18 open lending rows again** (`open2`, 600 s, 6 shards, as `open1`): 12 refuted
+  (8 before), none lost, none wrong. New: lending_int_v2 and _v4 `Health_non_interference`
+  (199 s, 196 s, `extend`), lending_int_v4 `Liquidation_defence` (554 s, `extend`),
+  lending_int_v3 `Liquidation_defence` (224 s, `fuzz`); lending_real_v2
+  `Health_non_interference` 417 to 175 s. Open: lending_int `Liquidation_defence`,
+  lending_int_v2 `Liquidation_defence` (true: a case split), lending_real and _v3,
+  lending_simple_int_v2 and _v4 `Liquidation_attack_any`.
 
 ## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
 
