@@ -119,6 +119,9 @@ class Kind2Output:
     # when the limit expires before the analysis, e.g. while parsing a large program, and
     # reported as an error), or killed by `run` after the limit
     timed_out: bool = False
+    # Kind 2 stopped at its time limit before it had read the program ("Error opening input
+    # file ...: Lib.TimeoutWall"): the front end needs more time than the run had
+    front_end: bool = False
 
 
 MEMORY_LIMIT_GB = 3     # for Kind 2 and its solvers together (per process as a fallback)
@@ -311,6 +314,27 @@ def solver_env(solver: str) -> Optional[dict]:
     return None
 
 
+# program (its hash) -> the largest time limit of a run that ended in the front end (`run`)
+_FRONT_END_BUDGETS: dict = {}
+
+
+def front_end_floor(lustre: str) -> float:
+    """The least time limit worth a run of Kind 2 on `lustre`, learned from its earlier runs:
+    twice the largest limit of a run that ended in the front end (0 if none). A run with that
+    limit or less ends there too, and the budgets of the rounds double. On the transition
+    system of lending_simple_int_v2 Liquidation_attack_any (16.9 MB), the front end of Kind 2
+    v3.0.0 took 120-240 s, and the runs of 3-64 s of a 600 s check gave nothing
+    (2026-11-05)."""
+    return 2 * _FRONT_END_BUDGETS.get(hash(lustre), 0.0)
+
+
+def note_front_end(lustre: str, timeout: Optional[float], out: "Kind2Output") -> None:
+    """Records the time limit of a run on `lustre` whose output `out` ended in the front end."""
+    if out.front_end and timeout is not None:
+        key = hash(lustre)
+        _FRONT_END_BUDGETS[key] = max(_FRONT_END_BUDGETS.get(key, 0.0), timeout)
+
+
 def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] = None,
         kind2: Optional[str] = None, save_to: Optional[str] = None,
         solver: str = "z3", cex: bool = False) -> Kind2Output:
@@ -337,6 +361,7 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
         with open(save_to, "w") as f:
             f.write(raw)
     out = parse_output(raw, err) if cex else parse_text(raw, err)
+    note_front_end(lustre, timeout, out)
     if killed:
         out.errors.append("Kind 2 did not stop in time and was killed")
         out.timed_out = True
@@ -417,7 +442,7 @@ def parse_output(raw: str, stderr: str = "") -> Kind2Output:
             props[o["name"]] = _property(o)
         if kind == "log" and _TIMEOUT.search(str(o.get("value"))):
             timed_out = True
-    return Kind2Output(list(props.values()), errors, raw, timed_out=timed_out)
+    return _front_end(Kind2Output(list(props.values()), errors, raw, timed_out=timed_out))
 
 
 # Engine names of the plain-text output, abbreviated as in the JSON output.
@@ -430,6 +455,19 @@ _SUMMARY = re.compile(r"(\S+): (valid|invalid|true up to|unknown)"
                       r"(?: \(k=(\d+)\)| after (\d+) steps| (\d+) steps)?$")
 # Kind 2's timeout: its message, and its exception when the limit expires before the analysis
 _TIMEOUT = re.compile(r"Wallclock timeout|Lib\.TimeoutWall")
+# the limit expired in the front end: Kind 2 reports its timeout exception as an error in
+# opening the input file (v2.3 and v3.0.0)
+_FRONT_END = re.compile(r"Error opening input file[^\n]*\s*Lib\.TimeoutWall")
+
+
+def _front_end(out: Kind2Output) -> Kind2Output:
+    """`out`, with `front_end` set, and its error replaced by a readable one, if the time
+    limit expired in the front end."""
+    if _FRONT_END.search(out.raw) or any(_FRONT_END.search(e) for e in out.errors):
+        out.front_end = out.timed_out = True
+        out.errors = [e for e in out.errors if "Error opening input file" not in e]
+        out.errors.append("Kind 2 did not finish reading the program within its time limit")
+    return out
 
 
 def parse_text(raw: str, stderr: str = "") -> Kind2Output:
@@ -461,7 +499,7 @@ def parse_text(raw: str, stderr: str = "") -> Kind2Output:
             errors.append(line.split("> ", 1)[1])
         elif line.lower().startswith("summary of properties:"):
             summary = True
-    return Kind2Output(list(props.values()), errors, raw, timed_out=timed_out)
+    return _front_end(Kind2Output(list(props.values()), errors, raw, timed_out=timed_out))
 
 
 def _property(o: dict) -> PropertyResult:

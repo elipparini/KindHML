@@ -1412,6 +1412,13 @@ DESIGN.md, "Solvers".
 - **Plan agreed with the user:** (a) no Kind 2 run below a floor learned from runs that ended
   in the front end; (c) completion of fuzzer states by the solver (one free transaction from
   a reachable state); (b) a larger share for the fuzzer, only as a final regression run.
+- **(a) done:** `kind2.py` recognizes a run that ended in the front end (`front_end`, with a
+  readable error) and records its time limit per program; `kind2.front_end_floor` (twice the
+  largest such limit) is part of `_kind2_floor`, now also applied by `kind2_search` and the
+  "reach" run. Tests on the server: all pass (4 shards). Trace of lending_simple_int_v2
+  `Liquidation_attack_any` (600 s): after the first failure, `kind2_search` starts no run on
+  the 15-17 MB programs; the free checks of 2.7 MB double their budget at each failure (3, 6,
+  12, 24 s); the fuzzer got 146 s instead of about 120 s; the row is still unknown.
 
 ## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
 

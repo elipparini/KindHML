@@ -235,10 +235,30 @@ def test_timeout_before_the_analysis():
     raw = ('[\n{\n  "objectType" : "log",\n  "level" : "fatal",\n  "source" : "parse",\n'
            '  "value" : "Error opening input file \'/tmp/task.lus\':\\nLib.TimeoutWall"\n}\n]\n')
     out = parse_output(raw)
-    assert out.properties == [] and out.timed_out
+    assert out.properties == [] and out.timed_out and out.front_end
+    assert out.errors == ["Kind 2 did not finish reading the program within its time limit"]
+    assert parse_text(text).front_end
     assert parse_text(TEXT).timed_out                  # the timeout after the summary
+    assert not parse_text(TEXT).front_end and not parse_output(RAW).front_end
     assert not parse_text(TEXT.replace("<Timeout> Wallclock timeout.\n", "")).timed_out
     assert not parse_output(RAW).timed_out
+
+
+def test_front_end_floor():
+    """A run that ended in the front end with limit t: no run of the same program with a
+    limit below 2 t (the floor), and none of another program is affected."""
+    from kindhml import kind2
+    text = (" kind2 v3.0.0\n\n<Error> Error opening input file '/tmp/task.lus':\n"
+            "        Lib.TimeoutWall\n")
+    program, other = "node main () returns (); -- front end", "node main () returns ();"
+    assert kind2.front_end_floor(program) == 0
+    kind2.note_front_end(program, 8.0, parse_text(text))
+    kind2.note_front_end(program, 3.0, parse_text(text))
+    kind2.note_front_end(program, 30.0, parse_text(TEXT))     # not in the front end
+    assert kind2.front_end_floor(program) == 16.0
+    assert kind2.front_end_floor(other) == 0
+    from kindhml.verify import _kind2_floor
+    assert _kind2_floor(program) == 16.0
 
 
 def test_text_output_of_a_killed_run():

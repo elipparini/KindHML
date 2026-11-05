@@ -1163,6 +1163,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                             pending.append([txs, st, m, kept, 0])
             elif task == "reach":
                 lus = invs.checks_for(target_users).reach_check(target)
+                if b < _kind2_floor(lus):
+                    continue                    # too short to get past the front end
                 # a property that needs idle users needs the whole final state (the target may
                 # leave out values, e.g. balances that the property does not read)
                 out = kind2.run(lus, b, solver="z3", extra_args=["--enable", "BMC"],
@@ -1391,7 +1393,8 @@ def kind2_search(prop: S.Property, lustre: str, timeout: Optional[float],
                  cex: bool = False) -> Outcome:
     """Kind 2 on the transition system. Solver "auto" runs Kind 2 with AUTO_ORDER[0] for at
     most half of the time and, if that gives no verdict, with AUTO_ORDER[1] for the rest
-    (without a time limit, only AUTO_ORDER[0])."""
+    (without a time limit, only AUTO_ORDER[0]). A run shorter than `_kind2_floor` is not
+    started (its solver gets the time instead, or none)."""
     solvers = list(AUTO_ORDER) if solver == "auto" else [solver]
     if timeout is None:
         solvers = solvers[:1]
@@ -1402,7 +1405,10 @@ def kind2_search(prop: S.Property, lustre: str, timeout: Optional[float],
             budget = None
         else:
             left = deadline - time.time()
-            budget = max(left / 2 if i < len(solvers) - 1 else left, 1)
+            floor = _kind2_floor(lustre)
+            if left < floor:
+                break
+            budget = max(left / 2 if i < len(solvers) - 1 else left, 1, floor)
         out = kind2.run(lustre, budget, extra_args=extra_args, solver=s, cex=cex)
         killed = killed or out.memory_killed
         result = next((p for p in out.properties if p.name == prop.name), None)
@@ -1413,6 +1419,8 @@ def kind2_search(prop: S.Property, lustre: str, timeout: Optional[float],
         outcome = Outcome(prop, result, out.errors, s, kind2_method(result))
         if outcome.status in ("valid", "invalid"):
             break
+    if outcome is None:
+        outcome = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [], "", "kind2")
     outcome.memory_killed = killed
     return outcome
 
@@ -1482,8 +1490,9 @@ def _kind2_floor(lustre: str) -> float:
     """The least time worth a run of Kind 2 on `lustre`: on programs of 3.5-8.5 MB with
     existentials over methods (lending, 2026-10-25), it needed at least 1.5 s per MB for any
     answer, and its runs of 1-3 s (the second solver of `_free_run` in the first rounds) gave
-    none."""
-    return len(lustre) / 1e6 * KIND2_SECONDS_PER_MB
+    none. Also at least the floor learned from earlier runs that ended in the front end
+    (`kind2.front_end_floor`)."""
+    return max(len(lustre) / 1e6 * KIND2_SECONDS_PER_MB, kind2.front_end_floor(lustre))
 
 
 def _repeated(search: Callable, fuzzer: Fuzzer, end: float):
