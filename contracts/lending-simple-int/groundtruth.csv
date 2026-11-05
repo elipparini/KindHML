@@ -10,3 +10,36 @@ lending_simple_int.sol,Net_worth_preserved,true,
 lending_simple_int.sol,Deposit_reversibility,true,
 lending_simple_int.sol,Borrow_safe,true,
 lending_simple_int.sol,Liquidation_only_unhealthy,true,
+lending_simple_int_v2.sol,Nonnegative,true,
+lending_simple_int_v2.sol,Health_non_interference,false,anyone can lower the price of the collateral.
+lending_simple_int_v2.sol,Liquidation_defence,true,
+lending_simple_int_v2.sol,Liquidation_defence_exists,true,repay the whole debt.
+lending_simple_int_v2.sol,Liquidation_attack,false,"if debt[b] < 2 * c1[b], setPrice(debt[b] / (2 * c1[b])) reverts, and b stays healthy."
+lending_simple_int_v2.sol,Liquidation_attack_exists,false,"prices are integers: if 4 * c1[b] >= 5 * debt[b], b is healthy at every price."
+lending_simple_int_v2.sol,Liquidation_attack_any,false,"prices are integers: if a holds no T1 and 4 * c1[u] >= 5 * debt[u] for every u, no call of a increases its net worth."
+lending_simple_int_v2.sol,Net_worth_preserved,true,
+lending_simple_int_v2.sol,Deposit_reversibility,true,
+lending_simple_int_v2.sol,Borrow_safe,true,
+lending_simple_int_v2.sol,Liquidation_only_unhealthy,true,
+lending_simple_int_v3.sol,Nonnegative,true,
+lending_simple_int_v3.sol,Health_non_interference,true,
+lending_simple_int_v3.sol,Liquidation_defence,true,
+lending_simple_int_v3.sol,Liquidation_defence_exists,true,repay the whole debt.
+lending_simple_int_v3.sol,Liquidation_attack,false,only the oracle sets the price.
+lending_simple_int_v3.sol,Liquidation_attack_exists,false,"only the oracle sets the price, and b stays healthy."
+lending_simple_int_v3.sol,Liquidation_attack_any,false,"every user can be healthy, and then no call of a increases its net worth."
+lending_simple_int_v3.sol,Net_worth_preserved,true,
+lending_simple_int_v3.sol,Deposit_reversibility,true,
+lending_simple_int_v3.sol,Borrow_safe,false,
+lending_simple_int_v3.sol,Liquidation_only_unhealthy,true,
+lending_simple_int_v4.sol,Nonnegative,true,
+lending_simple_int_v4.sol,Health_non_interference,true,
+lending_simple_int_v4.sol,Liquidation_defence,true,
+lending_simple_int_v4.sol,Liquidation_defence_exists,true,repay the whole debt.
+lending_simple_int_v4.sol,Liquidation_attack,false,"if debt[b] < 4, the liquidation of debt[b] / 4 == 0 reverts."
+lending_simple_int_v4.sol,Liquidation_attack_exists,false,"with w0[a] == 1, the liquidation seizes 11 / (10 * p1) tokens, worth at most 1."
+lending_simple_int_v4.sol,Liquidation_attack_any,false,"with w0[a] == 1, p1 == 1 and no T1, each liquidation by a gains 0, and a cannot borrow."
+lending_simple_int_v4.sol,Net_worth_preserved,true,
+lending_simple_int_v4.sol,Deposit_reversibility,true,
+lending_simple_int_v4.sol,Borrow_safe,true,
+lending_simple_int_v4.sol,Liquidation_only_unhealthy,false,
