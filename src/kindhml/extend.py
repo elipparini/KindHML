@@ -22,11 +22,15 @@ it from s, and the caller checks phi exactly at the new state (the exact check o
 fuzzer); only a confirmed state is a counterexample, reached by the transactions of s and
 the proposed one.
 
-The states (`Completion.candidates`): those of random traces whose abstract key is new. The
-key of a state has, for each entry of the fields (and balances) read by phi, its sign (its
-value, for addresses and booleans) and whether it differs from its value just after the
-constructors: on lending_int_v4, states with a debt, collateral and an accrued index come
-early, without naming these fields."""
+The states (`Completion.candidates`), in alternating batches:
+* if the free-state check gave a counterexample to induction s*, the closest state to s* of
+  each random trace walking towards it, with a distance relative to the values of s*
+  (`distance`);
+* the states of random traces whose abstract key has fewer than `per_key` states taken (1 at
+  first, doubled when no state is found). The key of a state has, for each entry of the
+  fields (and balances) read by phi, its sign (its value, for addresses and booleans) and
+  whether it differs from its value just after the constructors: on lending_int_v4, states
+  with a debt, collateral and an accrued index come early, without naming these fields."""
 from __future__ import annotations
 
 import time
@@ -43,6 +47,7 @@ from . import syntax as S
 from .concrete import state_literal
 from .encode_trans import (BLOCKS, REVERT, ST, TX, addr_const, base_type, default_value,
                            param_var, proc_const)
+from .fuzz import GUIDED_RANDOM, GUIDED_TRIES, MAX_STEPS, _key, _number, locations
 from .lustre_subst import eq
 from .model import System
 from .reference import State, Tx
@@ -70,6 +75,24 @@ def applicable(e: S.Expr) -> bool:
                     return False
         return True
     return visit(e, True)
+
+
+def distance(st: State, target: Dict[tuple, object]) -> float:
+    """The distance from a state to the target values (by location, `fuzz.locations`): the
+    sum of the differences of the numbers, each relative to max(1, |target value|), plus 1 for
+    each other value that differs. `fuzz.distance` sums the absolute differences, so that one
+    large value decides: the counterexample to induction of lending_int_v4
+    Health_non_interference has xr0 = 1 where the reachable states have 1000, and the closest
+    states then ignored the debts (2026-11-05: counterexample after 97 s with that distance,
+    after 6-39 s in 4 seeds with this one)."""
+    have, d = locations(st), 0.0
+    for loc, v in target.items():
+        x = have.get(loc)
+        if _number(x) and _number(v):
+            d += abs(x - v) / max(1, abs(v))
+        elif x != v:
+            d += 1
+    return d
 
 
 def _reads(e: S.Expr) -> Tuple[List[Tuple[str, str]], bool]:
@@ -174,7 +197,13 @@ class Completion:
                                                {n[2:]: v for n, v in variables.items()},
                                                z3.And(step, done, not_phi)))
         self.read, self.balance = _reads(prop.formula)
-        self.keys: set = set()
+        # the states taken, by key: at most `per_key` each, doubled when a batch finds no
+        # state below it (the keys are finitely many: on lending_int_v4, 302 with 2 users,
+        # all seen within 600 s)
+        self.keys: Dict[tuple, int] = {}
+        self.per_key = 1
+        self.taken: set = set()             # the states taken (`fuzz._key`)
+        self.turn = 0                       # alternation of the sources (`candidates`)
         # states to complete, each with the index of its next query
         self.queue: Deque[Tuple[List[Tx], State, int]] = deque()
 
@@ -233,7 +262,8 @@ class Completion:
         return tuple(out)
 
     def _new_states(self, fuzzer, stream: str, seconds: float) -> List[Tuple[List[Tx], State]]:
-        """The states of random traces of `stream` whose key is new, within `seconds`."""
+        """The states of random traces of `stream` whose key has fewer than `per_key` states
+        taken, within `seconds`; if there is none, `per_key` is doubled."""
         out = []
         end = time.time() + seconds
         while time.time() < end:
@@ -245,24 +275,85 @@ class Completion:
                     continue
                 st0 = st0 or st
                 k = self.key(st, st0)
-                if k not in self.keys:
-                    self.keys.add(k)
+                if self.keys.get(k, 0) < self.per_key and _key(st) not in self.taken:
+                    self.keys[k] = self.keys.get(k, 0) + 1
+                    self.taken.add(_key(st))
                     out.append((txs, st))
+        if not out:
+            self.per_key *= 2
         return out
+
+    def _closest_states(self, fuzzer, stream: str, target: Dict[tuple, object],
+                        seconds: float) -> List[Tuple[List[Tx], State]]:
+        """The closest state to `target` (`distance`) of each trace of `stream` walking
+        towards it, as `Fuzzer._guided` does, within `seconds`, if not taken before."""
+        methods = [(c, p) for c, p in self.system.methods if p.name != S.CONSTRUCTOR]
+        out = []
+        end = time.time() + seconds
+        while methods and time.time() < end:
+            start = fuzzer.constructed(stream)
+            if start is None:
+                continue
+            txs, st = start
+            best = (distance(st, target), txs, st)
+            for _ in range(MAX_STEPS):
+                if time.time() >= end:
+                    break
+                steps = []
+                for _ in range(GUIDED_TRIES):
+                    tx = fuzzer.transaction(*fuzzer.rnd.choice(methods), st)
+                    nxt = fuzzer.interp.step(st, tx)
+                    if not nxt.revert:
+                        steps.append((distance(nxt, target), tx, nxt))
+                if not steps:
+                    break
+                d, tx, st = (fuzzer.rnd.choice(steps) if fuzzer.rnd.random() < GUIDED_RANDOM
+                             else min(steps, key=lambda s: s[0]))
+                txs = txs + [tx]
+                if d < best[0]:
+                    best = (d, txs, st)
+            if _key(best[2]) not in self.taken:
+                self.taken.add(_key(best[2]))
+                out.append((best[1], best[2]))
+        return out
+
+    def _target(self, guide: Optional[Dict[tuple, object]]) -> Optional[Dict[tuple, object]]:
+        """The values of a counterexample to induction (`fuzz.locations`) at the addresses of
+        this system (it may have been found with more users)."""
+        if not guide:
+            return None
+        addresses = set(self.system.addresses)
+        out = {loc: v for loc, v in guide.items()
+               if (loc[0] is not None or loc[1] in addresses)
+               and (len(loc) < 3 or loc[2] in addresses)
+               and (not isinstance(v, str) or v in addresses)}
+        return out or None
 
     # ------------------------------------------------------------------ queries
 
-    def candidates(self, fuzzer, deadline: float) -> Iterator[Tuple[List[Tx], State, Tx]]:
+    def candidates(self, fuzzer, deadline: float,
+                   guide: Optional[Dict[tuple, object]] = None
+                   ) -> Iterator[Tuple[List[Tx], State, Tx]]:
         """Transactions proposed by the queries (prefix, state, transaction), until
-        `deadline`; a state not finished goes on at the next call."""
+        `deadline`; a state not finished goes on at the next call. With a counterexample to
+        induction (`guide`, by location), batches of states closest to it alternate with
+        batches chosen by key: on lending_int_v4 Health_non_interference, the closest states
+        led to a counterexample in 6-39 s in 4 seeds, the keys in 86 s, 111 s and twice not
+        in 600 s; on lending_int_v2, 13-148 s against 32-40 s (2026-11-05). The keys keep
+        the search going where the counterexample to induction is misleading."""
         stream = f"complete:{self.prop.name}"
+        target = self._target(guide)
         while time.time() < deadline - 0.5:
             if not self.queue:
-                batch = self._new_states(fuzzer, stream,
-                                         min(SELECT_SECONDS, (deadline - time.time()) / 4))
+                seconds = min(SELECT_SECONDS, (deadline - time.time()) / 4)
+                self.turn += 1
+                batch = (self._closest_states(fuzzer, f"{stream}:guided", target, seconds)
+                         if target and self.turn % 2 else [])
+                if not batch:
+                    batch = self._new_states(fuzzer, stream, seconds)
                 self.queue.extend((txs, st, 0) for txs, st in batch)
                 if not self.queue:
-                    return
+                    continue                # per_key was doubled, or the time is over
             txs, st, i = self.queue.popleft()
             literal = self.tr.run(state_literal(st, self.system, self.checks.enc), D._Env({}))
             pairs: List[Tuple[z3.ExprRef, z3.ExprRef]] = []

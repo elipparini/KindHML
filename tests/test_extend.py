@@ -63,8 +63,33 @@ def test_states_with_a_known_key_are_not_completed_again():
     fuzzer = Fuzzer(comp.system, "t1")
     first = comp._new_states(fuzzer, "s", 1)
     again = comp._new_states(fuzzer, "s", 1)
-    assert first                        # each state returned has a key not seen before
-    assert len(comp.keys) == len(first) + len(again)
+    assert first                        # each state returned is counted under its key
+    assert sum(comp.keys.values()) == len(first) + len(again)
+    assert all(n <= comp.per_key for n in comp.keys.values())
+
+
+def test_the_keys_saturate_and_admit_more_states():
+    """The keys are finitely many: when a batch finds no state, `per_key` is doubled."""
+    comp, _ = _completion("Scale_grows")
+    fuzzer = Fuzzer(comp.system, "t1")
+    for _ in range(20):
+        if comp.per_key > 1:
+            break
+        comp._new_states(fuzzer, "s", 0.5)
+    assert comp.per_key > 1
+
+
+def test_closest_states_to_a_target():
+    """With a target (as from a counterexample to induction), the walk keeps the closest
+    state of each trace; the relative distance is 0 at the target."""
+    comp, _ = _completion("Never_target")
+    fuzzer = Fuzzer(comp.system, "t1")
+    target = comp._target({("C", "x"): 0, ("C", "k"): 4, (None, "u9"): 3})
+    assert (None, "u9") not in target           # not an address of this system
+    states = comp._closest_states(fuzzer, "g", target, 1)
+    assert states
+    st = states[0][1]
+    assert extend.distance(st, {("C", "k"): st.fields[("C", "k")]}) == 0
 
 
 @pytest.mark.kind2

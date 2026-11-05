@@ -1192,7 +1192,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                     # exactly at the new state
                     comp, fuzzer = completions[users], invs.fuzzer_for(users)
                     checks = invs.checks_for(users)
-                    for txs, st, tx in comp.candidates(fuzzer, deadline_fuzz):
+                    for txs, st, tx in comp.candidates(fuzzer, deadline_fuzz, guide):
                         nxt = fuzzer.interp.step(st, tx)
                         left = deadline_fuzz - time.time()
                         if nxt.revert or left <= 1:
