@@ -477,6 +477,62 @@ formula φ⁻ in which each such existential in positive position is replaced by
 false: every candidate of φ is a candidate of φ⁻. A candidate is still confirmed by the exact
 check of φ, so φ⁻ only adds candidates, which cost exact checks.
 
+**Completion of fuzzer states** (2026-11-05, `extend.py`). Random transactions reach deep
+states cheaply but miss narrow ones: lending_int_v2 `Health_non_interference` fails in 1
+random state out of about 6,800 (a borrow must leave the borrower healthy at the current
+price and unhealthy at price 1), lending_int_v4 in none of 427,000 (a borrower exactly at the
+health threshold after an accrual). BMC from Init does not reach them through the nonlinear
+transitions. The solver finds narrow values well when the arithmetic is simple, and the
+arithmetic becomes simple at a concrete state: the fields that multiply or divide (an
+interest index, a price) are then numbers. So, from a reachable state s of the fuzzer, the
+solver looks for one more transaction after which φ is false. For each procedure g, sender
+u (a user) and choice of the address arguments of g, the query is
+
+    s2 = trans(s, tx(u, g, x)) ∧ ¬s2.revert ∧ ¬φ(s2)
+
+over the next state s2 and the other arguments x (numbers, booleans, the value of a payable
+procedure, the block increase). φ(s2) is the property on a free state (`FormulaEncoder.prop`),
+encoded once; trans is the transition term of g (`trans_term`). A first form, with the next
+state substituted into φ, took 5-20 s to encode per procedure: φ's own modalities were
+expanded into 1899 instances, each with a copy of the next state. For each state of the
+fuzzer, its values are substituted for s and the formula is simplified; the queries go to z3
+through its Python API, in this process: through Kind 2, each took 2-3 s, of which z3 used
+0.15-0.5 s (`--smt_trace`); here 14-50 ms.
+
+The translation (`direct.py`, with the values of enumerated types as integers, division as in
+SMT-LIB) is not exact, and need not be: a model only proposes a transaction. The reference
+interpreter runs it from s, and φ is checked exactly at the new state by the exact check of
+the fuzzer; only a confirmed state is a counterexample, reached by the transactions of s and
+the proposed one (verdict method `extend`). φ must not use `old`, `lastReverted` or
+`block.number` outside its modalities (`extend.applicable`): they would denote the added
+transaction.
+
+The states: those of random traces whose abstract key is new. The key of a state has, for
+each entry of the fields (and balances) read by φ, its sign (its value, for addresses and
+booleans) and whether it differs from its value just after the constructors. On lending_int_v4,
+the states with a debt, collateral and an accrued index come early, without naming these
+fields; without the keys (each new projection on these fields), no counterexample in 300 s.
+Prototype, 2 users, the queries alone after the invariants (server): lending_int_v2
+`Health_non_interference` in 39 s, _v4 in 300 s (unknown after 1 h before), _v4
+`Liquidation_defence` in 155 s (unknown after 1 h), lending_simple_int `Liquidation_attack_any`
+in 416 s (unknown at 600 s in the runs of 2026-11-02); no model for the true rows tried.
+
+In the rounds (`_rounds`, task "fuzz"): on nonlinear contracts (on linear ones, BMC towards
+the counterexample to induction finds the narrow states), on the sides without ghost sums,
+the searches of the fuzzer get half of the time of the task and the completion the other
+half; a state not finished goes on in the next round. QUERY_SECONDS = 2 s per query (11 of
+about 60,000 were undecided in 2 s); SELECT_SECONDS = 2 s for a batch of random traces (the
+fuzzer makes thousands of states per second, and a state costs about 0.5 s of queries). These
+values are provisional. KINDHML_COMPLETION=0 turns the completion off.
+
+In the tool (2026-11-05, the 18 lending rows open at 600 s; server, 600 s, 6 shards): 8
+refuted, all as the ground truth, 5 of them by `extend` (lending_real, _v2, _v3, _v4
+`Exchange_rate_monotone` in 194-213 s; lending_real_v2 `Health_non_interference` in 417 s).
+The lending_int rows refuted by the prototype stayed open: on lending_int_v2
+`Health_non_interference`, the completion got 14 s with 2 users (79 states), 14 s with 3,
+6.5 s with 4 and 4.5 s with 5, while Kind 2 on the transition system took 323 s without an
+answer (the prototype found the counterexample after 62 states, 39 s).
+
 Reproducibility (2026-10-29). The seeds are fixed (`Fuzzer` "kindhml", `chains.Search` "c1"),
 but one generator per fuzzer was shared by the guided search, the unguided search and the
 samples of the bounded evaluation, each cut by time budgets and alarms: after the first cut,
@@ -516,7 +572,8 @@ product of two variables, a division by a variable) the rounds go on.
    and each has its own solver, which exceeds the memory on nonlinear problems).
 
 Verdicts say how they were found: `inductive` (an invariant proved by Houdini),
-`invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `kind2-<ENGINE>` (task 5, with the
+`invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `extend` (task 4, a state of the
+fuzzer completed by the solver), `kind2-<ENGINE>` (task 5, with the
 engine of Kind 2 that found the verdict, in Kind 2's abbreviation: `kind2-BMC`, `kind2-IND`,
 `kind2-IND2`, `kind2-IC3IA`, `kind2-IC3QE`; `kind2` if Kind 2 does not name it).
 

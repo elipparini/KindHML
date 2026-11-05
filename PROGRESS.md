@@ -1433,6 +1433,14 @@ DESIGN.md, "Solvers".
     calls, 18 of 19 s).
   The encoding of those 67 x 3 programs: 122 s before, 95 s with the first cache, 44 s
   with both. Tests on the server: all pass (5 shards).
+- **(c) Completion of fuzzer states** (cb5b8ea, `extend.py`, DESIGN.md Sect. 6): z3 in this
+  process, the next state as variables, φ encoded once on a free state, the states chosen by
+  an abstract key. Prototype alone (2 users): lending_int_v2 `Health_non_interference` 39 s,
+  _v4 300 s, _v4 `Liquidation_defence` 155 s, lending_simple_int `Liquidation_attack_any`
+  416 s. In the tool, on the 18 lending rows open at 600 s: 8 refuted (5 by `extend`, all
+  lending-real), none wrong; the lending_int rows stay open: the completion got about 39 s of
+  600 s over 4 sides, Kind 2 on the transition system 323 s (trace of lending_int_v2
+  `Health_non_interference`).
 
 ## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
 
