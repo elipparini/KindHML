@@ -982,6 +982,9 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     # the sides without ghost sums; None for a property it does not apply to
     complete_on = COMPLETION and nonlinear and not ghost
     completions: Dict[int, Optional[extend.Completion]] = {}
+    # the last run of Kind 2 on the transition system ended without a verdict (its share
+    # then goes to fuzzing, on nonlinear contracts)
+    kind2_failed = False
     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
     while True:
         for task in ("invariants", "proof", "reach", "fuzz", "kind2"):
@@ -1015,14 +1018,19 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
             # fuzzer got 3-12 s per round; the rows Kind 2 decided in our runs had programs
             # of at most 0.42 MB (2026-10-25)
             large = k2_lustre is not None and len(k2_lustre) > KIND2_LARGE
-            if task == "fuzz" and (direct_on or large):
+            # and so too, on nonlinear contracts, once a run of Kind 2 on the transition
+            # system has ended without a verdict: on lending_int_v2 Health_non_interference,
+            # its runs took 323 s of 600 without an answer, and the completion of fuzzer
+            # states got 39 s (2026-11-05). A run that decides is not affected
+            light = direct_on or large or (nonlinear and kind2_failed)
+            if task == "fuzz" and light:
                 b = KIND2_SHARE * budget if left is None else min(KIND2_SHARE * budget, left)
             if task == "kind2":
                 # With a time limit and linear arithmetic, Kind 2 gets all the time left: it
                 # restarts from scratch at each run, and the other tasks succeed in seconds
                 # or not at all. With nonlinear arithmetic, Kind 2 rarely concludes, and the
                 # rounds go on; so do they if other sides have their rounds.
-                b = (1 if direct_on or large else KIND2_SHARE) * budget
+                b = (1 if light else KIND2_SHARE) * budget
                 if left is not None:
                     b = min(b, left) if nonlinear or not side.alone() else left
             if task == "invariants":
@@ -1227,6 +1235,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                     k2_lustre = lustre_for(program, prop, k2_users, mode, expand,
                                            ghost_sums=ghost)
                 o = kind2_search(prop, k2_lustre, b, engines, solver, cex)
+                kind2_failed = o.status not in ("valid", "invalid")
                 if o.status == "valid" and side.climb and k2_users < goal:
                     # a proof for k2_users users, not for goal (Kind 2's invariants name
                     # the users): Kind 2 goes on with one more user. No counterexample with
