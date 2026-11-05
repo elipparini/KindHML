@@ -372,6 +372,18 @@ class FormulaEvaluator:
         if isinstance(e, S.UnOp):
             v = ev(e.arg)
             return (not v) if e.op == "!" else -v
+        if isinstance(e, S.BinOp) and e.op in ("&&", "||", "->"):
+            # short-circuit: the right operand only when it decides. The operands have no
+            # effects, so the value is the same whenever both evaluate; the bounded evaluation
+            # of the fuzzer no longer runs the calls of a modality whose premise is false
+            # (lending_int_v2 Health_non_interference: 3 times faster, 2026-11-05). It draws
+            # fewer random samples, so its later samples differ from those of earlier runs.
+            a = ev(e.left)
+            if e.op == "&&":
+                return a and ev(e.right)
+            if e.op == "||":
+                return a or ev(e.right)
+            return (not a) or ev(e.right)
         if isinstance(e, S.BinOp):
             a, b = ev(e.left), ev(e.right)
             op = e.op
@@ -379,8 +391,7 @@ class FormulaEvaluator:
                 if b == 0:
                     return 0                   # unspecified, as in lustre_eval
                 return divide(e, a, b)
-            return {"&&": lambda: a and b, "||": lambda: a or b, "->": lambda: (not a) or b,
-                    "+": lambda: a + b, "-": lambda: a - b, "*": lambda: a * b,
+            return {"+": lambda: a + b, "-": lambda: a - b, "*": lambda: a * b,
                     "<": lambda: a < b, "<=": lambda: a <= b, ">": lambda: a > b,
                     ">=": lambda: a >= b, "==": lambda: a == b, "!=": lambda: a != b}[op]()
         if isinstance(e, S.Quant):

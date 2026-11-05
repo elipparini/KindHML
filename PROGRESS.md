@@ -1381,6 +1381,38 @@ DESIGN.md, "Solvers".
   - no time slice for `cvc5-mbqi` (it would be one more tuned constant);
   - the file-based path for cvc5's portfolio or yicesQS is left for later.
 
+## Done (2026-11-05): mutations of the integer lending families; why rows stay open
+
+- **Mutations** (4a9d5aa): lending_int_v2-v4 and lending_simple_int_v2-v4, the mutations of the
+  real families (`setPrice` by anyone; `borrow` checks the health before adding the debt;
+  `liquidate` without health checks). Server, 600 s, 6 shards: 63 rows, 56 as the ground
+  truth, 7 unknown, none wrong. With 3600 s: lending_int_v2 `Health_non_interference` refuted
+  in 1801 s, lending_int_v3 `Liquidation_defence` in 2469 s, lending_simple_int_v2 and _v4
+  `Liquidation_attack_any` in 2261 s and 1076 s.
+- **Why rows stay open** (traces of the rounds on the server, scripts in
+  `~/claude/lendmut/diag/`):
+  - lending_int_v2 `Health_non_interference`: 1 random state in about 6,800 violates it
+    (`borrow` succeeds in 1.6% of the calls); the bounded evaluation took 0.3-0.5 s per state;
+    the fuzzer got about 50 s of the 600 s, over 5 sides; Kind 2 on the transition system
+    about 230 s, without an answer;
+  - the bounded evaluation evaluated `&&`, `||`, `->` eagerly: the calls of a modality were
+    run even when the premise was false;
+  - `Liquidation_attack_any`: Kind 2 runs ended in the front end ("Error opening input file
+    ...: Lib.TimeoutWall"): the 16.9 MB transition system needs 120-240 s to be read by Kind 2
+    v3.0.0 (60-120 s by v2.3), the 2.7 MB free checks more than 16 s; about 110 s of 600 s;
+  - lending_int_v4 `Health_non_interference`: no violating state in 427,000 random states
+    (debt taken before `accrue`, collateral at the threshold);
+  - lending_int_v2 `Liquidation_defence` (true): the defence needs a case split (price 1 if
+    `c1[a] == 0`, a large price otherwise), which a single instance (Sect. 7.8) cannot give.
+- **Short-circuit evaluation** of `&&`, `||`, `->` in `FormulaEvaluator` (reference.py): the
+  same values, 3 times faster on lending_int_v2 `Health_non_interference` (363 to 137 ms per
+  state, the same flags on 150 states). Tests on the server: all pass except
+  `test_a_true_chain_property_is_proved_by_an_instance` under load (it passes alone in 228 s
+  of its 300 s, with and without the change).
+- **Plan agreed with the user:** (a) no Kind 2 run below a floor learned from runs that ended
+  in the front end; (c) completion of fuzzer states by the solver (one free transaction from
+  a reachable state); (b) a larger share for the fuzzer, only as a final regression run.
+
 ## Noted (2026-11-02, with the user): Kind 2 kept; a split for later
 
 The user asked whether Kind 2 could be dropped. Decision: keep it as it is for now. The roles
