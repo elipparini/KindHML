@@ -92,6 +92,30 @@ def test_closest_states_to_a_target():
     assert extend.distance(st, {("C", "k"): st.fields[("C", "k")]}) == 0
 
 
+def test_the_sources_alternate_by_state():
+    """With a target, the states closest to it and the states by key alternate one by one,
+    so both are completed even within one short call (a batch of closest states is larger
+    than a window of the rounds)."""
+    comp, _ = _completion("Scale_grows")
+    fuzzer = Fuzzer(comp.system, "t1")
+    guide = {("C", "x"): 0, ("C", "k"): 4}
+    assert list(comp.candidates(fuzzer, time.time() + 3, guide)) == []
+    assert comp.completed["near"] >= 1 and comp.completed["keys"] >= 1
+    assert sum(comp.keys.values()) >= 1     # by batch: 0 of 92 states (2026-11-06)
+
+
+def test_the_closest_states_go_first():
+    """With a target, the first state completed is one of the closest states."""
+    comp, _ = _completion("Scale_grows")
+    fuzzer = Fuzzer(comp.system, "t1")
+    calls = []
+    near, keys = comp._closest_states, comp._new_states
+    comp._closest_states = lambda *a: calls.append("near") or near(*a)
+    comp._new_states = lambda *a: calls.append("keys") or keys(*a)
+    list(comp.candidates(fuzzer, time.time() + 3, {("C", "x"): 0, ("C", "k"): 4}))
+    assert calls[:2] == ["near", "keys"]
+
+
 @pytest.mark.kind2
 def test_a_needle_is_refuted():
     program, _ = V.load(COMPLETION)

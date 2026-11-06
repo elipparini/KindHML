@@ -1381,7 +1381,39 @@ DESIGN.md, "Solvers".
   - no time slice for `cvc5-mbqi` (it would be one more tuned constant);
   - the file-based path for cvc5's portfolio or yicesQS is left for later.
 
-## Done (2026-11-05): mutations of the integer lending families; why rows stay open
+## Done (2026-11-06): mutations of the integer AMM families; the cost of the completion
+
+- **Mutations** (d2f4f2c): amm_int_v2-v5 and amm_simple_int_v2-v4, adapted from amm-real
+  (swap0 without the slippage check; a linear price; a fee of 0.3% in integers; for amm-int
+  only, `redeem` requires `x < supply`: amm-simple-int has no liquidity tokens). Ground truth
+  by hand, with a concrete counterexample in the note of each false row. Server, 600 s: 75
+  rows, all as the ground truth.
+- **The cost of the completion** (DESIGN.md Sect. 6, "The cost of the completion"): in the
+  full runs of 2026-11-05, about 12 rows refuted by the fuzzer were 2-9 times slower with the
+  completion; run again under the same load, the slowdowns came back. Traces of the rounds
+  gave two causes: the batches of closest states took all the windows of the first rounds,
+  so no state by key was completed; and the completion took half of the fuzz task, so the
+  fuzzer's counterexamples came one round later.
+- **Changes** (extend.py, verify.py): the two sources alternate state by state, the closest
+  states first; the completion is a task of its own ("extend", after "fuzz", 1 budget per
+  round); a proposal found with less than 1 s left is checked first in the next round. On 34
+  lending rows (600 s): 29 decided against 28, none wrong; 2440 s against 4944 s over the 26
+  rows decided by all. Variants tried on the same rows: the alternation alone, keys first
+  (28 rows, 5346 s; `Net_worth_preserved` 33 to 215 s) and closest first (27 rows,
+  4130 s); the task with KIND2_SHARE budgets (29 rows, 2531 s). Tests on the server: all pass (the 6
+  more skips than before are from `test_formula.py`, which skips when no state is checked
+  within its time budget, under load).
+- **Full run** (473 tasks, 600 s, 4 shards, against the run of 2026-11-05): no wrong verdict;
+  the same 7 rows open against the ground truth (lending_int_v2 `Liquidation_defence` and
+  the 6 regressions of `tests/test_regressions.py`); 3 rows more (lending_real, _v3 and
+  lending_simple_int_v4 `Liquidation_attack_any`), 2 less (lending_int_v4
+  `Health_non_interference` and `Liquidation_defence`, as on the 34 rows); 8262 s against
+  5094 s over the 383 rows decided by both. The 96 rows of amm-int and amm-simple-int are all
+  decided, as the ground truth. 6 rows were slower (`amm_real_v4` `Sandwich_slippage` 11.6 to
+  179 s, `amm_simple_real_v3` `Sandwich_slippage` 2.4 to 43 s); each of three of them, with
+  the properties before it in its file, in one process as in the runs, took the same time
+  with the old and the new code (16.0 and 16.1 s, 3.1 and 3.1 s, 9.8 and 9.7 s): the
+  load of the run.
 
 - **Mutations** (4a9d5aa): lending_int_v2-v4 and lending_simple_int_v2-v4, the mutations of the
   real families (`setPrice` by anyone; `borrow` checks the health before adding the debt;

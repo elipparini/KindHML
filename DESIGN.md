@@ -507,7 +507,7 @@ the proposed one (verdict method `extend`). φ must not use `old`, `lastReverted
 `block.number` outside its modalities (`extend.applicable`): they would denote the added
 transaction.
 
-The states, in alternating batches:
+The states, from two sources that alternate state by state, the closest states first:
 * if the free-state check gave a counterexample to induction s*, the closest state to s* of
   each random trace walking towards it (as `Fuzzer._guided`), with a distance relative to the
   values of s* (`extend.distance`: each difference divided by max(1, |value|)). The absolute
@@ -530,10 +530,12 @@ Prototype, 2 users, the queries alone after the invariants (server): lending_int
 `Liquidation_defence` in 155 s (unknown after 1 h), lending_simple_int `Liquidation_attack_any`
 in 416 s (unknown at 600 s in the runs of 2026-11-02); no model for the true rows tried.
 
-In the rounds (`_rounds`, task "fuzz"): on nonlinear contracts (on linear ones, BMC towards
-the counterexample to induction finds the narrow states), on the sides without ghost sums,
-the searches of the fuzzer get half of the time of the task and the completion the other
-half; a state not finished goes on in the next round. QUERY_SECONDS = 2 s per query (11 of
+In the rounds (`_rounds`): on nonlinear contracts (on linear ones, BMC towards the
+counterexample to induction finds the narrow states), on the sides without ghost sums, the
+completion is a task of its own, "extend", after "fuzz", with 1 budget per round; a state
+not finished goes on at the next round. A proposal found with less than 1 s left in the
+task is kept with the undecided candidates of the fuzzer, which the fuzz task of the next
+round checks first. QUERY_SECONDS = 2 s per query (11 of
 about 60,000 were undecided in 2 s); SELECT_SECONDS = 2 s for a batch of random traces (the
 fuzzer makes thousands of states per second, and a state costs about 0.5 s of queries). These
 values are provisional. KINDHML_COMPLETION=0 turns the completion off.
@@ -547,8 +549,9 @@ The lending_int rows refuted by the prototype stayed open: on lending_int_v2
 answer (the prototype found the counterexample after 62 states, 39 s).
 
 So (2026-11-05, with the user), on nonlinear contracts, once a run of Kind 2 on the transition
-system has ended without a verdict, the task gets 1 budget per round and fuzzing (with the
-completion) KIND2_SHARE budgets, as for large programs and direct checks (`_rounds`,
+system has ended without a verdict, the task gets 1 budget per round and fuzzing KIND2_SHARE
+budgets (then with the completion; since 2026-11-06 the completion has 1 budget of its own,
+below), as for large programs and direct checks (`_rounds`,
 `kind2_failed`); a run that decides is not affected, and linear contracts are unchanged. In
 the last full run (2026-11-02) this task decided 5 rows (price-bet 3, vault 1,
 lending-simple-real 1). A completion on fewer sides (the smallest number of users only) was
@@ -557,6 +560,34 @@ With this share and the states closest to s*, on the same 18 rows (600 s, 6 shar
 refuted (8 before), none lost; lending_int_v2 and _v4 `Health_non_interference` in 199 s and
 196 s, lending_int_v4 `Liquidation_defence` in 554 s (all `extend`), lending_int_v3
 `Liquidation_defence` in 224 s (`fuzz`).
+
+The cost of the completion (2026-11-06). In the full runs of 2026-11-05 (398 tasks, 600 s),
+with and without the completion: 7 rows more with it, 3 `Liquidation_attack_any` rows less,
+and about 12 rows refuted by the fuzzer 2-9 times slower. Run again on these rows, with and
+without it under the same load, the slowdowns came back: they were not noise. Two causes,
+found by traces of the rounds:
+* the batches of closest states (40-70 states, about 0.4 s of queries each) took all the
+  windows of the first rounds (2-3 s each), and no state by key was completed: lending_int_v4
+  `Deposit_reversibility`, refuted by the keys alone in 14 s, waited for the fuzzer (155 s).
+  The two sources now alternate state by state, the closest states first: on lending_int_v3
+  `Net_worth_preserved`, the first closest state gives the counterexample with 7 queries
+  (33 s); with a state by key first, it waited for a later round (215 s);
+* the completion took half of the time of the fuzz task, so a counterexample that the fuzzer
+  finds in a window of a given length came one round later. The completion is now a task of
+  its own, with 1 budget.
+On 34 lending rows (the slowed rows, the rows decided by the completion and the open ones;
+600 s, 3 shards, 3 runs at once), before and after both changes: 28 and 29 rows decided,
+none wrong; 4944 s and 2440 s over the 26 rows decided by all the runs (lending_int_v2
+`Liquidation_attack` 162 to 26 s, lending_simple_int_v2 `Health_non_interference` 431 to 67
+s). New: lending_real, _v3 and lending_simple_int_v4 `Liquidation_attack_any` (338-538 s);
+lost: lending_int_v4 `Health_non_interference` and `Liquidation_defence` (199 s and 588 s
+before). Alone, the new code refutes `Health_non_interference` in 221 s, in its second window
+with 2 users, after 9 states of each source (195 s with the completion inside the fuzz
+task); in the runs, with 8 processes on 8 cores, these states presumably did not fit in that
+window (not traced). With KIND2_SHARE budgets for the completion too (as for the fuzzer, once
+Kind 2 has failed): 29 rows, 2531 s; with 1 budget, the rule of the share is unchanged. In
+the full run (473 tasks, 600 s, 4 shards, against 2026-11-05): the same 3 rows more and 2
+less, no wrong verdict, 8262 s against 5094 s over the 383 rows decided by both.
 
 Reproducibility (2026-10-29). The seeds are fixed (`Fuzzer` "kindhml", `chains.Search` "c1"),
 but one generator per fuzzer was shared by the guided search, the unguided search and the
@@ -592,12 +623,14 @@ product of two variables, a division by a variable) the rounds go on.
 3. The BMC search for s*, once 2 has found it.
 4. Random testing, with exact confirmation: first guided by s*, once 2 has found it, then
    unguided.
+   4b. On nonlinear contracts, the completion of states of the fuzzer by the solver ("Completion
+   of fuzzer states" above), with 1 budget.
 5. Kind 2 on the transition system (as before; with BMC and k-induction only, after the
    memory limit of a run killed a solver: the invariant generators and IC3 run in parallel
    and each has its own solver, which exceeds the memory on nonlinear problems).
 
 Verdicts say how they were found: `inductive` (an invariant proved by Houdini),
-`invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `extend` (task 4, a state of the
+`invariants` (task 2), `reach` (task 3), `fuzz` (task 4), `extend` (task 4b, a state of the
 fuzzer completed by the solver), `kind2-<ENGINE>` (task 5, with the
 engine of Kind 2 that found the verdict, in Kind 2's abbreviation: `kind2-BMC`, `kind2-IND`,
 `kind2-IND2`, `kind2-IC3IA`, `kind2-IC3QE`; `kind2` if Kind 2 does not name it).

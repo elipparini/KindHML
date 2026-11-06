@@ -204,8 +204,12 @@ class Completion:
         self.per_key = 1
         self.taken: set = set()             # the states taken (`fuzz._key`)
         self.turn = 0                       # alternation of the sources (`candidates`)
-        # states to complete, each with the index of its next query
-        self.queue: Deque[Tuple[List[Tx], State, int]] = deque()
+        # states to complete, by source ("near": closest to the counterexample to induction,
+        # "keys"), each with the index of its next query; and the states completed by source
+        self.queues: Dict[str, Deque[Tuple[List[Tx], State, int]]] = {
+            "near": deque(), "keys": deque()}
+        self.completed: Dict[str, int] = {"near": 0, "keys": 0}
+        self.resume: Optional[str] = None   # the source of a state not finished
 
     @staticmethod
     def make(checks, prop: S.Property) -> Optional["Completion"]:
@@ -335,37 +339,56 @@ class Completion:
                    guide: Optional[Dict[tuple, object]] = None
                    ) -> Iterator[Tuple[List[Tx], State, Tx]]:
         """Transactions proposed by the queries (prefix, state, transaction), until
-        `deadline`; a state not finished goes on at the next call. With a counterexample to
-        induction (`guide`, by location), batches of states closest to it alternate with
-        batches chosen by key: on lending_int_v4 Health_non_interference, the closest states
-        led to a counterexample in 6-39 s in 4 seeds, the keys in 86 s, 111 s and twice not
-        in 600 s; on lending_int_v2, 13-148 s against 32-40 s (2026-11-05). The keys keep
-        the search going where the counterexample to induction is misleading."""
+        `deadline`; a state not finished goes on first at the next call. With a
+        counterexample to induction (`guide`, by location), the states closest to it
+        alternate, one by one, with the states chosen by key: on lending_int_v4
+        Health_non_interference, the closest states led to a counterexample in 6-39 s in 4
+        seeds, the keys in 86 s, 111 s and twice not in 600 s; on lending_int_v2, 13-148 s
+        against 32-40 s (2026-11-05). The keys keep the search going where the
+        counterexample to induction is misleading. The alternation is by state, not by
+        batch: a batch of closest states (40-70 states, about 0.4 s of queries each) took
+        all the windows of the first rounds (2-3 s each), and lending_int_v4
+        Deposit_reversibility, refuted by the keys in 14 s alone, waited for the fuzzer
+        (155 s, against 20 s without the completion; 2026-11-06). The closest states go
+        first: on lending_int_v3 Net_worth_preserved, the first closest state gives a
+        counterexample with 7 queries in the first window (33 s); with a state by key first,
+        it waited for a later round (215 s, 2026-11-06)."""
         stream = f"complete:{self.prop.name}"
         target = self._target(guide)
+        sources = ("near", "keys") if target else ("keys",)
         while time.time() < deadline - 0.5:
-            if not self.queue:
-                seconds = min(SELECT_SECONDS, (deadline - time.time()) / 4)
+            if self.resume is not None:     # a state not finished at the last call
+                source, self.resume = self.resume, None
+            else:                           # the closest states first
+                source = sources[self.turn % len(sources)]
                 self.turn += 1
-                batch = (self._closest_states(fuzzer, f"{stream}:guided", target, seconds)
-                         if target and self.turn % 2 else [])
-                if not batch:
-                    batch = self._new_states(fuzzer, stream, seconds)
-                self.queue.extend((txs, st, 0) for txs, st in batch)
-                if not self.queue:
+            queue = self.queues[source]
+            if not queue:
+                seconds = min(SELECT_SECONDS, (deadline - time.time()) / 4)
+                if source == "near":
+                    queue.extend((txs, st, 0) for txs, st in self._closest_states(
+                        fuzzer, f"{stream}:guided", target, seconds))
+                if not queue:               # no new closest state: a state by key
+                    source, queue = "keys", self.queues["keys"]
+                if not queue:
+                    queue.extend((txs, st, 0)
+                                 for txs, st in self._new_states(fuzzer, stream, seconds))
+                if not queue:
                     continue                # per_key was doubled, or the time is over
-            txs, st, i = self.queue.popleft()
+            txs, st, i = queue.popleft()
             literal = self.tr.run(state_literal(st, self.system, self.checks.enc), D._Env({}))
             pairs: List[Tuple[z3.ExprRef, z3.ExprRef]] = []
             self._pairs(self.s, literal, pairs)
             for j in range(i, len(self.queries)):
                 left = deadline - time.time()
                 if left <= 0.5:
-                    self.queue.appendleft((txs, st, j))
+                    queue.appendleft((txs, st, j))
+                    self.resume = source
                     return
                 tx = self._ask(self.queries[j], pairs, min(QUERY_SECONDS, left))
                 if tx is not None:
                     yield txs, st, tx
+            self.completed[source] += 1
 
     def _pairs(self, sym, value, out: list) -> None:
         for f in self.tr.fields(sym):
