@@ -8,3 +8,30 @@ amm_simple_int.sol,Swap_reversibility,false,"rounding (e.g. r0 = r1 = 1, x = 1: 
 amm_simple_int.sol,No_money_pump,true,
 amm_simple_int.sol,Arbitrage,false,"rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the swap gains nothing)."
 amm_simple_int.sol,Arbitrage_exists,false,"rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the only possible swap gains nothing)."
+amm_simple_int_v2.sol,Nonnegative,true,
+amm_simple_int_v2.sol,Slippage,false,"e.g. r0 = r1 = 1, x = 1, ymin = 1: the swap pays nothing and succeeds."
+amm_simple_int_v2.sol,Sandwich,false,"for a small x, rounding leaves adv nothing to gain."
+amm_simple_int_v2.sol,Sandwich_slippage,false,"rounding (e.g. r0 = r1 = 1, x = 1, ymin = 0: every front-run pays adv nothing, so its back-run reverts)."
+amm_simple_int_v2.sol,Swap_additivity,false,rounding.
+amm_simple_int_v2.sol,Swap_reversibility,false,"rounding (e.g. r0 = r1 = 1, x = 1: the swap pays nothing)."
+amm_simple_int_v2.sol,No_money_pump,true,
+amm_simple_int_v2.sol,Arbitrage,false,"rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the swap gains nothing)."
+amm_simple_int_v2.sol,Arbitrage_exists,false,"rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the only possible swap gains nothing)."
+amm_simple_int_v3.sol,Nonnegative,false,"a swap of more than the reserve r0 makes r1 negative (e.g. r0 = r1 = 1, swap0(2, 0))."
+amm_simple_int_v3.sol,Slippage,true,
+amm_simple_int_v3.sol,Sandwich,false,"if adv holds at least r0 tokens T0, its front-run makes r1 nonpositive, and the back-run reverts."
+amm_simple_int_v3.sol,Sandwich_slippage,false,"if x >= 2 * r0 (e.g. r0 = r1 = 1, x = 3, ymin = 0), every front-run that lets the victim's swap succeed leaves r1 nonpositive after it, and the back-run reverts."
+amm_simple_int_v3.sol,Swap_additivity,false,"the first swap lowers the price of the second (e.g. r0 = 2, r1 = 10, x1 = x2 = 1: 6 tokens T1 against 10)."
+amm_simple_int_v3.sol,Swap_reversibility,false,"e.g. r0 = r1 = 1, x = 1: the swap empties r1, so every swap1 reverts."
+amm_simple_int_v3.sol,No_money_pump,false,"e.g. r0 = r1 = 2: swap0(1, 0) pays 1 token T1, then swap1(1, 0) pays 3 tokens T0."
+amm_simple_int_v3.sol,Arbitrage,false,"rounding (e.g. r0 = 2, r1 = 3, p = 1, t0[a] = 1: the strategy swaps 0 tokens, which reverts)."
+amm_simple_int_v3.sol,Arbitrage_exists,false,"rounding (e.g. r0 = 2, r1 = 3, p = 1, t0[a] = 1: the only possible swap pays 1 token T1 for 1 token T0)."
+amm_simple_int_v4.sol,Nonnegative,true,
+amm_simple_int_v4.sol,Slippage,true,
+amm_simple_int_v4.sol,Sandwich,false,"for a small x, the fees and rounding leave adv nothing to gain."
+amm_simple_int_v4.sol,Sandwich_slippage,false,"e.g. r0 = r1 = 1, x = 1, ymin = 0: every front-run pays adv nothing, so its back-run reverts."
+amm_simple_int_v4.sol,Swap_additivity,false,"with the fee, two swaps give less than one (e.g. r0 = r1 = 1000, x1 = x2 = 1: 0 tokens T1 against 1)."
+amm_simple_int_v4.sol,Swap_reversibility,false,"e.g. r0 = r1 = 1, x = 1: the swap pays nothing."
+amm_simple_int_v4.sol,No_money_pump,true,"a round trip with the fee pays less than the same round trip without it, which is not profitable."
+amm_simple_int_v4.sol,Arbitrage,false,"the fee and rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the swap gains nothing)."
+amm_simple_int_v4.sol,Arbitrage_exists,false,"the fee and rounding (e.g. r0 = 1, r1 = 3, p = 1, t0[a] = 1: the only possible swap gains nothing)."
