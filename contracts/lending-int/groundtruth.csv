@@ -2,7 +2,7 @@ contract,property,expected,note
 lending_int.sol,Nonnegative,true,
 lending_int.sol,Totals,true,
 lending_int.sol,Health_non_interference,true,
-lending_int.sol,Liquidation_defence,false,
+lending_int.sol,Liquidation_defence,false,"u1 is the oracle: constructor(u1, 13, 1, 13), transfer1(u2, 1), u2 deposit1(1), deposit0(10), u2 borrow(10), transfer0(u2, 2), setPrice(1), accrue() twice: idx = 1210, the debt of u2 is 12 = w0[u2]; repay(12) removes 12000 / 1210 = 9 of its 10 scaled debt, and after every action of u2, u1 liquidates it with v = 1."
 lending_int.sol,Liquidation_attack,false,
 lending_int.sol,Exchange_rate_monotone,false,
 lending_int.sol,Net_worth_preserved,false,
