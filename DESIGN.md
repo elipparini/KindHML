@@ -307,7 +307,11 @@ for each contract C: what the users can claim is held by C), definitions (`G -> 
 for the assignments `f = e` and `f = e' / d` under the conditions G of the enclosing ifs),
 and, for an address field a, an address constant K (null or a contract) and a boolean field
 g, `a == K`, `a != K`, `g -> a != K` and `!g -> a != K` (regression owner `P2_true`, for every
-n, needs `owner != C`; price-bet `Winnability` needs `player_has_joined -> player != null`).
+n, needs `owner != C`; price-bet `Winnability` needs `player_has_joined -> player != null`),
+and, for two address fields a and b, `a != b`, `g -> a != b` and `!g -> a != b` (2026-11-06:
+two-donatees `P2_true`, `P4_true`, `P2b_true`, `P3c_true` and signature_error `P5_true`, open
+for every n in every run before, need `started -> p1 != p2`, which `join` keeps by requiring
+`msg.sender != p1`; with it, each is proved for every n by invariants in under 2 s).
 `sum(m)` is a new built-in (also for users): the sum of
 m over all addresses, finite (A1). The candidates are written as source text and
 type-checked like declared invariants; those false in a reachable state of the fuzzer (2 s
@@ -658,6 +662,20 @@ Kind 2 runs stop in their `finally`), then SIGKILL; `_cleanup` kills a recorded 
 it still belongs to its run (pids are reused), and joins its watcher thread (no fork with
 other threads alive). Forks were checked for the in-process z3 of the completion (a timeout of
 1 s still stops a query in a forked process) and for SIGALRM in the fuzzer.
+
+Lanes. With more CPUs than sides, a side is split into lanes, each in a worker of its own
+(`_Side.lanes`, split off in this order): Kind 2 (in its own worker it gets all the time
+left: one run, no restarts), the proofs (Houdini, the checks on a free state, BMC towards
+s*), the fuzzer, the completion. A lane is `_rounds` with a `_Lane`: it runs its own tasks
+and ends when none of them can decide. The proof lane publishes s* (its users, the guide of
+the fuzzer, the values of the universal variables) and Kind 2's lane the end of the searches
+(a proof with fewer users, parameterized mode); the coordinator relays these facts to the
+other lanes of the side, the fuzzer lane cuts its window short when one arrives, and the
+completion lane checks its own late proposals (the fuzz task checks them in a whole side). A
+decided lane gives the outcome of its side; lanes without a verdict merge into Kind 2's
+outcome (with what it proved), with the proof lane's counterexample to induction. The CPUs
+left after the lanes start a side with more users early, then go to the workers that run
+Kind 2, whose engines run in parallel.
 
 CPU time (results.csv `cpu`): the CPU time of the Python processes of the check (each its
 own, RUSAGE_SELF; the workers report theirs) plus that of its solver runs (`cpu_solvers`: the

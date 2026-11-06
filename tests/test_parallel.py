@@ -30,7 +30,7 @@ def slow(rounds: int, o, delay: float = 0.05, fail=None):
 
 def coordinator(cores: int = 4, deadline=FAR) -> parallel.Coordinator:
     return parallel.Coordinator(cores, deadline, UNIVERSAL, {}, V._step, V.houdini_progress,
-                                V.resume_houdini, V._failed)
+                                V.resume_houdini, V._failed, V._merge_lanes, V._Lane)
 
 
 def any_mode(script, c, cores=4, wit=None):
@@ -112,8 +112,8 @@ def test_the_workers_die_with_the_coordinator():
             coord = coordinator(2)
             orig = coord._start
 
-            def start(sides, cpus):
-                orig(sides, cpus)
+            def start(job):
+                orig(job)
                 os.write(send, f"{coord.workers[-1].pid}\n".encode())
             coord._start = start
             comb = V._AnyCombiner(PROGRAM, UNIVERSAL, None, None, lambda *a, **k: _forever(),
@@ -198,3 +198,77 @@ def test_sigalrm_in_a_forked_worker():
             os._exit(1)
     _, status = os.waitpid(pid, 0)
     assert os.WEXITSTATUS(status) == 0
+
+
+# ------------------------------------------------------------------ lanes
+
+K, P, F, E = frozenset({"kind2"}), V.PROOF_LANE, frozenset({"fuzz"}), frozenset({"extend"})
+
+
+def test_lane_groups():
+    """Kind 2 is split off first, then the proofs, then the fuzzer."""
+    assert parallel.lane_groups([K, P, F, E], 1) == [K | P | F | E]
+    assert parallel.lane_groups([K, P, F, E], 2) == [K, P | F | E]
+    assert parallel.lane_groups([K, P, F, E], 3) == [K, P, F | E]
+    assert parallel.lane_groups([K, P, F, E], 9) == [K, P, F, E]
+    assert parallel.lane_groups([P, F], 2) == [P, F]
+
+
+def lane_side(script):
+    """A side whose lanes run script(tasks, lane), a generator."""
+    s = V._Side(1, False, None)
+    s.prop = UNIVERSAL
+    s.lanes = [K, P, F, E]
+    s.make_gen = lambda lane=None: script(lane.tasks if lane else None, lane)
+    s.gen = s.make_gen()
+    return s
+
+
+def test_the_fuzzer_lane_gets_the_counterexample_to_induction_of_the_proof_lane():
+    def script(tasks, lane):
+        if tasks == P:
+            yield
+            lane.publish({"target_users": 1, "guide": {("C", "x"): 3}, "inputs": {},
+                          "cti": "x = 3", "direct": False})
+            return outcome("unknown")
+        if tasks == F:
+            while True:
+                if any(f.get("guide") for f in lane.pull()):
+                    return outcome("invalid", "fuzz")
+                time.sleep(0.05)
+                yield
+        while True:                     # Kind 2 and the completion: no verdict
+            time.sleep(0.05)
+            yield
+
+    coord = coordinator(4)
+    o = coord.drive(V._OneCombiner(lane_side(script), coord.stop))
+    assert (o.status, o.method) == ("invalid", "fuzz")
+    assert len(coord.workers) == 4 and all(gone(w.pid) for w in coord.workers)
+
+
+def test_lanes_without_a_verdict_merge():
+    """The outcome of Kind 2's lane (its proofs with fewer users), with the counterexample to
+    induction of the proof lane."""
+    def script(tasks, lane):
+        yield
+        o = outcome("unknown")
+        if tasks == K:
+            o.true_for = "up to 2 users"
+        if tasks == P:
+            o.cti = "x = 3"
+        return o
+
+    coord = coordinator(4)
+    o = coord.drive(V._OneCombiner(lane_side(script), coord.stop))
+    assert (o.status, o.true_for, o.cti) == ("unknown", "up to 2 users", "x = 3")
+
+
+def test_the_merge_of_lanes():
+    k, p, f = outcome("unknown"), outcome("unknown"), outcome("error")
+    p.cti, f.errors = "x = 3", ["side failed: RuntimeError: a bug"]
+    k.memory_killed = False
+    f.memory_killed = True
+    o = V._merge_lanes({K: k, P: p, F: f})
+    assert o.cti == "x = 3" and o.memory_killed and o.status == "unknown"
+    assert o.errors == ["side failed: RuntimeError: a bug"]

@@ -1394,8 +1394,21 @@ DESIGN.md, "Solvers".
   outcomes as before on 1000 random scripts); the parallel driver (`parallel.py`: one worker
   per side, pinned CPUs, spare sides with more users, failures confined to their side).
   Suite on the server: 1937 passed, 0 failed.
-- **Next:** measurements on 50 rows (unpinned; 1 core; 2, 4, 8 cores), then the tasks of a side
-  in parallel (lanes), then a full run.
+- **Measurements** (the 34 lending rows and the 16 rows proved by instances, 600 s, sides in
+  parallel, no lanes yet; 0 wrong verdicts): unpinned 45 decided (wall 7295 s; 4292 s on the
+  45 rows decided by all), 1 pinned core 45 (7323 s; 4322 s: pinning costs nothing), 2 cores
+  47 (5344 s; 2585 s), 4 cores 47 (3885 s; 1427 s), 8 cores 48 (3656 s; 1448 s, CPU/wall
+  3.8: the sides alone do not use 8 cores). New with several cores: lending_int_v2
+  `Liquidation_defence` (true; proved by a disjunctive instance once the witness side has a
+  core of its own, 381-508 s), lending_simple_int_v2 `Health_non_interference` and
+  `Liquidation_attack_any`.
+- **Lanes done** (DESIGN.md Sect. 6): the tasks of a side in parallel. Suite on the server:
+  1946 passed, 0 failed.
+- **Invariant templates for two address fields** (`a != b`, `g -> a != b`): two-donatees
+  `P2_true`, `P4_true`, `P2b_true`, `P3c_true` and signature_error `P5_true`, open for every n
+  in every run before, are proved by invariants in under 2 s; removed from the open rows of
+  `tests/test_regressions.py`.
+- **Next:** a full run with 8 cores, then the rows still open with 3600 s.
 
 ## Done (2026-11-06): mutations of the integer AMM families; the cost of the completion
 

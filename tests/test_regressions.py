@@ -23,12 +23,6 @@ DIRS = [os.path.join(ROOT, "contracts", "regression"), os.path.join(ROOT, "tests
 
 OPEN = {
     ("division", "P1_true"): "nonlinear witness; unknown within the timeout",
-    ("two-donatees", "P2_true"): "needs an auxiliary invariant; unknown within the timeout",
-    ("two-donatees", "P4_true"): "needs an auxiliary invariant; unknown within the timeout",
-    ("two-donatees", "P2b_true"): "valid by IC3 with z3 in about 30 s: at the edge of the timeout",
-    ("two-donatees", "P3c_true"): "needs an auxiliary invariant; unknown within the timeout",
-    ("signature_error", "P5_true"): "valid by IC3 with z3, in 16 s to more than 30 s depending "
-                                    "on the run: at the edge of the timeout",
     ("calls", "Report_sees_balance_after_transfer"): "invalid; found in 25-30 s (by the search "
                                                      "of the counterexample to induction): at "
                                                      "the edge of the timeout",

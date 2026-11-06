@@ -5,9 +5,9 @@ from __future__ import annotations
 import csv
 import os
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
-from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Callable, Dict, FrozenSet, Generator, List, Optional, Tuple, Union
 
 from . import kind2
 from .colors import PLAIN, Palette
@@ -255,6 +255,28 @@ class _Side:
     gen: Optional[Generator] = None
     outcome: Optional[Outcome] = None
     prop: Optional[S.Property] = None   # for the outcome of an encoding stopped at the limit
+    # the generator of a lane of the side (`_Lane`; None: all its tasks), for `parallel.py`;
+    # None for a side that is not run by `_rounds`
+    make_gen: Optional[Callable[..., Generator]] = None
+    # the task groups of the side, in the order they are split into lanes (`parallel.py`)
+    lanes: List[FrozenSet[str]] = field(default_factory=list)
+
+
+PROOF_LANE = frozenset({"invariants", "proof", "reach"})
+
+
+@dataclass
+class _Lane:
+    """The tasks of a side that one worker runs (`parallel.py`, DESIGN.md Sect. 6, "Several
+    cores"), with its board: `pull()` gives the facts published by the other lanes of the
+    side since the last call, `publish(fact)` sends one, and `waiting()` tells whether facts
+    are waiting (a search window is then cut short). The facts: the counterexample to
+    induction of the proof lane (keys target_users, guide, inputs, cti, direct), and
+    {"searching": False} after a proof by Kind 2 with fewer users (climb)."""
+    tasks: FrozenSet[str]
+    pull: Callable[[], List[dict]] = lambda: []
+    publish: Callable[[dict], None] = lambda fact: None
+    waiting: Callable[[], bool] = lambda: False
 
 
 def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Optional[float],
@@ -314,22 +336,35 @@ def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
              **flags) -> _Side:
         s = _Side(users, ghost, goal, **flags)
         s.prop = prop
-        s.gen = _rounds(program, prop, s, cut, context, start, deadline, mode, expand,
-                        extra_args, solver, cex, invgen, user_invariants)
+        s.make_gen = lambda lane=None: _rounds(program, prop, s, cut, context, start, deadline,
+                                               mode, expand, extra_args, solver, cex, invgen,
+                                               user_invariants, lane)
+        s.gen = s.make_gen()
+        # the lanes of the side, split off in this order: Kind 2, the proofs, the fuzzer; the
+        # completion only on nonlinear contracts without ghost sums
+        complete = s.search and COMPLETION and is_nonlinear(program) and not ghost
+        s.lanes = ([frozenset({"kind2"})] if s.kind2 else []) + [PROOF_LANE] \
+            + ([frozenset({"fuzz"})] if s.search else []) \
+            + ([frozenset({"extend"})] if complete else [])
         return s
 
     # several cores: the sides in parallel (`parallel.py`); not with SMT traces, whose file
     # names would collide
     coord = (parallel.Coordinator(cores, deadline, prop, context, _step, houdini_progress,
-                                  resume_houdini, _failed)
+                                  resume_houdini, _failed, _merge_lanes, _Lane)
              if cores is not None and cores >= 2 and smt_trace.TRACER is None else None)
     if users_mode == "exact" and n_users != ANY:
+        if coord is not None:
+            return coord.drive(_OneCombiner(side(n_users, False, n_users, None), coord.stop))
         return _drive_one(side(n_users, False, n_users, None))
     cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
     c = cut.of_property(prop.name)
     if users_mode == "parameterized":
         ghost = c is not None and c <= n_users
-        return _drive_one(side(c if ghost else n_users, ghost, n_users, cut, climb=True))
+        one = side(c if ghost else n_users, ghost, n_users, cut, climb=True)
+        if coord is not None:
+            return coord.drive(_OneCombiner(one, coord.stop))
+        return _drive_one(one)
     if n_users == ANY:
         wit = None
         # a chain of existentials over methods: its instances also with a cutoff (lending
@@ -687,10 +722,52 @@ def _failed(prop: S.Property, status: str, message: str) -> Outcome:
                    [message])
 
 
+def _merge_lanes(outs: Dict[FrozenSet[str], Outcome]) -> Outcome:
+    """The outcome of a side whose lanes (`parallel.py`) all ended without a verdict: that of
+    its Kind 2 lane, if any (with the numbers of users it proved, `true_for`), else that of its
+    proofs, else any; with the counterexample to induction of the proofs, the memory kills of
+    all, and the errors of the lanes that failed."""
+    def of(task: str) -> Optional[Outcome]:
+        return next((o for g, o in outs.items() if task in g), None)
+    o = replace(of("kind2") or of("proof") or next(iter(outs.values())))
+    proofs = of("proof")
+    o.cti = o.cti or (proofs.cti if proofs else "") or next((x.cti for x in outs.values()
+                                                            if x.cti), "")
+    o.memory_killed = any(x.memory_killed for x in outs.values())
+    o.errors = list(dict.fromkeys(list(o.errors) + [e for x in outs.values()
+                                                     if x.status == "error"
+                                                     for e in x.errors]))
+    return o
+
+
 def _drive_one(side: _Side) -> Outcome:
     while not _step(side):
         pass
     return side.outcome
+
+
+class _OneCombiner:
+    """One side (exact or parameterized mode), for the parallel driver, which may split it
+    into lanes (`parallel.py`): its outcome is the outcome, as with `_drive_one`."""
+
+    def __init__(self, side: _Side, stop: Callable[[_Side], None]):
+        self.side, self.stop, self.sides = side, stop, [side]
+
+    def live(self) -> List[_Side]:
+        return [s for s in self.sides if s.outcome is None]
+
+    def done(self) -> bool:
+        return not self.live()
+
+    def close(self) -> None:
+        for s in self.live():
+            self.stop(s)
+
+    def ended(self, s: _Side) -> Optional[Outcome]:
+        return s.outcome if _decided(s.outcome) else None
+
+    def final(self) -> Outcome:
+        return self.side.outcome
 
 
 class _CombinedCombiner:
@@ -939,7 +1016,8 @@ def _users_list(ms: List[int]) -> str:
 def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cutoff],
             context: dict, start: float, deadline: Optional[float], mode: str, expand,
             extra_args: Optional[List[str]], solver: str, cex: bool, invgen: bool,
-            user_invariants: bool) -> Generator[None, None, Outcome]:
+            user_invariants: bool, lane: Optional[_Lane] = None
+            ) -> Generator[None, None, Outcome]:
     """The check of a property with the users of `side`, in rounds: a generator that yields
     after each round and returns the outcome.
 
@@ -1165,11 +1243,58 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     # then goes to fuzzing, on nonlinear contracts)
     kind2_failed = False
     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
+
+    def check_pending(until: float) -> Optional[Outcome]:
+        """The undecided candidates of earlier rounds, each checked again until `until`:
+        a counterexample, or None."""
+        nonlocal last
+        for cand in list(pending):
+            left = until - time.time()
+            if left <= 1:
+                break
+            txs, st, m, kept = cand[:4]
+            cand[4] += 1
+            status, s = exact(invs.checks_for(m), kept["literal"], left, kept)
+            if status == "invalid":
+                o = fuzz_found(txs, st, m, s, kept.get("method", "fuzz"))
+                if o.status == "invalid":
+                    return o
+                o.cti, last = last.cti, o
+            if status != "unknown" or cand[4] >= PENDING_TRIES:
+                pending.remove(cand)
+        return None
+
+    def lane_done() -> bool:
+        """Whether no task of the lane can decide any more."""
+        houdini, proofs = invs.proved is not None, invs.proved is not None and not proof_open
+        finished = {"invariants": houdini, "proof": proofs,
+                    "reach": proofs and not (target and searching),
+                    "fuzz": not searching,
+                    "extend": not (searching and complete_on)
+                    or completions.get(users, True) is None,
+                    "kind2": not kind2_open}
+        return all(finished[t] for t in lane.tasks)
+
     while True:
         for task in ("invariants", "proof", "reach", "fuzz", "extend", "kind2"):
             # the conditions are evaluated in turn: a counterexample found by "proof" is
             # searched for by "reach" in the same round
-            if not (searching or kind2_open) and invs.proved is not None and not proof_open:
+            if lane is not None:
+                # a lane (`parallel.py`): the facts of the other lanes of the side, its own
+                # tasks only, and its own end
+                for fact in lane.pull():
+                    if "guide" in fact:
+                        target_users, guide, inputs = (fact["target_users"], fact["guide"],
+                                                       fact["inputs"])
+                        last.cti = last.cti or fact["cti"]
+                        direct_concrete[1] = direct_concrete[1] or fact["direct"]
+                    if fact.get("searching") is False:
+                        searching = False
+                if lane_done():
+                    return scoped(last, users)
+                if task not in lane.tasks:
+                    continue
+            elif not (searching or kind2_open) and invs.proved is not None and not proof_open:
                 return scoped(last, users)          # no task can decide for goal
             if task == "invariants" and invs.proved is not None:
                 if prop.invariant and prop.name in invs.proved:
@@ -1219,6 +1344,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                 b = (1 if light else KIND2_SHARE) * budget
                 if left is not None:
                     b = min(b, left) if nonlinear or not side.alone() else left
+                if lane is not None and lane.tasks == {"kind2"}:
+                    b = left                # its own worker: one run, no restarts
             if task == "invariants":
                 invs.attempt(b)
                 if invs.proved is not None and prop.invariant and prop.name in invs.proved:
@@ -1316,25 +1443,18 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                                                    enc.system, enc, known=known)
                             have = locations(st)
                             guide = {loc: have[loc] for loc in known if loc in have} or None
+                            if lane is not None:
+                                lane.publish({"target_users": u, "guide": guide,
+                                              "inputs": inputs, "cti": last.cti,
+                                              "direct": direct_concrete[1]})
             elif task == "fuzz":
                 deadline_fuzz = time.time() + b
                 # the undecided candidates of earlier rounds first, with this larger budget:
                 # on lending-simple-real Liquidation_attack_any, a candidate took 45-160 s to
                 # find and 12-15 s to encode, then Kind 2 refuted it in 31 s
-                for cand in list(pending):
-                    left = deadline_fuzz - time.time()
-                    if left <= 1:
-                        break
-                    txs, st, m, kept = cand[:4]
-                    cand[4] += 1
-                    status, s = exact(invs.checks_for(m), kept["literal"], left, kept)
-                    if status == "invalid":
-                        o = fuzz_found(txs, st, m, s, kept.get("method", "fuzz"))
-                        if o.status == "invalid":
-                            return o
-                        o.cti, last = last.cti, o
-                    if status != "unknown" or cand[4] >= PENDING_TRIES:
-                        pending.remove(cand)
+                o = check_pending(deadline_fuzz)
+                if o is not None:
+                    return o
                 # first towards the counterexample to induction, if any, then at random; the
                 # first search gets half of the time, the last all the time left. A search
                 # gives a few candidates at a time, so it is repeated until its time is over:
@@ -1347,13 +1467,21 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                                 prop, guide, t, filtered=not direct_concrete[1],
                                 values=inputs))]
                             if guide else []) + [(users, lambda f, t: f.candidates(prop, t))]
+                cut_short = False
                 for k, (m, search) in enumerate(searches):
+                    if cut_short:
+                        break
                     checks = invs.checks_for(m)
                     end = (deadline_fuzz if k == len(searches) - 1
                            else time.time() + (deadline_fuzz - time.time()) / 2)
                     for txs, st in _repeated(search, invs.fuzzer_for(m), end):
                         left = deadline_fuzz - time.time()
                         if left <= 1:
+                            break
+                        if lane is not None and lane.waiting():
+                            # a fact of another lane (the counterexample to induction): the
+                            # next round searches with it
+                            cut_short = True
                             break
                         kept = {"literal": state_literal(st, checks.enc.system, checks.enc)}
                         status, s = exact(checks, kept["literal"], left, kept)
@@ -1373,6 +1501,12 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                 # them took a round more (34 lending rows, 600 s: 4825 s against 2429 s on the
                 # 25 rows decided by both, 2026-11-06)
                 deadline_ext = time.time() + b
+                if lane is not None and "fuzz" not in lane.tasks:
+                    # the late proposals of the completion, which the fuzz task checks first
+                    # when it runs in this process
+                    o = check_pending(deadline_ext)
+                    if o is not None:
+                        return o
                 comp, fuzzer = completions[users], invs.fuzzer_for(users)
                 checks = invs.checks_for(users)
                 for txs, st, tx in comp.candidates(fuzzer, deadline_ext, guide):
@@ -1432,6 +1566,8 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                     # at most k2_users users extends to goal (it would extend to
                     # k2_users), so the other searches stop
                     searching, k2_note = False, ""
+                    if lane is not None:
+                        lane.publish({"searching": False})
                     last = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"),
                                    o.errors, o.solver, "kind2", last.cti,
                                    true_for=proved_for(k2_users))

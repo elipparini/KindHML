@@ -18,7 +18,9 @@ of the contracts (f, g numeric fields, m mappings to numbers, c constants of the
                 enclosing ifs, with e over fields and constants; G && d != 0 -> f * d == e',
                 for f = e' / d
 * addresses:    a == K;  a != K;  g -> a != K;  !g -> a != K, for an address field a, an
-                address constant K (null or a contract) and a boolean field g
+                address constant K (null or a contract) and a boolean field g;
+                a != b;  g -> a != b;  !g -> a != b, for two address fields a, b
+                (two-donatees: started -> p1 != p2, since join requires msg.sender != p1)
 
 They are written as source text and type-checked like invariants written by the user. A
 candidate false in a reachable state of the fuzzer (random transactions run by the reference
@@ -189,6 +191,12 @@ def _templates(program: S.Program) -> List[Tuple[str, tuple]]:
             for g in flags:
                 out += [(f"{g} -> {a} != {k}", ("addr_if", g, True, a, k)),
                         (f"(!{g}) -> {a} != {k}", ("addr_if", g, False, a, k))]
+    for i, a in enumerate(addrs):
+        for b in addrs[i + 1:]:
+            out.append((f"{a} != {b}", ("addr_ne2", a, b)))
+            for g in flags:
+                out += [(f"{g} -> {a} != {b}", ("addr_if2", g, True, a, b)),
+                        (f"(!{g}) -> {a} != {b}", ("addr_if2", g, False, a, b))]
     out += [(t, ("def", t)) for t in _definitions(program)]
     return list(dict(out).items())            # without duplicates, in order
 
@@ -204,8 +212,8 @@ def minimize(keys: List[tuple]) -> List[tuple]:
     f <= c by f <= c' (c' < c); f > 0 -> g > 0 by (f > 0) == (g > 0) or by g positive;
     (f > 0) == (g > 0) by f and g positive; f == 0 -> g == 0 by g > 0 -> f > 0 (or
     (f > 0) == (g > 0)) when g >= 0; sum(m) <= f by sum(m) == f; m[null] >= 0 by
-    m[null] == 0; g -> a != K by a != K; a != K and g -> a != K by a == K' (K' != K). Fewer,
-    stronger premises are faster for the solvers."""
+    m[null] == 0; g -> a != K by a != K; a != K and g -> a != K by a == K' (K' != K);
+    g -> a != b by a != b. Fewer, stronger premises are faster for the solvers."""
     ks = set(keys)
     ge = {}
     for k in ks:
@@ -251,6 +259,8 @@ def minimize(keys: List[tuple]) -> List[tuple]:
         if kind == "addr_if":
             a, c = k[3], k[4]
             return (("addr", a) if c == "null" else ("addr_ne", a, c)) in ks or elsewhere(a, c)
+        if kind == "addr_if2":
+            return ("addr_ne2", k[3], k[4]) in ks
         return False
     return [k for k in keys if not implied(k)]
 

@@ -131,6 +131,20 @@ def test_address_templates():
     assert len(invgen.candidates(program)) == len(texts)      # all well typed
 
 
+def test_templates_of_two_address_fields():
+    """Two address fields compared, also under a boolean field: two-donatees needs
+    started -> p1 != p2 (join requires msg.sender != p1), which Houdini proves."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "regression", "two-donatees.sol"))
+    texts = invgen.templates(program)
+    for t in ("TwoDonatee.p1 != TwoDonatee.p2",
+              "TwoDonatee.started -> TwoDonatee.p1 != TwoDonatee.p2",
+              "(!TwoDonatee.started) -> TwoDonatee.p1 != TwoDonatee.p2"):
+        assert t in texts, t
+    assert len(invgen.candidates(program)) == len(texts)      # all well typed
+    keys = [("addr_ne2", "a", "b"), ("addr_if2", "g", True, "a", "b")]
+    assert invgen.minimize(keys) == [("addr_ne2", "a", "b")]
+
+
 def test_invariant_definitions():
     """An assignment f = e / d under the conditions G gives G && d != 0 -> f * d == e."""
     program, _ = V.load(os.path.join(ROOT, "contracts", "lending-real", "lending_real.sol"))
