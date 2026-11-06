@@ -21,17 +21,29 @@ conjuncts `t >= x`, `x <= t` and `x == t` of the requires that start its body, f
 parameter x, with msg.sender replaced by the sender of the modality. A guard often names the
 amount that a strategy needs: on lending-real, the defence against liquidation is
 repay(sdebt[a] * idx), the whole debt, which is a product, not a field (2026-10-25).
+
+Disjunctive instances (`Cases`, 2026-11-06): the disjunction of several instances implies the
+property too, as each of them does. A defence may need a case split: on lending_int_v2
+Liquidation_defence, price 1 if c1[a] == 0, a price above the debt otherwise. The cases are
+chosen from a larger pool of calls (the arguments also the constants 0 and 1 and the products
+of two terms), by their values at the counterexample states of refuted instances.
 """
 
 from __future__ import annotations
 
 import itertools
-from typing import Dict, List, Optional, Tuple
+from dataclasses import replace
+from fractions import Fraction
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from . import pretty
 from . import syntax as S
+from .fuzz import INT_DOMAIN
+from .reference import FormulaEvaluator, Revert
 
 MAX_INSTANCES = 64
+MAX_POOL = 2048         # the calls of the pool of `Cases` (evaluated at states, not checked)
+MAX_CASES = 3           # the cases of a disjunctive instance
 
 
 def _fits(u, t) -> bool:
@@ -136,8 +148,10 @@ def _sender(e, fvar: str) -> Optional[S.Expr]:
     return None
 
 
-def candidates(program: S.Program, t, scope: List[str]) -> List[S.Expr]:
-    """The terms of type t for an argument (module docstring)."""
+def candidates(program: S.Program, t, scope: List[str], extended: bool = False) -> List[S.Expr]:
+    """The terms of type t for an argument (module docstring); with `extended`, for a
+    number, also the constants 0 and 1 and the products of two of the terms (of a type that
+    fits t)."""
     if t == S.BOOL:
         return [S.BoolLit(True), S.BoolLit(False)]
     if t == S.ADDRESS:
@@ -153,7 +167,19 @@ def candidates(program: S.Program, t, scope: List[str]) -> List[S.Expr]:
         for f in c.fields:
             if not isinstance(f.type, S.MapType) and _fits(f.type, t):
                 out.append(S.Field(c.name, f.name))
-    return out
+    if not extended:
+        return out
+    real = t == S.REAL
+    consts: List[S.Expr] = ([S.RealLit(Fraction(0)), S.RealLit(Fraction(1))] if real
+                            else [S.IntLit(0), S.IntLit(1)])
+    products: List[S.Expr] = []
+    for i, x in enumerate(out):
+        for y in out[i:]:
+            e = S.BinOp("*", x, y, real=real)
+            u = _type(program, e, scope)
+            if u is not None and _fits(u, t):
+                products.append(e)
+    return out + consts + products
 
 
 def _subst(e, mapping: Dict[str, S.Expr], modal: Optional[Tuple[str, str, S.Procedure]],
@@ -249,6 +275,31 @@ def instances(program: S.Program, prop: S.Property,
     """The instances of the first existential over a method of `prop` (module docstring), each
     with a description, at most `limit` (in the order of the procedures and of the candidate
     terms); [] if there is none."""
+    return [instance(prop, [ch], f"{prop.name}__w{i}")
+            for i, ch in enumerate(choices(program, prop, limit))]
+
+
+def instance(prop: S.Property, cases: Sequence[Tuple[str, S.Expr]],
+             name: str) -> Tuple[str, S.Property]:
+    """The instance of `prop` with the disjunction of `cases` (`choices` of `prop`) in place
+    of its first existential over a method, with its description: it implies the property,
+    as each case does. The variables bound in each case after the first are renamed apart
+    (each case binds the variables of the body of the existential)."""
+    fq = _site(prop.formula, [])[0]
+    body = cases[0][1]
+    for i, (_, b) in enumerate(cases[1:], 1):
+        body = S.BinOp("||", body, _rename(b, {n: f"{n}__{i}" for n in _binds(b)}))
+    return (" | ".join(t for t, _ in cases),
+            S.Property(name, _replace(prop.formula, fq, body), None, prop.pos))
+
+
+def choices(program: S.Program, prop: S.Property, limit: int = MAX_INSTANCES,
+            extended: bool = False, guarded: bool = False) -> List[Tuple[str, S.Expr]]:
+    """The calls that replace the first existential over a method of `prop` (module
+    docstring): for each, its description and the body of the existential with the call, at
+    most `limit`; with `extended`, the arguments from `candidates` with `extended`; with
+    `guarded`, only the calls with guard terms (they come first). [] if there is no such
+    existential, or its instances would not imply the property."""
     site = _site(prop.formula, [])
     if site is None:
         return []
@@ -257,7 +308,7 @@ def instances(program: S.Program, prop: S.Property,
     if not _plain_uses(body, fq.var, aq.var if aq is not None else None, False) \
             or _binds(body) & set(scope + [fq.var] + ([aq.var] if aq is not None else [])):
         return []                       # a variable of the terms would be captured
-    out: List[Tuple[str, S.Property]] = []
+    out: List[Tuple[str, S.Expr]] = []
     seen: set = set()
     # the sender of the call, if a term at the state of the existential: it replaces msg.sender
     # in the guard terms
@@ -266,44 +317,132 @@ def instances(program: S.Program, prop: S.Property,
             or (isinstance(sender, S.QVar) and sender.name in scope)):
         sender = None
 
-    def calls(guards: bool):
+    def calls(guards: bool, level: int = 0):
         """The calls with their choices of terms: with `guards`, those of the procedures with
         guard terms (the other parameters with the generic terms); the procedures with fewer
-        combinations first, so that the limit cuts the procedures with many parameters."""
+        combinations first, so that the limit cuts the procedures with many parameters. With
+        `level` 1 or 2, the calls with a constant or a product (`_by_level`) as one of their
+        arguments, and terms of lower levels as the others."""
         found = []
         for c in program.contracts:
             for p in c.procs:
                 if p.name == S.CONSTRUCTOR:
                     continue
-                choices = [candidates(program, v.type, scope) for v in p.params]
+                levels = [_by_level(program, v.type, scope) for v in p.params]
+                terms = [ls[0] for ls in levels]
                 if guards:
                     own = [guard_terms(program, p, v, sender, scope) for v in p.params]
                     if not any(own):
                         continue
-                    choices = [g or ch for g, ch in zip(own, choices)]
-                if all(choices):
-                    size = 1
-                    for ch in choices:
-                        size *= len(ch)
-                    found.append((size, c, p, choices))
+                    terms = [g or ch for g, ch in zip(own, terms)]
+                if level:
+                    # one argument at `level` (each in turn), the others below it
+                    for i, ls in enumerate(levels):
+                        if len(ls) > level and ls[level]:
+                            low = [sum(x[:level], []) if len(x) > 1 else x[0] for x in levels]
+                            terms = low[:i] + [ls[level]] + low[i + 1:]
+                            found.append((_size(terms), c, p, terms))
+                elif all(terms):
+                    found.append((_size(terms), c, p, terms))
         return sorted(found, key=lambda x: x[0])
 
-    for guards in (True, False):
-        for _, c, p, choices in calls(guards):
-            for terms in itertools.product(*choices):
+    for guards, level in ([(True, 0)] if guarded else
+                          [(True, 0), (False, 0)] + ([(False, 1), (False, 2)] if extended
+                                                     else [])):
+        for _, c, p, terms_of in calls(guards, level):
+            for terms in itertools.product(*terms_of):
                 text = f"{p.name}({', '.join(pretty.expr(t) for t in terms)})"
                 if text in seen:
                     continue
                 seen.add(text)
                 mapping = {fq.var: S.ProcConst(c.name, p.name)}
-                new_body = _subst(body, mapping, (c.name, p.name, p),
-                                  aq.var if aq is not None else None, tuple(terms))
-                formula = _replace(prop.formula, fq, new_body)
-                out.append((text, S.Property(f"{prop.name}__w{len(out)}", formula, None,
-                                             prop.pos)))
+                out.append((text, _subst(body, mapping, (c.name, p.name, p),
+                                         aq.var if aq is not None else None, tuple(terms))))
                 if len(out) >= limit:
                     return out
     return out
+
+
+def _size(terms: List[List[S.Expr]]) -> int:
+    size = 1
+    for ch in terms:
+        size *= len(ch)
+    return size
+
+
+def _by_level(program: S.Program, t, scope: List[str]) -> List[List[S.Expr]]:
+    """The terms of type t for an argument, by level: the terms of `candidates`; for a
+    number, then its constants; then its products (`candidates` with `extended`)."""
+    plain = candidates(program, t, scope)
+    if t not in (S.INT, S.UINT, S.REAL):
+        return [plain]
+    more = candidates(program, t, scope, extended=True)[len(plain):]
+    return [plain, [e for e in more if not isinstance(e, S.BinOp)],
+            [e for e in more if isinstance(e, S.BinOp)]]
+
+
+def _rename(e, names: Dict[str, str]):
+    """e with the quantified variables of `names` (bound in e) renamed."""
+    if isinstance(e, S.QVar) and e.name in names:
+        return replace(e, name=names[e.name])
+    if isinstance(e, S.Quant) and e.var in names:
+        return replace(e, var=names[e.var], body=_rename(e.body, names))
+    if not hasattr(e, "__dataclass_fields__") or isinstance(e, (S.Type, S.MapType)):
+        return e
+    changes = {}
+    for name in e.__dataclass_fields__:
+        v = getattr(e, name)
+        if isinstance(v, tuple):
+            new = tuple(_rename(x, names) if isinstance(x, S.Expr) else x for x in v)
+            if any(a is not b for a, b in zip(new, v)):
+                changes[name] = new
+        elif isinstance(v, S.Expr):
+            new = _rename(v, names)
+            if new is not v:
+                changes[name] = new
+    return replace(e, **changes) if changes else e
+
+
+class Cases:
+    """Disjunctive instances from counterexamples (module docstring). The calls of the pool
+    (`choices` with `extended`) are evaluated at the counterexample states of refuted
+    instances (bounded evaluation, as the fuzzer's); after each state, the fewest calls that
+    together hold at every recorded state where some call holds (greedily, at most
+    `max_cases`; the earlier call of the pool on a tie) give the cases of a new instance, if
+    not given before. The choice is a heuristic: an instance is proved or refuted by its own
+    check, and a state may be unreachable (where no call may hold)."""
+
+    def __init__(self, program: S.Program, prop: S.Property, limit: int = MAX_POOL,
+                 max_cases: int = MAX_CASES):
+        self.prop, self.max_cases = prop, max_cases
+        self.pool = choices(program, prop, limit, extended=True)
+        self.formulas = [instance(prop, [ch], prop.name)[1].formula for ch in self.pool]
+        self.holds: List[Set[int]] = [set() for _ in self.pool]
+        self.states = 0
+        self.given: Set[frozenset] = set()   # the sets of cases given (or checked otherwise)
+
+    def add(self, st, system) -> Optional[List[Tuple[str, S.Expr]]]:
+        """Records the state st (of `system`); the cases of a new instance, or None."""
+        ev = FormulaEvaluator(system, INT_DOMAIN)
+        k, self.states = self.states, self.states + 1
+        for j, f in enumerate(self.formulas):
+            try:
+                if ev.holds(f, [st]):
+                    self.holds[j].add(k)
+            except (Revert, KeyError, ZeroDivisionError, TypeError, ValueError,
+                    NotImplementedError, IndexError, RecursionError):
+                pass                        # a call the interpreter cannot run there
+        left = set().union(*self.holds) if self.holds else set()
+        chosen: List[int] = []
+        while left and len(chosen) < self.max_cases:
+            j = max(range(len(self.pool)), key=lambda j: len(self.holds[j] & left))
+            chosen.append(j)
+            left -= self.holds[j]
+        key = frozenset(self.pool[j][0] for j in chosen)
+        if left or not chosen or key in self.given:
+            return None
+        self.given.add(key)
+        return [self.pool[j] for j in sorted(chosen)]
 
 
 def _replace(e, old, new):

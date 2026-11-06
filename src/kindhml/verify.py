@@ -404,7 +404,19 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
     after each pass over the instances, that of a round of the side at each round. An
     instance implies the property; a proof of an instance holds for every n >= L = max(c_H,
     its cutoff), and for every n < L since the instance needs no idle user. Without such a
-    proof, unknown (a refuted instance refutes nothing)."""
+    proof, unknown (a refuted instance refutes nothing).
+
+    Disjunctive instances (`witness.Cases`; on lending_int_v2 Liquidation_defence, no single
+    call is a defence, and the disjunction of setPrice(1) and setPrice(sdebt[a] * idx) was
+    proved in 2 s, 2026-11-06): at the first refutation of an instance, its counterexample
+    with the strongest premise set (one more run, with the budget of a check; the instance
+    goes on with its other sets as before) goes to `witness.Cases`, the last refuted first,
+    one after each check of an instance, once the instances with guard terms are checked;
+    the disjunctive instance they give, if any, is checked next, with the strongest premise
+    set only. Taken only after a first pass over all the instances, the counterexamples came
+    too late on cases.sol under load (its 34 instances took 146 s over the rounds of the
+    side); with the weakest premise sets, 55 of the 512 calls of the pool held at the states
+    of lending_int_v2, and the same cases came again for 8 states."""
     unknown = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
     found = witness.instances(program, prop)
     cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
@@ -438,23 +450,82 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
     # run, none was decided in 300 s; alone, each is decided in 0.5 s)
     pending = [(text, inst, premises, 0) for text, inst in found
                for premises in [invs.checks.premises(inst, invs.assumed())] if premises]
+    # the instances with guard terms, checked first: the counterexamples are taken after
+    # them (a guard often names the amount of a strategy, Sect. 7.8: the 12 rows proved by an
+    # instance in the run of 2026-11-06 were all proved by one with a guard term; taking
+    # counterexamples from the start made lending_real Liquidation_defence 16 s -> 61 s)
+    guarded = {text for text, _ in witness.choices(program, prop, guarded=True)}
+    first = sum(1 for text, _, _, _ in pending if text in guarded)
+    cases = witness.Cases(program, prop)
+    cases.given |= {frozenset([text]) for text, _ in found}
+    # the instances refuted, at their first refutation: (description, instance, its
+    # strongest premise set, the refuted case), whose counterexamples go to `cases`
+    refuted: List[Tuple[str, S.Property, object, str]] = []
+    made = 0                            # the disjunctive instances made
+
+    def disjunctive(b: float):
+        """The counterexample of the last refuted instance, and the instance of `cases`
+        with it (an entry of `pending`), or None. The last first: a disjunctive instance
+        is refuted at a state where its cases fail, which changes the next cases; the
+        states of the earlier instances mostly agree with them (cases.sol: 13 states in a
+        row gave the same cases, 2026-11-06)."""
+        nonlocal made
+        text, inst, prem, case = refuted.pop()
+        try:
+            u = max(1, invs.checks.property_count(prem, inst))
+            checks_u = invs.checks_for(u)
+            lus, names = checks_u.property_check(inst, prem)
+            status, res, _, _ = _free_run_cex(lus, case if case in names else names[0], b)
+            if status == "valid" and len(names) == 1:
+                return text, inst, [prem], 0        # its check proves the property
+            if status != "invalid" or res is None or not res.counterexample:
+                return None
+            values = state_values(res.counterexample)
+            st = state_from_values({p: python_constant(v) for p, v in values.items()},
+                                   checks_u.enc.system, checks_u.enc)
+            chosen = cases.add(st, checks_u.enc.system)
+            if chosen is None:
+                return None
+            made += 1
+            text, new = witness.instance(prop, chosen, f"{prop.name}__d{made}")
+            if checks.cutoff([new]).of_property(new.name) is None or not downward(new):
+                return None
+            # the strongest premise set only (as `_chain_rounds`): its counterexample is
+            # the next state of `cases`; with the smallest first, a refuted instance waited
+            # for the next pass to be refuted with the strongest
+            premises = invs.checks.premises(new, invs.assumed())[-1:]
+            return (text, new, premises, 0) if premises else None
+        except EncodingTimeout:
+            raise                           # the time limit: `_step` gives unknown
+        except (OutOfFragment, KindHMLError, NotImplementedError, ValueError, TypeError,
+                KeyError, IndexError, RecursionError):
+            return None
+
     per = FIRST_BUDGET / 2              # the budget of a check, doubled after each pass
     budget, k = FIRST_BUDGET, 0         # the budget of a round; the next instance
-    while pending:
+    cti_next = False                    # whether a counterexample is taken next
+    while pending or refuted:
         end = time.time() + budget
-        while pending and time.time() < end:
+        while (pending or refuted) and time.time() < end:
             left = None if deadline is None else deadline - time.time()
             if left is not None and left <= 1:
                 return unknown
+            if refuted and (not pending or (first <= 0 and cti_next)):
+                cti_next = False
+                new = disjunctive(per if left is None else min(per, left))
+                if new is not None:
+                    pending.insert(k, new)  # checked next
+                continue
             text, inst, premises, i = pending[k]
+            case = None
             try:
                 u = max(1, invs.checks.property_count(premises[i], inst))
             except OutOfFragment:
                 status = "invalid"      # not checked: the next premise set, if any
             else:
                 lus, names = invs.checks_for(u).property_check(inst, premises[i])
-                status, _, solver = _free_run(lus, names, per if left is None
-                                              else min(per, left))
+                status, case, solver = _free_run(lus, names, per if left is None
+                                                 else min(per, left))
             if status == "valid":
                 low = max(invs.users, u)
                 o = _valid(prop, "invariants", time.time() - start, solver)
@@ -464,6 +535,8 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
                            + f"; for the instance {text} of {prop.name}")
                 return o
             if status == "invalid":
+                if case is not None and i == 0:
+                    refuted.append((text, inst, premises[-1], case))
                 if i + 1 < len(premises):
                     pending[k] = (text, inst, premises, i + 1)
                 else:
@@ -472,6 +545,8 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
             k += 1
             if k >= len(pending):
                 k, per = 0, per * 2
+            cti_next = True             # a counterexample, then an instance, in turn
+            first -= 1
         yield
         budget *= 2
     return unknown

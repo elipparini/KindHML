@@ -1414,6 +1414,21 @@ DESIGN.md, "Solvers".
   the properties before it in its file, in one process as in the runs, took the same time
   with the old and the new code (16.0 and 16.1 s, 3.1 and 3.1 s, 9.8 and 9.7 s): the
   load of the run.
+- **The two lending rows open after 3 h** (with the user: the order (1) exact check of a
+  hand-made counterexample, (2) disjunctive instances, (3) a counterexample to induction for
+  existentials over methods):
+  - (1) lending_int `Liquidation_defence` (false; never refuted): a counterexample by hand
+    with 2 users and 9 transactions (two accruals leave a remainder of scaled debt after
+    `repay` of the whole debt), checked by the reference interpreter on all 609 actions of
+    the borrower and by the exact check of the tool (cvc5; z3 undecided in 450 s); now the
+    note of its ground truth (383939a). It is narrow: with one accrual, `repay(11)` defends;
+    with 15 tokens instead of 12, `deposit0(15)` does.
+  - (2) lending_int_v2 `Liquidation_defence` (true): disjunctive instances (DESIGN.md Sect.
+    7.8). The witness side alone proves it in 526 s; the crafted `cases.sol` is proved in
+    75-150 s by the tool; the 16 rows proved by instances keep their times (335 s against
+    380 s).
+
+## Done (2026-11-05): mutations of the integer lending families; why rows stay open
 
 - **Mutations** (4a9d5aa): lending_int_v2-v4 and lending_simple_int_v2-v4, the mutations of the
   real families (`setPrice` by anyone; `borrow` checks the health before adding the debt;

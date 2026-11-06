@@ -1134,6 +1134,39 @@ proved; `experiments/witness/`). A proved instance proves the property for every
 n >= L = max(c_H, u), u the cutoff of its check, and, since it needs no idle user, for every n < L (the proof with L users
 holds for fewer users); the scope names the instance. A refuted instance refutes nothing.
 
+Disjunctive instances (2026-11-06, `witness.Cases`). A disjunction of instances implies the
+property too, as each of them does (the existential is in positive position), so its proof
+proves the property, by the same argument. A defence may need a case split: on lending_int_v2
+`Liquidation_defence` (true), the borrower sets the price to 1 if it has no collateral (every
+liquidation then needs collateral) and to a price above its debt otherwise (it becomes
+healthy); no single call does both, and the row was open after 3 h. Written by hand as a
+property, `setPrice(1) || setPrice(sdebt[a] * idx)` was proved for every n in 2 s. The cases
+are found by counterexamples (CEGIS):
+* a pool of calls, as the instances but with more terms: the constants 0 and 1 and the
+  products of two terms, ordered by the kind of the terms (fields, then constants, then
+  products), each over all the procedures (`choices` with `extended`, at most MAX_POOL =
+  2048 calls). Ordered procedure by procedure, setPrice, the last procedure with one
+  parameter of lending_int, fell out of the first 512 calls;
+* at the first refutation of an instance, its counterexample with the strongest premise set
+  (one more Kind 2 run) is recorded, and every call of the pool is evaluated there (the
+  bounded evaluation of the fuzzer; 1.3-1.7 s for 1473 calls on lending_int_v2). The
+  fewest calls that together hold at every recorded state where some call holds (greedily,
+  at most MAX_CASES = 3, the earlier call of the pool on a tie) are the cases of the next
+  instance, if not tried before; it is checked next, with the strongest premise set only.
+  The last counterexample goes first: the counterexample of the last disjunctive instance is
+  where its cases fail.
+The choice is a heuristic: a recorded state need not be reachable, and only the check of an
+instance proves anything; the bound variables of each case are renamed apart. The
+counterexamples are taken once the instances with guard terms are checked: the 12 rows
+proved by an instance in the run of 2026-11-06 were all proved by one with a guard term, and
+with counterexamples from the start lending_real `Liquidation_defence` took 61 s instead of
+16 s (the 16 rows proved by instances: 380 s before, 335 s after). The crafted contract
+`tests/contracts/witness/cases.sol` is proved through `price(1) | price(d[a] * r)` after 6-8
+counterexamples. On lending_int_v2 `Liquidation_defence`, the witness side alone proved it in
+526 s, through `deposit0(w0[a]) | setPrice(1) | setPrice(w0[a] * idx)` (the 9th disjunctive
+instance, after 70 counterexamples; the price w0[a] * idx is above the debt, since
+w0[a] >= sdebt[a] * idx / 1000).
+
 ### 7.9 Instances of a chain of existentials over methods (2026-10-25)
 
 `forall xs . premise -> exists f1 args1 ... fk argsk . << s : C.f1(args1) >> ... << s :

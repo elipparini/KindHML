@@ -12,6 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LENDING = os.path.join(ROOT, "contracts", "lending-simple-real", "lending_simple_real.sol")
 LOCK = os.path.join(ROOT, "tests", "contracts", "witness", "lock.sol")
 UINT = os.path.join(ROOT, "tests", "contracts", "witness", "uint.sol")
+CASES = os.path.join(ROOT, "tests", "contracts", "witness", "cases.sol")
 LENDING_REAL = os.path.join(ROOT, "contracts", "lending-real", "lending_real.sol")
 
 
@@ -103,3 +104,90 @@ def test_a_false_property_is_not_proved_by_an_ill_typed_instance():
     program, _ = V.load(UINT)
     o = V.verify(program, program.prop("Revertible"), V.ANY, 60, users_mode="combined")
     assert o.status != "valid", o.describe()
+
+
+# ------------------------------------------------------------------ disjunctive instances
+
+def _bound(e) -> list:
+    """The names bound in e, with repetitions."""
+    from kindhml import syntax as S
+    out = [e.var] if isinstance(e, S.Quant) else []
+    for name in getattr(e, "__dataclass_fields__", ()):
+        v = getattr(e, name)
+        for x in (v if isinstance(v, tuple) else (v,)):
+            if isinstance(x, S.Expr):
+                out += _bound(x)
+    return out
+
+
+def test_extended_terms_have_constants_and_products():
+    program, _ = V.load(CASES)
+    prop = program.prop("Defence_cases")
+    plain = [t for t, _ in witness.choices(program, prop, witness.MAX_POOL)]
+    extended = [t for t, _ in witness.choices(program, prop, witness.MAX_POOL, extended=True)]
+    assert "price(1)" not in plain and "price((d[a] * r))" not in plain
+    assert "price(1)" in extended and "price(0)" in extended and "price((d[a] * r))" in extended
+    assert set(plain) <= set(extended)
+
+
+def test_a_disjunctive_instance_binds_its_variables_apart():
+    """Each case binds the liquidator b of the body: the second is renamed."""
+    program, _ = V.load(CASES)
+    prop = program.prop("Defence_cases")
+    pool = dict(witness.choices(program, prop, witness.MAX_POOL, extended=True))
+    text, inst = witness.instance(prop, [("price(1)", pool["price(1)"]),
+                                         ("price((d[a] * r))", pool["price((d[a] * r))"])], "D")
+    assert text == "price(1) | price((d[a] * r))"
+    names = _bound(inst.formula)
+    assert len(names) == len(set(names)) and "b__1" in names
+
+
+def _state(txs):
+    from kindhml.model import System
+    from kindhml.reference import Interpreter, Tx, initial_state
+    program, _ = V.load(CASES)
+    system = System.make(program, 2)
+    interp, st = Interpreter(system), initial_state(system, {})
+    for sender, proc, args in txs:
+        st = interp.step(st, Tx(sender, "C", ("C", proc), args))
+        assert not st.revert, (proc, args)
+    return st, system
+
+
+def test_the_cases_cover_the_states():
+    """At s1 (c[u2] == 0, price 3) only price(1) defends u2; at s2 (c[u2] == 1) a price of at
+    least 4 does. The cases: price(1) and a call that holds at s2."""
+    program, _ = V.load(CASES)
+    cases = witness.Cases(program, program.prop("Defence_cases"))
+    s1, system = _state([("u1", "constructor", {"s": 5}), ("u2", "owe", {"v": 2}),
+                         ("u1", "grow", {}), ("u1", "price", {"v": 3})])
+    first = cases.add(s1, system)
+    assert [t for t, _ in first] == ["price(1)"]
+    s2, _ = _state([("u1", "constructor", {"s": 5}), ("u1", "give", {"to": "u2", "v": 1}),
+                    ("u2", "put", {"v": 1}), ("u2", "owe", {"v": 2}), ("u1", "grow", {}),
+                    ("u1", "price", {"v": 3})])
+    second = cases.add(s2, system)
+    texts = [t for t, _ in second]
+    assert len(texts) == 2 and "price(1)" in texts
+    assert cases.add(s2, system) is None          # the same cases: not given again
+
+
+@pytest.mark.kind2
+def test_a_disjunctive_instance_proves_the_property():
+    """Defence_cases has no cutoff and no single instance that proves it (each of price(1),
+    price(d[a] * r) fails in one of the cases); a disjunction of instances is proved."""
+    program, _ = V.load(CASES)
+    o = V.verify(program, program.prop("Defence_cases"), V.ANY, 600, users_mode="combined")
+    assert o.status == "valid", o.describe()
+    assert "for the instance" in o.scope and " | " in o.scope, o.scope
+
+
+def test_the_pool_has_the_defence_of_lending_int_v2():
+    """The pool is ordered by the kind of the terms (fields, then constants, then products),
+    each over all the procedures: with the procedures in turn, setPrice, the last procedure
+    with one parameter, was cut out of the first 512 calls (2026-11-06)."""
+    program, _ = V.load(os.path.join(ROOT, "contracts", "lending-int", "lending_int_v2.sol"))
+    texts = [t for t, _ in witness.choices(program, program.prop("Liquidation_defence"),
+                                           witness.MAX_POOL, extended=True)]
+    assert "setPrice(1)" in texts and "setPrice((sdebt[a] * idx))" in texts
+    assert texts.index("setPrice(1)") < min(i for i, t in enumerate(texts) if "*" in t)
