@@ -48,6 +48,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
+from kindhml import cpu                              # noqa: E402
 from kindhml import fix_hash_seed                    # noqa: E402
 from kindhml import kind2                            # noqa: E402
 from kindhml import smt_trace                        # noqa: E402
@@ -214,8 +215,11 @@ def select(args):
 
 def isolated(work, limit: float) -> tuple:
     """work() in a child process (a fork, which shares the state of this one), within `limit`
-    seconds (0: no limit): ("done", its value), ("failed", the error), or ("stopped", None) if
-    it was stopped at the limit."""
+    seconds (0: no limit): (how, value, cpu, cpu_solvers), with how and value ("done", its
+    value), ("failed", the error), or ("stopped", None) if it was stopped at the limit; cpu
+    the CPU time of the task, cpu_solvers that of its solver runs, from the systemd slice of
+    the task (None without systemd scopes; `cpu.py`). The child is the root of its task
+    (`kind2.set_root`): its slice is stopped when it ends."""
     recv, send = multiprocessing.Pipe(duplex=False)
     pid = os.fork()
     if pid == 0:
@@ -224,54 +228,65 @@ def isolated(work, limit: float) -> tuple:
         try:
             try:
                 recv.close()
+                kind2.set_root()
                 try:
                     result = ("done", work())
                 except Exception as e:
                     result = ("failed", f"{type(e).__name__}: {e}")
-                send.send(result)
+                send.send(result + (cpu.python_seconds(),))
             finally:
                 os._exit(0)
         finally:
             os._exit(1)
     send.close()
-    ended = False                       # the child ends by itself
-    try:
-        if not recv.poll(limit or None):
-            return "stopped", None
-        ended = True
+    python = None                       # the CPU time of the Python process(es) of the task
+    if not recv.poll(limit or None):
+        result = "stopped", None
+        python = cpu.proc_seconds(pid)  # sampled before it is stopped
+        ru = stop(pid)
+    else:
         try:
-            return recv.recv()
+            *result, python = recv.recv()
+            result = tuple(result)
         except EOFError:
-            return "failed", "the process of the task ended without a result"
-    finally:
-        if ended:
-            os.waitpid(pid, 0)
-        else:
-            stop(pid)
+            result = "failed", "the process of the task ended without a result"
+        ru = os.wait4(pid, 0)[2]
+    solvers = kind2.slice_cpu(pid)
+    if solvers is None and kind2._memory_scope():
+        solvers = 0.0                   # no solver run, so no slice
+    kind2.stop_slice(pid)
+    total = (python + solvers if python is not None and solvers is not None
+             else cpu.rusage_seconds(ru))
+    return result + (total, solvers)
 
 
 def stop(pid: int):
     """Stop the child process `pid`: SIGTERM, on which `kind2.run` stops Kind 2; after
-    STOP_GRACE seconds, SIGKILL, for it and its Kind 2 runs."""
+    STOP_GRACE seconds, SIGKILL, for it and its Kind 2 runs. Returns its resource usage."""
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
     end = time.time() + STOP_GRACE
     while time.time() < end:
-        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+        done, _, ru = os.wait4(pid, os.WNOHANG)
+        if done == pid:
             kind2.kill_runs(pid, alive=False)
-            return
+            return ru
         time.sleep(0.1)
     kind2.kill_runs(pid, alive=True)
     os.kill(pid, signal.SIGKILL)
-    os.waitpid(pid, 0)
+    return os.wait4(pid, 0)[2]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--timeout", type=float, default=10)
+    ap.add_argument("--cores", default="auto",
+                    help="the cores of a task: N, or auto (every available CPU but one, the "
+                         "default), or 0 (unpinned, as before the option); the run is pinned "
+                         "to the first N CPUs of its affinity set (cpu.py)")
     ap.add_argument("--task_timeout", type=float, default=None,
                     help="hard limit of a task (s), at which its process is stopped (default:"
                          f" 2 x timeout + {TASK_MARGIN}; 0: no limit)")
@@ -333,6 +348,12 @@ def main():
     if args.participants == V.ANY and (args.strategy == "kind2"
                                        or args.users_mode == "parameterized"):
         ap.error(f"{V.ANY} needs --strategy portfolio and --users_mode combined or exact")
+    try:
+        args.cores = cpu.resolve(args.cores)
+    except ValueError:
+        ap.error(f"--cores: N >= 0, or auto, not {args.cores}")
+    if args.smt_trace and args.cores is not None:
+        args.cores = 1                  # the names of the trace files would collide
     global LOG, C
     C = palette(args.color)
     expand = () if args.expand == "none" else tuple(args.expand.split(","))
@@ -350,6 +371,9 @@ def main():
         args.csv = args.csv or os.path.join(args.out, "results.csv")
     selected = select(args)
     say(f"{sum(len(rs) for _, _, rs in selected)} tasks in {len(selected)} files")
+    cpus = cpu.pin(args.cores)
+    say(f"cores: {args.cores if args.cores is not None else 'unpinned'} "
+        f"(CPUs {','.join(map(str, cpus))})")
     if args.smt_trace_logics and not args.smt_trace:
         ap.error("--smt_trace_logics needs --smt_trace")
     smt_trace.configure(os.path.abspath(args.smt_trace) if args.smt_trace else None,
@@ -357,8 +381,11 @@ def main():
 
     # The CSV is written row by row, so that an interrupted run keeps its partial results.
     # transactions: those of the counterexample of a refuted property (empty otherwise)
+    # cpu: user + system time of the task, its Python processes and its solver runs
+    # (`cpu.py`); cpu_solvers: that of its solver runs alone, from its systemd slice (empty
+    # without systemd scopes); cores: the cores of the task (empty: unpinned, `--cores 0`)
     fields = ["file", "property", "status", "method", "groundtruth", "check", "wall", "scope",
-              "transactions"]
+              "transactions", "cpu", "cpu_solvers", "cores"]
     out_csv = open(args.csv, "w", newline="") if args.csv else None
     writer = csv.DictWriter(out_csv, fieldnames=fields) if out_csv else None
     if writer:
@@ -371,6 +398,7 @@ def main():
         if args.strategy == "portfolio":
             # the invariant phase of the file, with its own time limit
             start = time.time()
+            start_cpu = cpu.python_seconds() + (kind2.slice_cpu(os.getpid()) or 0)
             limit = (args.invariants_timeout if args.invariants_timeout is not None
                      else 3 * args.timeout)
             entries = V.prove_invariants(program, args.participants, limit, context,
@@ -378,7 +406,10 @@ def main():
                                          invgen=not args.no_invgen,
                                          user_invariants=not args.no_user_invariants,
                                          users_mode=args.users_mode)
-            elapsed = f"[{time.time()-start:.1f}s]"
+            # the CPU time before the wall time: compare_runs.py reads the line's last
+            # bracket
+            used = cpu.python_seconds() + (kind2.slice_cpu(os.getpid()) or 0) - start_cpu
+            elapsed = f"(cpu {used:.1f}s) [{time.time()-start:.1f}s]"
             for invs in entries:
                 head = f"({V.invariant_label(invs)}) " if len(entries) > 1 else ""
                 say(f"{V.stem(f):>18}   {head}{V.invariant_summary(invs)} {elapsed}",
@@ -397,7 +428,7 @@ def main():
                                    strategy=args.strategy, context=context,
                                    invgen=not args.no_invgen,
                                    user_invariants=not args.no_user_invariants,
-                                   users_mode=args.users_mode)
+                                   users_mode=args.users_mode, cores=args.cores)
                     found = (out.groundtruth_check(), out.describe(), out.describe(C),
                              out.status, out.method, out.scope,
                              out.result.k if out.status == "invalid" else None)
@@ -407,7 +438,7 @@ def main():
                              None)
                 return found, V.houdini_progress(context)
 
-            how, value = isolated(check, args.task_timeout)
+            how, value, cpu_task, cpu_solvers = isolated(check, args.task_timeout)
             if how == "done":
                 (gt, desc, colored, status, method, scope, transactions), progress = value
                 V.resume_houdini(context, progress)
@@ -422,19 +453,24 @@ def main():
                 colored = f"{C.bold(prop.name)}: {C.magenta(status)} ({why})"
             wall = time.time() - start
             tally[gt] = tally.get(gt, 0) + 1
-            say(f"{V.stem(f):>18} - {desc} [{wall:.1f}s]",
-                colored=f"{V.stem(f):>18} - {colored} {C.dim(f'[{wall:.1f}s]')}")
+            say(f"{V.stem(f):>18} - {desc} (cpu {cpu_task:.1f}s) [{wall:.1f}s]",
+                colored=f"{V.stem(f):>18} - {colored} "
+                        f"{C.dim(f'(cpu {cpu_task:.1f}s) [{wall:.1f}s]')}")
             if writer:
                 writer.writerow({"file": os.path.relpath(f, ROOT), "property": prop.name,
                                  "status": status, "method": method,
                                  "groundtruth": prop.groundtruth, "check": gt,
                                  "wall": round(wall, 2), "scope": scope,
-                                 "transactions": transactions})
+                                 "transactions": transactions, "cpu": round(cpu_task, 2),
+                                 "cpu_solvers": (round(cpu_solvers, 2)
+                                                 if cpu_solvers is not None else None),
+                                 "cores": args.cores})
                 out_csv.flush()
         if args.print_invariants or LOG:
             # always in the log; on the screen with --print_invariants
             for line in V.invariant_report(context):
                 say(f"{V.stem(f):>18}   {line}", screen=args.print_invariants)
+    kind2.stop_slice(os.getpid())       # the solver runs of the invariant phases
     say("summary: " + ", ".join(f"{k}: {v}" for k, v in sorted(tally.items())),
         colored="summary: " + ", ".join(f"{C.groundtruth(k)}: {v}"
                                         for k, v in sorted(tally.items())))

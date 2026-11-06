@@ -1381,6 +1381,22 @@ DESIGN.md, "Solvers".
   - no time slice for `cvc5-mbqi` (it would be one more tuned constant);
   - the file-based path for cvc5's portfolio or yicesQS is left for later.
 
+## In progress (2026-11-06, with the user): several cores per check
+
+- **Why:** every recent decision (Kind 2's share, the budget of the completion, the turns of the
+  witness side, which keep lending_int_v2 `Liquidation_defence` open in the tool although the
+  side alone proves it in 526 s) was about sharing one core. Plan agreed with the user: one
+  check uses N cores (`--cores`, default every available CPU but one; the paper reports wall
+  time and cores), the CPU time is recorded too.
+- **Stages 0-2 done** (DESIGN.md Sect. 6, "Several cores"): solver runs in the slice of their
+  check (CPU time from its cpu.stat, stop as a whole), cleanup without killing reused pids,
+  `cpu`, `cpu_solvers`, `cores` in results.csv; one combiner for the serial drivers (the same
+  outcomes as before on 1000 random scripts); the parallel driver (`parallel.py`: one worker
+  per side, pinned CPUs, spare sides with more users, failures confined to their side).
+  Suite on the server: 1937 passed, 0 failed.
+- **Next:** measurements on 50 rows (unpinned; 1 core; 2, 4, 8 cores), then the tasks of a side
+  in parallel (lanes), then a full run.
+
 ## Done (2026-11-06): mutations of the integer AMM families; the cost of the completion
 
 - **Mutations** (d2f4f2c): amm_int_v2-v5 and amm_simple_int_v2-v4, adapted from amm-real

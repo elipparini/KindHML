@@ -635,6 +635,36 @@ fuzzer completed by the solver), `kind2-<ENGINE>` (task 5, with the
 engine of Kind 2 that found the verdict, in Kind 2's abbreviation: `kind2-BMC`, `kind2-IND`,
 `kind2-IND2`, `kind2-IC3IA`, `kind2-IC3QE`; `kind2` if Kind 2 does not name it).
 
+**Several cores** (2026-11-06; `parallel.py`, `cpu.py`; `--cores N`, by default every
+available CPU but one, `--cores 0` the earlier unpinned behaviour; `verify(..., cores=N)`).
+The shares of a round (Kind 2's share, the budget of the completion, the turns of the witness
+side) all divide one core. With N >= 2 cores, the sides of a check run in parallel: the
+process of the check (the coordinator) forks one worker per side after the invariant phase
+(the workers inherit `context`) and applies the same combiner as the serial drivers
+(`_CombinedCombiner`, `_AnyCombiner`; on 1000 random scripts, the same outcomes and the same
+sides as the drivers before them, `tests/test_combiner.py`). Each worker is pinned to its own
+CPUs among the N of the check, and Kind 2 and its solvers inherit them: with its engines in
+parallel, Kind 2 would otherwise take the CPUs of the other sides. With more sides than CPUs,
+a worker runs several sides in turn; a free CPU starts the exact side with one more user
+early, one at a time (`spare_side`). A side that raises, or whose worker dies, ends with
+status error, and the other sides go on (serially, the check failed). The command lines pin
+the whole run to its N CPUs (`os.sched_setaffinity`), so that the number of cores is the
+number used; `--smt_trace` uses one core (the names of its files would collide).
+
+Processes: the solver runs of a check are systemd scopes named after the root process of the
+check, in its slice `kindhml-<root>.slice`, which `kill_runs` and `stop_slice` stop as a
+whole; a worker dies with the coordinator (PR_SET_PDEATHSIG), and is stopped by SIGTERM (its
+Kind 2 runs stop in their `finally`), then SIGKILL; `_cleanup` kills a recorded pid only if
+it still belongs to its run (pids are reused), and joins its watcher thread (no fork with
+other threads alive). Forks were checked for the in-process z3 of the completion (a timeout of
+1 s still stops a query in a forked process) and for SIGALRM in the fuzzer.
+
+CPU time (results.csv `cpu`): the CPU time of the Python processes of the check (each its
+own, RUSAGE_SELF; the workers report theirs) plus that of its solver runs (`cpu_solvers`: the
+cpu.stat of the slice, which also counts the solvers Kind 2 leaves behind). `os.wait4` alone
+misses most of it, since Kind 2 does not wait for its solvers: on a row with a wall time of
+6.1 s, the slice counted 8.3 s of solvers, `os.wait4` 2.8 s in all.
+
 On the regressions and test contracts (30 s per property), 82 properties out of 89 match; 28 are
 decided by free-state checks (0.4–2.6 s each). Two properties at the edge of the time limit with
 Kind 2 alone (about 27 s) are now unknown: `two-donatees` P5 and `calls`

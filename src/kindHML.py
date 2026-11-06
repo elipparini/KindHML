@@ -17,7 +17,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from kindhml import cpu                              # noqa: E402
 from kindhml import fix_hash_seed                    # noqa: E402
+from kindhml import kind2                            # noqa: E402
 from kindhml import smt_trace                        # noqa: E402
 from kindhml import verify as V                     # noqa: E402
 from kindhml.colors import palette                  # noqa: E402
@@ -85,9 +87,19 @@ def main() -> int:
     ap.add_argument("--smt_trace_logics", default="", metavar="L1,L2,...",
                     help="with --smt_trace, keep only the instances in these logics, e.g. "
                          "QF_NIA,NIA (default: all)")
+    ap.add_argument("--cores", default="auto",
+                    help="the cores of the check: N, or auto (every available CPU but one, the "
+                         "default), or 0 (unpinned, as before the option); the process is "
+                         "pinned to the first N CPUs of its affinity set")
     args = ap.parse_args()
     if args.smt_trace_logics and not args.smt_trace:
         ap.error("--smt_trace_logics needs --smt_trace")
+    try:
+        args.cores = cpu.resolve(args.cores)
+    except ValueError:
+        ap.error(f"--cores: N >= 0, or auto, not {args.cores}")
+    if args.smt_trace and args.cores is not None:
+        args.cores = 1                  # the names of the trace files would collide
     args.users_mode = V.users_mode_of(args.users_mode)
     if args.n_of_participants is None:
         if args.strategy == "kind2" or args.users_mode == "parameterized":
@@ -115,6 +127,8 @@ def main() -> int:
         return 2
     name = V.stem(args.contract)
     timeout = int(args.timeout) if args.timeout == int(args.timeout) else args.timeout
+    cpu.pin(args.cores)
+    kind2.set_root()                    # the slice of this process's solver runs
     os.makedirs(args.out_lus, exist_ok=True)
     context: dict = {}                  # invariants are proved once for all the properties
     smt_trace.configure(args.smt_trace or None, args.smt_trace_logics or None)
@@ -146,13 +160,16 @@ def main() -> int:
                                      ghost_sums=ghost))
             print(f"{name} - {prop.name}: {lus_path}")
             continue
+        start_cpu = cpu.python_seconds() + (kind2.slice_cpu(os.getpid()) or 0)
         outcome = V.verify(program, prop, args.n_of_participants, args.timeout or None,
                            mode=args.mode, expand=expand, lus_path=lus_path,
                            solver=args.solver, cex=args.cex, strategy=args.strategy,
                            context=context, invgen=not args.no_invgen,
                            user_invariants=not args.no_user_invariants,
-                           users_mode=args.users_mode)
-        print(f"{name} - {outcome.describe(c)}", flush=True)
+                           users_mode=args.users_mode, cores=args.cores)
+        used = cpu.python_seconds() + (kind2.slice_cpu(os.getpid()) or 0) - start_cpu
+        print(f"{name} - {outcome.describe(c)} "
+              f"{c.dim(f'(cpu {used:.1f}s)')}", flush=True)
         if args.cex and outcome.status == "invalid" and outcome.result.counterexample:
             print(format_counterexample(outcome.result.counterexample, c=c), flush=True)
         os.makedirs(args.out_results, exist_ok=True)
@@ -163,6 +180,7 @@ def main() -> int:
     if args.print_invariants:
         for line in V.invariant_report(context):
             print(f"{name} - {line}")
+    kind2.stop_slice(os.getpid())
     return code
 
 

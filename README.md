@@ -55,6 +55,12 @@ Options:
   each property on an arbitrary state satisfying them, searches for the state that refutes it,
   and runs Kind 2 on the transition system, in rounds with doubling budgets; `kind2` only
   runs Kind 2 on the transition system. See `DESIGN.md`, Sect. 6.
+- `--cores N|auto|0`: the cores of a check. `auto` (default): every CPU the process may run on
+  but one; `N`: N of them; the run is pinned to these CPUs, and Kind 2 and its solvers run on
+  them too. With N >= 2, the sides of a check (its numbers of users, the instances of an
+  existential over a method) run in parallel. `0`: one process, not pinned (the behaviour
+  before the option). With `tests/run_all.py`, `results.csv` reports the CPU time of each
+  check (`cpu`, of which `cpu_solvers` in the solvers) and its cores.
 - `--no_invgen`: do not generate candidate invariants (only those of the file are used).
 - `--no_user_invariants`: do not use the declared invariants (of the file, or of the spec and
   lemmas of a benchmark family) as candidates for the proofs; they are still verified.

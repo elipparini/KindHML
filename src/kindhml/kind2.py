@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
 import functools
+import glob
 import json
 import os
 import re
@@ -127,6 +129,87 @@ class Kind2Output:
 MEMORY_LIMIT_GB = 3     # for Kind 2 and its solvers together (per process as a fallback)
 _HAVE_SCOPE: Optional[bool] = None
 
+# The task this process works for (`set_root`): the systemd scopes of its solver runs are named
+# kindhml-{ROOT}-{pid}-{id} and placed in the slice kindhml-{ROOT}.slice, so that the runs of a
+# task, from any of the processes it forks, are found (`kill_runs`), measured (`slice_cpu`) and
+# stopped (`stop_slice`) together. None: this process is its own root.
+ROOT: Optional[int] = None
+
+
+def root() -> int:
+    return ROOT if ROOT is not None else os.getpid()
+
+
+def slice_name(pid: Optional[int] = None) -> str:
+    return f"kindhml-{root() if pid is None else pid}.slice"
+
+
+def set_root(pid: Optional[int] = None, memory_mb: Optional[int] = None) -> None:
+    """Make this process (or `pid`) the root of a task (see ROOT); with `memory_mb`, the
+    slice of the task limits the memory of all its solver runs together (the slice is
+    created first, with an empty scope, so that the limit holds from its first run)."""
+    global ROOT
+    ROOT = os.getpid() if pid is None else pid
+    if memory_mb is not None and _memory_scope():
+        for cmd in (_memory_scope() + ["true"],
+                    ["systemctl", "--user", "set-property", "--runtime", slice_name(),
+                     f"MemoryMax={memory_mb}M"]):
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+
+def slice_cpu(pid: int) -> Optional[float]:
+    """The CPU time (s) used so far by the solver runs of the task rooted at `pid` (the
+    cpu.stat of its slice, which includes solvers left behind by Kind 2), or None (no slice:
+    no systemd user scopes, or no run)."""
+    for path in glob.glob(f"/sys/fs/cgroup/user.slice/user-*.slice/user@*.service/"
+                          f"kindhml.slice/{slice_name(pid)}/cpu.stat"):
+        try:
+            with open(path) as f:
+                for line in f:
+                    key, value = line.split()
+                    if key == "usage_usec":
+                        return int(value) / 1e6
+        except (OSError, ValueError):
+            pass
+    return None
+
+
+_AT_EXIT: dict = {}         # the slices to stop when this process exits, by the owner pid
+
+
+def _stop_at_exit() -> None:
+    for name in _AT_EXIT.get(os.getpid(), ()):
+        try:
+            subprocess.run(["systemctl", "--user", "stop", name], capture_output=True,
+                           timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def _note_slice() -> None:
+    """The slice of this process's runs is stopped when it exits normally, unless it belongs
+    to a task whose root stops it (`set_root`; a forked task or worker ends by `os._exit`,
+    which skips this). Without it, every process that ran a solver (a pytest shard, a script)
+    left an empty slice behind."""
+    if ROOT is None and os.getpid() not in _AT_EXIT:
+        if not _AT_EXIT:
+            atexit.register(_stop_at_exit)
+        _AT_EXIT[os.getpid()] = {slice_name()}
+
+
+def stop_slice(pid: int) -> None:
+    """Stop the slice of the task rooted at `pid`, with every process still in it (slices
+    are not removed when their runs end: one per task would accumulate)."""
+    if _HAVE_SCOPE is not False and shutil.which("systemctl"):
+        try:
+            subprocess.run(["systemctl", "--user", "stop", slice_name(pid)],
+                           capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
 
 def memory_limit_mb() -> int:
     """The memory limit of a run: $KINDHML_MEMORY_GB if set, else the smaller of
@@ -149,12 +232,14 @@ def _memory_scope() -> List[str]:
     """A `systemd-run` prefix limiting the memory of Kind 2 and all its solvers together,
     or [] if systemd user scopes are not available."""
     global _HAVE_SCOPE
-    scope = ["systemd-run", "--user", "--scope", "-q",
+    scope = ["systemd-run", "--user", "--scope", "-q", f"--slice={slice_name()}",
              "-p", f"MemoryMax={memory_limit_mb()}M", "-p", "MemorySwapMax=0"]
     if _HAVE_SCOPE is None:
         try:
+            # without the slice: a process that only probes must not leave a slice behind
             _HAVE_SCOPE = bool(shutil.which("systemd-run") and subprocess.run(
-                scope + ["true"], capture_output=True, timeout=10).returncode == 0)
+                ["systemd-run", "--user", "--scope", "-q", "true"], capture_output=True,
+                timeout=10).returncode == 0)
         except (OSError, subprocess.TimeoutExpired):
             _HAVE_SCOPE = False
     return scope if _HAVE_SCOPE else []
@@ -222,16 +307,46 @@ class _Watcher(threading.Thread):
             pass
 
 
-def _cleanup(proc: subprocess.Popen, unit: Optional[str], watcher: "_Watcher"):
+def _uptime() -> float:
+    try:
+        with open("/proc/uptime") as f:
+            return float(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+
+
+def _belongs(pid: int, unit: Optional[str], since: float) -> bool:
+    """Whether `pid` is still a process of a run: in its scope `unit`, or, without a scope,
+    started after the run (at `since`, seconds since boot). A recorded pid may have been
+    reused by another process, e.g. a solver of another worker of the same task."""
+    try:
+        if unit:
+            with open(f"/proc/{pid}/cgroup") as f:
+                return f"/{unit}.scope" in f.read()
+        with open(f"/proc/{pid}/stat") as f:
+            start = int(f.read().rsplit(")", 1)[1].split()[19]) / os.sysconf("SC_CLK_TCK")
+        return start >= since - 1
+    except (OSError, IndexError, ValueError):
+        return False
+
+
+def _cleanup(proc: subprocess.Popen, unit: Optional[str], watcher: "_Watcher",
+             since: float = 0.0):
     """Kill Kind 2 and every process it started: the whole systemd scope if there is one,
-    and in any case the process groups and the recorded descendants."""
+    and in any case the process groups and the recorded descendants that still belong to
+    the run (`_belongs`). The watcher thread is joined: a process forked later must not
+    have it."""
     watcher.done.set()
+    if watcher is not threading.current_thread():
+        watcher.join(2)
     if unit:
         subprocess.run(["systemctl", "--user", "kill", "--signal=SIGKILL", unit + ".scope"],
                        capture_output=True, timeout=10)
         subprocess.run(["systemctl", "--user", "stop", unit + ".scope"],
                        capture_output=True, timeout=10)
     for pid in [proc.pid] + _descendants(proc.pid) + sorted(watcher.seen):
+        if not _belongs(pid, unit, since):
+            continue
         for kill in (lambda p: os.killpg(os.getpgid(p), signal.SIGKILL),
                      lambda p: os.kill(p, signal.SIGKILL)):
             try:
@@ -243,8 +358,9 @@ def _cleanup(proc: subprocess.Popen, unit: Optional[str], watcher: "_Watcher"):
 
 def kill_runs(pid: int, alive: bool) -> None:
     """Kill the Kind 2 runs of process `pid` (`run`), with their solvers, when `pid` was stopped
-    before `run` could clean up: their systemd scopes and, if `pid` is still alive (otherwise
-    its number may be reused), its descendants."""
+    before `run` could clean up: their systemd scopes (those of the processes it forked too,
+    if `pid` is the root of a task: `set_root`) and, if `pid` is still alive (otherwise its
+    number may be reused), its descendants."""
     if alive:
         for p in _descendants(pid):
             try:
@@ -257,6 +373,7 @@ def kill_runs(pid: int, alive: bool) -> None:
                             f"kindhml-{pid}-*.scope"], capture_output=True, timeout=10)
         except (OSError, subprocess.TimeoutExpired):
             pass
+    stop_slice(pid)
 
 
 SOLVERS = ("z3", "cvc5", "cvc5-mbqi")
@@ -375,13 +492,17 @@ def run(lustre: str, timeout: Optional[float], extra_args: Optional[List[str]] =
 def run_command(cmd: List[str], timeout: Optional[float],
                 env: Optional[dict] = None) -> Tuple[str, str, bool, int]:
     """Run a solver command (Kind 2, or z3 for `direct.py`) in a systemd scope named after
-    this process (so that `kill_runs` finds it), with the memory limit of `memory_limit_mb`,
+    the root of the task and this process, in the slice of the task (so that `kill_runs`
+    finds it, and `slice_cpu` measures it), with the memory limit of `memory_limit_mb`,
     in the environment `env` (None: this process's). It is killed, with every process it
     started, after `timeout` seconds (None: no limit). Returns (stdout, stderr, whether it was
     killed at the timeout, processes killed by the memory limit)."""
     scope = _memory_scope()
-    unit = f"kindhml-{os.getpid()}-{uuid.uuid4().hex[:8]}" if scope else None
+    if scope:
+        _note_slice()
+    unit = f"kindhml-{root()}-{os.getpid()}-{uuid.uuid4().hex[:8]}" if scope else None
     prefix = scope + [f"--unit={unit}"] if scope else []
+    since = _uptime()
     proc = subprocess.Popen(prefix + cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True, env=env,
                             preexec_fn=None if scope else _limit_memory)
@@ -391,11 +512,11 @@ def run_command(cmd: List[str], timeout: Optional[float],
         raw, err = proc.communicate(timeout=timeout)
         killed = False
     except subprocess.TimeoutExpired:
-        _cleanup(proc, unit, watcher)
+        _cleanup(proc, unit, watcher, since)
         raw, err = proc.communicate()
         killed = True
     finally:
-        _cleanup(proc, unit, watcher)
+        _cleanup(proc, unit, watcher, since)
     return raw, err, killed, watcher.oom_kills
 
 

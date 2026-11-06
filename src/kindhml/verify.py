@@ -15,6 +15,8 @@ from . import lustre as L
 from . import pretty
 from .builder import parse, parse_spec
 from . import lustre_subst
+from . import parallel
+from . import smt_trace
 from .encode_formula import EncodingTimeout, FormulaEncoder
 from .encode_trans import BALANCE, Encoder, param_var, proc_const, summed_maps
 from .errors import KindHMLError
@@ -261,10 +263,12 @@ def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Option
            cex: bool = False, strategy: str = "portfolio",
            context: Optional[dict] = None, invgen: bool = True,
            user_invariants: bool = True, parameterized: bool = False,
-           users_mode: Optional[str] = None) -> Outcome:
+           users_mode: Optional[str] = None, cores: Optional[int] = None) -> Outcome:
     """Check one property within `timeout` seconds (None or 0: no limit, the search goes on until
     there is a verdict), for `n_users` users, or for every number of users if `n_users` is
-    ANY. With `cex`, an invalid property comes with a counterexample (slower).
+    ANY. With `cex`, an invalid property comes with a counterexample (slower). With `cores`
+    N >= 2, the sides run in parallel on N CPUs of the affinity set of this process
+    (`parallel.py`); otherwise in this process, one round each in turn.
 
     Strategy "kind2": Kind 2 on (Init, Trans) and Φ(φ) with n_users users (`kind2_search`).
     Strategy "portfolio" (default): the sides of the users mode (`users_mode_of`), each one
@@ -278,7 +282,7 @@ def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Option
     try:
         return _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
                        solver, cex, strategy, context, invgen, user_invariants, parameterized,
-                       users_mode)
+                       users_mode, cores)
     except EncodingTimeout as e:
         return Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [e.message])
     finally:
@@ -286,7 +290,8 @@ def verify(program: S.Program, prop: S.Property, n_users: Users, timeout: Option
 
 
 def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args, solver, cex,
-            strategy, context, invgen, user_invariants, parameterized, users_mode) -> Outcome:
+            strategy, context, invgen, user_invariants, parameterized, users_mode,
+            cores=None) -> Outcome:
     """`verify`, without the time limit of the encoders."""
     if context is None:
         context = {}
@@ -313,6 +318,11 @@ def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
                         extra_args, solver, cex, invgen, user_invariants)
         return s
 
+    # several cores: the sides in parallel (`parallel.py`); not with SMT traces, whose file
+    # names would collide
+    coord = (parallel.Coordinator(cores, deadline, prop, context, _step, houdini_progress,
+                                  resume_houdini, _failed)
+             if cores is not None and cores >= 2 and smt_trace.TRACER is None else None)
     if users_mode == "exact" and n_users != ANY:
         return _drive_one(side(n_users, False, n_users, None))
     cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
@@ -331,13 +341,18 @@ def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
                                      user_invariants, start, deadline) if sh is not None
                        else _witness_rounds(program, prop, context, mode, expand, invgen,
                                             user_invariants, start, deadline))
-        return _drive_any(program, prop, cut, c if users_mode == "combined" else None,
-                          side, deadline, wit)
+        cc = c if users_mode == "combined" else None
+        if coord is not None:
+            return coord.drive(_AnyCombiner(program, prop, cut, cc, side, deadline, wit,
+                                            stop=coord.stop))
+        return _drive_any(program, prop, cut, cc, side, deadline, wit)
     if c is None or c > n_users:
         return _drive_combined(None, side(n_users, False, n_users, None),
                                _why_exact(cut, prop, n_users))
     param = side(c, True, n_users, cut, kind2=False, search=False)
     exact = side(n_users, False, n_users, None, alone=lambda: param.outcome is not None)
+    if coord is not None:
+        return coord.drive(_CombinedCombiner(param, exact, "", stop=coord.stop))
     return _drive_combined(param, exact, "")
 
 
@@ -665,156 +680,243 @@ def _chain_rounds(program: S.Program, prop: S.Property, sh: chains.Shape, contex
     return unknown
 
 
+def _failed(prop: S.Property, status: str, message: str) -> Outcome:
+    """The outcome of a side that failed ("error") or was stopped ("unknown") in a worker
+    (`parallel.py`)."""
+    return Outcome(prop, None if status == "error" else kind2.PropertyResult(prop.name, status),
+                   [message])
+
+
 def _drive_one(side: _Side) -> Outcome:
     while not _step(side):
         pass
     return side.outcome
 
 
-def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
+class _CombinedCombiner:
     """Combined mode, n users: the parameterized side (if the property has a cutoff at most n)
-    and the exact side, one round each in turn, until a verdict for n users. The
-    parameterized side only proves (Houdini and the check on a free state): it ends when that
-    check is refuted, and the exact side, which searches for counterexamples with n users, then
-    runs alone. A proof of the parameterized side holds for n (Prop. 7.9); without a verdict,
-    the outcome of the exact side."""
-    sides = [s for s in (param, exact) if s is not None]
-    while any(s.outcome is None for s in sides):
-        for s in sides:
-            if s.outcome is None and _step(s) and _decided(s.outcome):
-                for t in sides:
-                    if t.outcome is None:
-                        t.gen.close()
-                if s is exact:
-                    s.outcome.scope = _exact_scope(s.outcome, exact.users, why)
-                return s.outcome
-    o = exact.outcome
-    o.scope = why
-    if param is not None:
-        o.scope = f"no verdict with {_n(exact.users)}, nor with the cutoff {param.users}"
-        o.cti = o.cti or param.outcome.cti
-    return o
+    and the exact side, until a verdict for n users. The parameterized side only proves
+    (Houdini and the check on a free state): it ends when that check is refuted, and the
+    exact side, which searches for counterexamples with n users, then runs alone. A proof of
+    the parameterized side holds for n (Prop. 7.9); without a verdict, the outcome of the
+    exact side. Shared by the serial driver (`_drive_combined`) and the parallel one
+    (`parallel.py`); `stop(side)` stops a side (serial: closes its generator)."""
+
+    def __init__(self, param: Optional[_Side], exact: _Side, why: str,
+                 stop: Callable[[_Side], None]):
+        self.param, self.exact, self.why, self.stop = param, exact, why, stop
+        self.sides = [s for s in (param, exact) if s is not None]
+
+    def live(self) -> List[_Side]:
+        return [s for s in self.sides if s.outcome is None]
+
+    def done(self) -> bool:
+        return not self.live()
+
+    def close(self) -> None:
+        for s in self.live():
+            self.stop(s)
+
+    def ended(self, s: _Side) -> Optional[Outcome]:
+        """The verdict, if the side `s`, which has just ended, gives one."""
+        if not _decided(s.outcome):
+            return None
+        if s is self.exact:
+            s.outcome.scope = _exact_scope(s.outcome, self.exact.users, self.why)
+        return s.outcome
+
+    def final(self) -> Outcome:
+        """The outcome without a verdict, once every side has ended."""
+        o = self.exact.outcome
+        o.scope = self.why
+        if self.param is not None:
+            o.scope = (f"no verdict with {_n(self.exact.users)}, nor with the cutoff"
+                       f" {self.param.users}")
+            o.cti = o.cti or self.param.outcome.cti
+        return o
+
+
+def _drive_combined(param: Optional[_Side], exact: _Side, why: str) -> Outcome:
+    """Combined mode, n users (`_CombinedCombiner`), in this process: one round of each side
+    in turn."""
+    comb = _CombinedCombiner(param, exact, why, stop=lambda s: s.gen.close())
+    while not comb.done():
+        for s in comb.sides:
+            if s.outcome is None and _step(s):
+                v = comb.ended(s)
+                if v is not None:
+                    comb.close()
+                    return v
+    return comb.final()
+
+
+class _AnyCombiner:
+    """Every number of users n >= 1 (DESIGN.md, Sect. 7.6). The sides: with a cutoff c, the
+    parameterized side P (its proofs hold for every n >= L, with L <= c) and the exact sides
+    for m = 1, ..., c - 1; without a cutoff, the exact side for 1 user. While P has not proved
+    the property, when all the exact sides have ended before the deadline, the exact side
+    with one more user starts (best effort, for counterexamples with more users;
+    `next_side`). A counterexample with any m users refutes the property. The property is
+    valid if P proves it for every n >= L and each m < L is proved: by the exact side with m
+    users, or, if no address variable is universal in the negation of the property, by any
+    proof with M >= m users, P's included (Cor. 7.8). After P's proof, the exact sides with
+    m >= L stop. The side `wit`, if any, proves instances of an existential over a method
+    (`_witness_rounds`): its proof holds for every n. Shared by the serial driver
+    (`_drive_any`) and the parallel one (`parallel.py`); `stop(side)` stops a side (serial:
+    closes its generator)."""
+
+    def __init__(self, program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[int],
+                 side: Callable[..., _Side], deadline: Optional[float], wit: Optional[_Side],
+                 stop: Callable[[_Side], None]):
+        self.prop, self.c, self.side, self.deadline, self.wit, self.stop = \
+            prop, c, side, deadline, wit, stop
+        self.sides: List[_Side] = []
+        self.exact: Dict[int, _Side] = {}
+        # the numbers of users m proved, each with the users M of its proof: M = m, or M > m
+        # by Cor. 7.8 (for m >= L, covered by the proof of P, M = m)
+        self.proved: Dict[int, int] = {}
+        try:
+            self.downward = Scanner(System.make(program, 1)).idle_needed(prop.formula) == 0
+        except OutOfFragment:
+            self.downward = False
+        self.param = (side(c, True, None, cut, kind2=False, alone=self.alone)
+                      if c is not None else None)
+        if self.param is not None:
+            self.sides.append(self.param)
+        if wit is not None:
+            self.sides.append(wit)
+        for m in range(1, c if c is not None else 2):
+            self.add(m)
+        self.low: Optional[int] = None  # P proved every n >= low
+
+    def alone(self) -> bool:
+        return sum(1 for s in self.sides if s.outcome is None) == 1
+
+    def add(self, m: int) -> _Side:
+        self.exact[m] = self.side(m, False, None, None, alone=self.alone)
+        self.sides.append(self.exact[m])
+        return self.exact[m]
+
+    def live(self) -> List[_Side]:
+        return [s for s in self.sides if s.outcome is None]
+
+    def done(self) -> bool:
+        return not self.live()
+
+    def close(self) -> None:
+        for s in self.live():
+            self.stop(s)
+
+    def cover(self, ms, users: Optional[int], o: Outcome) -> None:
+        """The numbers of users ms are proved by `o`, a proof with `users` users (None: each
+        with its own number); their exact sides stop."""
+        for m in ms:
+            self.proved.setdefault(m, m if users is None else users)
+            if self.exact.get(m) is not None and self.exact[m].outcome is None:
+                self.stop(self.exact[m])
+                self.exact[m].outcome = o
+
+    def ended(self, s: _Side) -> Optional[Outcome]:
+        """The verdict, if the side `s`, which has just ended, gives one (with the proofs
+        before it); the sides it covers are stopped."""
+        o = s.outcome
+        if o.status == "invalid":
+            if s is not self.param:
+                o.scope = f"counterexample with {_n(s.users)}"
+            return o
+        if o.status != "valid":
+            return None
+        if s is self.wit:
+            return o
+        if s is self.param:
+            # P runs without Kind 2: its proofs, by invariants, hold from users_from on
+            assert o.users_from is not None, o.describe()
+            self.low = o.users_from
+            self.cover([m for m in self.exact if m >= self.low], None, o)
+            if self.downward:
+                self.cover(range(1, self.low), self.low, o)
+        else:
+            self.cover(range(1, s.users + 1) if self.downward else [s.users], s.users, o)
+        low, proved = self.low, self.proved
+        if low is not None and all(m in proved for m in range(1, low)):
+            v = self.param.outcome
+            v.scope = f"n >= {low} by invariants"
+            more = sorted({proved[m] for m in range(1, low) if proved[m] != m})
+            own = [m for m in range(1, low) if proved[m] == m and m not in more]
+            if not more:
+                v.scope += f", n < {low} one by one" if low > 1 else ""
+            else:
+                v.scope += (f", n < {low} by " + (f"{_proofs(own)}, and by " if own else "")
+                            + _proofs(more) + (", which holds" if len(more) == 1
+                                               else ", which hold") + " for fewer users")
+            return v
+        return None
+
+    def next_side(self) -> Optional[_Side]:
+        """The exact side with one more user, if one is due (P has not proved the property,
+        every exact side has ended, the deadline has not passed): it is made and returned."""
+        if (self.low is None and all(s.outcome is not None for s in self.exact.values())
+                and (self.deadline is None or time.time() < self.deadline)):
+            return self.add(max(self.exact, default=(self.c or 1) - 1) + 1)
+        return None
+
+    def spare_side(self) -> Optional[_Side]:
+        """With a free CPU (`parallel.py`): the exact side with one more user than the
+        largest, before the others have ended, while P has not proved the property and the
+        deadline has not passed; one at a time (none while the last one made so is live)."""
+        if self.low is not None or (self.deadline is not None
+                                    and time.time() >= self.deadline):
+            return None
+        if getattr(self, "spare", None) is not None and self.spare.outcome is None:
+            return None
+        self.spare = self.add(max(self.exact, default=(self.c or 1) - 1) + 1)
+        return self.spare
+
+    def final(self) -> Outcome:
+        """The outcome without a verdict, once every side has ended."""
+        prop, c, low, proved, exact = self.prop, self.c, self.low, self.proved, self.exact
+        k = 0
+        while k + 1 in proved:
+            k += 1
+        others = [m for m in sorted(proved) if m > k and (low is None or m < low)]
+        parts = (([f"up to {_n(k)}"] if k else [])
+                 + ([f"for {_users_list(others)}"] if others else [])
+                 + ([f"for every n >= {_n(low)}"] if low else []))
+        # an error (of Kind 2) of a side still needed is the outcome, as with n users; not one
+        # of a side covered by another proof, or of a side from the cutoff on (best effort)
+        bound = low or c
+        failed = [s.outcome for m, s in exact.items() if s.outcome.status == "error"
+                  and m not in proved and (bound is None or m < bound)]
+        errors = list(dict.fromkeys(e for f in failed for e in f.errors))
+        o = Outcome(prop, None if failed else kind2.PropertyResult(prop.name, "unknown"),
+                    errors, true_for=" and ".join(parts))
+        o.cti = next((s.outcome.cti for s in self.sides if s.outcome.cti), "")
+        unproved = [m for m in sorted(exact) if m not in proved]
+        open_ = ([f"with {_users_list(unproved)}"] if unproved else []) + \
+            ([f"with the cutoff {c}"] if self.param is not None and low is None else [])
+        o.scope = "; ".join(([f"true {o.true_for}"] if o.true_for else [])
+                            + ([f"no verdict {', nor '.join(open_)}"] if open_ else []))
+        return o
 
 
 def _drive_any(program: S.Program, prop: S.Property, cut: Cutoff, c: Optional[int],
                side: Callable[..., _Side], deadline: Optional[float],
                wit: Optional[_Side] = None) -> Outcome:
-    """Every number of users n >= 1 (DESIGN.md, Sect. 7.6). The sides: with a cutoff c, the
-    parameterized side P (its proofs hold for every n >= L, with L <= c) and the exact sides
-    for m = 1, ..., c - 1; without a cutoff, the exact side for 1 user. While P has not proved
-    the property, when all the exact sides have ended before the deadline, the exact side
-    with one more user starts (best effort, for counterexamples with more users). A
-    counterexample with any m users refutes the property. The property is valid if P proves
-    it for every n >= L and each m < L is proved: by the exact side with m users, or, if no
-    address variable is universal in the negation of the property, by any proof with M >= m
-    users, P's included (Cor. 7.8). After P's proof, the exact sides with m >= L stop. The
-    side `wit`, if any, proves instances of an existential over a method (`_witness_rounds`):
-    its proof holds for every n."""
-    sides: List[_Side] = []
-    exact: Dict[int, _Side] = {}
-    # the numbers of users m proved, each with the users M of its proof: M = m, or M > m by
-    # Cor. 7.8 (for m >= L, covered by the proof of P, M = m)
-    proved: Dict[int, int] = {}
-    try:
-        downward = Scanner(System.make(program, 1)).idle_needed(prop.formula) == 0
-    except OutOfFragment:
-        downward = False
-
-    def alone() -> bool:
-        return sum(1 for s in sides if s.outcome is None) == 1
-
-    def add(m: int):
-        exact[m] = side(m, False, None, None, alone=alone)
-        sides.append(exact[m])
-
-    def cover(ms, users: Optional[int], o: Outcome) -> None:
-        """The numbers of users ms are proved by `o`, a proof with `users` users (None: each
-        with its own number); their exact sides stop."""
-        for m in ms:
-            proved.setdefault(m, m if users is None else users)
-            if exact.get(m) is not None and exact[m].outcome is None:
-                exact[m].gen.close()
-                exact[m].outcome = o
-
-    param = side(c, True, None, cut, kind2=False, alone=alone) if c is not None else None
-    if param is not None:
-        sides.append(param)
-    if wit is not None:
-        sides.append(wit)
-    for m in range(1, c if c is not None else 2):
-        add(m)
-    low = None                          # P proved every n >= low
-
-    def close() -> None:
-        for s in sides:
-            if s.outcome is None:
-                s.gen.close()
-
+    """Every number of users n >= 1 (`_AnyCombiner`), in this process: one round of each live
+    side in turn."""
+    comb = _AnyCombiner(program, prop, cut, c, side, deadline, wit,
+                        stop=lambda s: s.gen.close())
     while True:
-        for s in [s for s in sides if s.outcome is None]:
+        for s in comb.live():
             if s.outcome is not None or not _step(s):
                 continue
-            o = s.outcome
-            if o.status == "invalid":
-                close()
-                if s is not param:
-                    o.scope = f"counterexample with {_n(s.users)}"
-                return o
-            if o.status != "valid":
-                continue
-            if s is wit:
-                close()
-                return o
-            if s is param:
-                # P runs without Kind 2: its proofs, by invariants, hold from users_from on
-                assert o.users_from is not None, o.describe()
-                low = o.users_from
-                cover([m for m in exact if m >= low], None, o)
-                if downward:
-                    cover(range(1, low), low, o)
-            else:
-                cover(range(1, s.users + 1) if downward else [s.users], s.users, o)
-            if low is not None and all(m in proved for m in range(1, low)):
-                close()
-                v = param.outcome
-                v.scope = f"n >= {low} by invariants"
-                more = sorted({proved[m] for m in range(1, low) if proved[m] != m})
-                own = [m for m in range(1, low) if proved[m] == m and m not in more]
-                if not more:
-                    v.scope += f", n < {low} one by one" if low > 1 else ""
-                else:
-                    v.scope += (f", n < {low} by " + (f"{_proofs(own)}, and by " if own else "")
-                                + _proofs(more) + (", which holds" if len(more) == 1
-                                                   else ", which hold") + " for fewer users")
+            v = comb.ended(s)
+            if v is not None:
+                comb.close()
                 return v
-        if (low is None and all(s.outcome is not None for s in exact.values())
-                and (deadline is None or time.time() < deadline)):
-            # the next number of users (best effort, for counterexamples with more users)
-            add(max(exact, default=(c or 1) - 1) + 1)
-        elif all(s.outcome is not None for s in sides):
+        if comb.next_side() is None and comb.done():
             break
-    k = 0
-    while k + 1 in proved:
-        k += 1
-    others = [m for m in sorted(proved) if m > k and (low is None or m < low)]
-    parts = (([f"up to {_n(k)}"] if k else [])
-             + ([f"for {_users_list(others)}"] if others else [])
-             + ([f"for every n >= {_n(low)}"] if low else []))
-    # an error (of Kind 2) of a side still needed is the outcome, as with n users; not one of
-    # a side covered by another proof, or of a side from the cutoff on (only best effort)
-    bound = low or c
-    failed = [s.outcome for m, s in exact.items() if s.outcome.status == "error"
-              and m not in proved and (bound is None or m < bound)]
-    errors = list(dict.fromkeys(e for f in failed for e in f.errors))
-    o = Outcome(prop, None if failed else kind2.PropertyResult(prop.name, "unknown"), errors,
-                true_for=" and ".join(parts))
-    o.cti = next((s.outcome.cti for s in sides if s.outcome.cti), "")
-    unproved = [m for m in sorted(exact) if m not in proved]
-    open_ = ([f"with {_users_list(unproved)}"] if unproved else []) + \
-        ([f"with the cutoff {c}"] if param is not None and low is None else [])
-    o.scope = "; ".join(([f"true {o.true_for}"] if o.true_for else [])
-                        + ([f"no verdict {', nor '.join(open_)}"] if open_ else []))
-    return o
+    return comb.final()
 
 
 def _proofs(ms: List[int]) -> str:
