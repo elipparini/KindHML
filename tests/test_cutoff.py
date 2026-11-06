@@ -424,9 +424,10 @@ def test_any_number_of_users():
 @pytest.mark.skipif(not HAVE_KIND2, reason="Kind 2 not available")
 def test_any_number_of_users_without_cutoff():
     """A property outside the fragment, for every number of users: proved with 1, 2, ...
-    users, one after the other, until the time limit."""
-    program, _ = V.load(os.path.join(ROOT, "contracts", "regression", "additivity.sol"))
-    o = V.verify(program, program.prop("P1_true"), V.ANY, 20)
+    users, one after the other, until the time limit. (additivity P1_true was the example
+    until its numeric instance proved it for every n, `test_numwit.py`.)"""
+    program, _ = V.load(os.path.join(ROOT, "tests", "contracts", "features.sol"))
+    o = V.verify(program, program.prop("Trivial"), V.ANY, 20)
     assert o.status == "unknown" and o.true_for.startswith("up to"), o.describe()
 
 

@@ -253,12 +253,17 @@ class Coordinator:
         live = {id(s): s for s in sides}
         for s in sides:
             s.alone = lambda: len(live) == 1
+            s.publish = lambda fact, i=id(s): conn.send(("fact", i, None, fact))
         while live:
             for i, s in list(live.items()):
                 while conn.poll():
                     what, j = conn.recv()
                     if what == "close" and j in live:
                         live.pop(j).gen.close()
+                    elif what == "fact" and j.get("witness"):
+                        # a target of the witness side: the fuzz tasks read it (`_rounds`)
+                        self.context.setdefault(("witness targets", self.prop.name),
+                                                []).append(j)
                 if i not in live:
                     continue
                 if self._step(s):
@@ -384,12 +389,7 @@ class Coordinator:
                             comb.close()
                             return v
                     elif msg[0] == "fact":
-                        for other in self.where.get(msg[1], []):
-                            if other is not w and other.alive and other.job.tasks is not None:
-                                try:
-                                    other.conn.send(("fact", msg[3]))
-                                except (BrokenPipeError, OSError):
-                                    pass
+                        self._relay(w, msg[1], msg[3])
                     elif msg[0] == "bye":
                         w.said_bye = True
                         cpu.WORKERS += msg[1]
@@ -401,6 +401,22 @@ class Coordinator:
             for w in self.workers:
                 self._terminate(w)
             self.resume(self.context, merge_progress(self.reports))
+
+    def _relay(self, sender: _Worker, side: int, fact: dict) -> None:
+        """A fact of a lane to the other lanes of its side; a target of the witness side to
+        every worker that searches (and to the workers forked later, through `context`)."""
+        if fact.get("witness"):
+            self.context.setdefault(("witness targets", self.prop.name), []).append(fact)
+            to = [w for w in self.workers if w is not sender and w.alive
+                  and (w.job.tasks is None or "fuzz" in w.job.tasks)]
+        else:
+            to = [w for w in self.where.get(side, []) if w is not sender and w.alive
+                  and w.job.tasks is not None]
+        for w in to:
+            try:
+                w.conn.send(("fact", fact))
+            except (BrokenPipeError, OSError):
+                pass
 
     def _more(self, comb) -> None:
         """New sides on free CPUs: the next side due (`next_side`), else one side with more

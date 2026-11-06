@@ -15,6 +15,7 @@ from . import lustre as L
 from . import pretty
 from .builder import parse, parse_spec
 from . import lustre_subst
+from . import numwit
 from . import parallel
 from . import smt_trace
 from .encode_formula import EncodingTimeout, FormulaEncoder
@@ -152,6 +153,8 @@ class Outcome:
                                      # ("up to 2 users and for every n >= 4 users")
     users_from: Optional[int] = None    # parameterized mode: the verdict holds for every
                                         # number of users from this one on
+    users: Optional[int] = None      # a counterexample of the fuzzer: its number of users
+                                     # (that of its side, unless guided by another side)
 
     @property
     def status(self) -> str:
@@ -260,6 +263,9 @@ class _Side:
     make_gen: Optional[Callable[..., Generator]] = None
     # the task groups of the side, in the order they are split into lanes (`parallel.py`)
     lanes: List[FrozenSet[str]] = field(default_factory=list)
+    # a worker of the parallel driver sends the facts of the side to the other sides with it
+    # (the targets of the witness side); None: `context` holds them (`_witness_rounds`)
+    publish: Optional[Callable[[dict], None]] = None
 
 
 PROOF_LANE = frozenset({"invariants", "proof", "reach"})
@@ -375,7 +381,7 @@ def _verify(program, prop, n_users, timeout, mode, expand, lus_path, extra_args,
             wit.gen = (_chain_rounds(program, prop, sh, context, mode, expand, invgen,
                                      user_invariants, start, deadline) if sh is not None
                        else _witness_rounds(program, prop, context, mode, expand, invgen,
-                                            user_invariants, start, deadline))
+                                            user_invariants, start, deadline, wit))
         cc = c if users_mode == "combined" else None
         if coord is not None:
             return coord.drive(_AnyCombiner(program, prop, cut, cc, side, deadline, wit,
@@ -445,7 +451,8 @@ def _decided(o: Outcome) -> bool:
 
 def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: str, expand,
                     invgen: bool, user_invariants: bool, start: float,
-                    deadline: Optional[float]) -> Generator[None, None, Outcome]:
+                    deadline: Optional[float], side: Optional[_Side] = None
+                    ) -> Generator[None, None, Outcome]:
     """Every number of users, a property without a cutoff: its instances with candidate
     witnesses of an existential over a method (`witness.instances`; DESIGN.md, Sect. 7.8)
     that have a cutoff and need no idle user (Cor. 7.8), checked on a free state with the
@@ -469,11 +476,13 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
     of lending_int_v2, and the same cases came again for 8 states."""
     unknown = Outcome(prop, kind2.PropertyResult(prop.name, "unknown"), [])
     found = witness.instances(program, prop)
+    # without an existential over a method: the instances of a block of existentials over
+    # numbers (`numwit.py`), found from states of the fuzzer once Houdini is done
+    numeric = not found and numwit.site(prop.formula) is not None
     cut = cutoff_of(context, program, mode, expand, invgen, user_invariants)
-    if not found or cut.steps is None:
+    if not (found or numeric) or cut.steps is None:
         return unknown
     checks = context[("cutoff checks", id(program), invgen, user_invariants)]
-    icut = checks.cutoff([inst for _, inst in found])
     scanner = Scanner(System.make(program, 1))
 
     def downward(inst: S.Property) -> bool:
@@ -482,9 +491,16 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
         except OutOfFragment:
             return False
 
-    found = [(text, inst) for text, inst in found
-             if icut.of_property(inst.name) is not None and downward(inst)]
-    if not found:
+    def usable(found):
+        """The instances with a cutoff that need no idle user (Cor. 7.8)."""
+        if not found:
+            return []
+        icut = checks.cutoff([inst for _, inst in found])
+        return [(text, inst) for text, inst in found
+                if icut.of_property(inst.name) is not None and downward(inst)]
+
+    found = usable(found)
+    if not (found or numeric):
         return unknown
     invs = _entry(context, program, cut.steps, mode, expand, invgen, user_invariants, True)
     budget = FIRST_BUDGET
@@ -495,6 +511,14 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
         invs.attempt(budget if left is None else min(budget, left))
         budget *= 2
         yield
+    if numeric:
+        try:
+            found = usable(numwit.instances(program, prop, invs.fuzzer_for(max(2, invs.users))))
+        except (OutOfFragment, KindHMLError, NotImplementedError, ValueError, TypeError,
+                KeyError, IndexError, RecursionError):
+            found = []
+        if not found:
+            return unknown
     # each instance: its premise sets (from the smallest) and the index of the current one;
     # one Kind 2 run per check (with the 64 instances of Liquidation_defence_exists in one
     # run, none was decided in 300 s; alone, each is decided in 0.5 s)
@@ -534,6 +558,24 @@ def _witness_rounds(program: S.Program, prop: S.Property, context: dict, mode: s
             st = state_from_values({p: python_constant(v) for p, v in values.items()},
                                    checks_u.enc.system, checks_u.enc)
             chosen = cases.add(st, checks_u.enc.system)
+            if not any(cases.states - 1 in h for h in cases.holds):
+                # no call of the pool holds there: a target for the fuzzers of the exact
+                # sides, as a counterexample to induction (those of properties with an
+                # existential over a method have none)
+                known: set = set()
+                st_known = state_from_values({p: python_constant(v) for p, v in values.items()},
+                                             checks_u.enc.system, checks_u.enc, known=known)
+                have = locations(st_known)
+                model = _stream_inputs(res.counterexample)
+                fact = {"target_users": u, "inputs": _input_values(model),
+                        "guide": {loc: have[loc] for loc in known if loc in have} or None,
+                        "cti": describe_state(values) + _inputs(model), "direct": False,
+                        "witness": True}
+                if fact["guide"]:
+                    if side is not None and side.publish is not None:
+                        side.publish(fact)
+                    else:
+                        context.setdefault(("witness targets", prop.name), []).append(fact)
             if chosen is None:
                 return None
             made += 1
@@ -899,7 +941,7 @@ class _AnyCombiner:
         o = s.outcome
         if o.status == "invalid":
             if s is not self.param:
-                o.scope = f"counterexample with {_n(s.users)}"
+                o.scope = f"counterexample with {_n(o.users or s.users)}"
             return o
         if o.status != "valid":
             return None
@@ -1212,9 +1254,11 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
         res = kind2.PropertyResult(prop.name, "invalid", len(txs), method, time.time() - start)
         named = {x for tx in txs for x in [tx.sender, tx.contract]
                  + [v for v in tx.args.values() if isinstance(v, str)]}
-        return scoped(Outcome(prop, res, [], s, method,
-                              trace="; ".join(describe_tx(tx) for tx in txs)),
-                      m, final=state_paths(st, invs.checks_for(m).enc.system), participants=named)
+        o = scoped(Outcome(prop, res, [], s, method,
+                           trace="; ".join(describe_tx(tx) for tx in txs)),
+                   m, final=state_paths(st, invs.checks_for(m).enc.system), participants=named)
+        o.users = m
+        return o
 
     budget = FIRST_BUDGET
     proof_open, target, engines, kind2_open = True, None, extra_args, side.kind2
@@ -1224,6 +1268,7 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
     k2_note = ""                        # the last run of Kind 2 after such a proof, if undecided
     target_users = users                # the users of the counterexample to induction
     guide: Optional[Dict[tuple, object]] = None     # its known values, for the fuzzer
+    witness_guide = False               # the guide is a target of the witness side
     inputs: Dict[str, list] = {}        # and those of its universal variables, by name
     premises: List[List[str]] = []
     witnesses: List[list] = []          # the maps of the witness premises of each premise set
@@ -1283,9 +1328,11 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                 # a lane (`parallel.py`): the facts of the other lanes of the side, its own
                 # tasks only, and its own end
                 for fact in lane.pull():
-                    if "guide" in fact:
+                    if "guide" in fact and (guide is None or witness_guide
+                                            or not fact.get("witness")):
                         target_users, guide, inputs = (fact["target_users"], fact["guide"],
                                                        fact["inputs"])
+                        witness_guide = bool(fact.get("witness"))
                         last.cti = last.cti or fact["cti"]
                         direct_concrete[1] = direct_concrete[1] or fact["direct"]
                     if fact.get("searching") is False:
@@ -1449,6 +1496,14 @@ def _rounds(program: S.Program, prop: S.Property, side: _Side, cut: Optional[Cut
                                               "direct": direct_concrete[1]})
             elif task == "fuzz":
                 deadline_fuzz = time.time() + b
+                targets = context.get(("witness targets", prop.name))
+                if (guide is None or witness_guide) and targets and not ghost:
+                    # the last target of the witness side (`_witness_rounds`)
+                    fact = targets[-1]
+                    target_users, guide, inputs = (fact["target_users"], fact["guide"],
+                                                   fact["inputs"])
+                    last.cti = last.cti or fact["cti"]
+                    witness_guide = True
                 # the undecided candidates of earlier rounds first, with this larger budget:
                 # on lending-simple-real Liquidation_attack_any, a candidate took 45-160 s to
                 # find and 12-15 s to encode, then Kind 2 refuted it in 31 s

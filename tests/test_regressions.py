@@ -22,7 +22,6 @@ TIMEOUT = 30
 DIRS = [os.path.join(ROOT, "contracts", "regression"), os.path.join(ROOT, "tests", "contracts")]
 
 OPEN = {
-    ("division", "P1_true"): "nonlinear witness; unknown within the timeout",
     ("calls", "Report_sees_balance_after_transfer"): "invalid; found in 25-30 s (by the search "
                                                      "of the counterexample to induction): at "
                                                      "the edge of the timeout",
@@ -35,8 +34,6 @@ OPEN = {
 
 # for every number of users only
 OPEN_ANY = {
-    ("additivity", "P1_true"): "outside the fragment (an address existential under a universal):"
-                               " no cutoff, true up to some number of users only",
     ("features", "Trivial"): "outside the fragment (the map next has address values): no cutoff,"
                              " true up to some number of users only",
 }

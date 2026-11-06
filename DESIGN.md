@@ -1215,6 +1215,31 @@ counterexamples. On lending_int_v2 `Liquidation_defence`, the witness side alone
 instance, after 70 counterexamples; the price w0[a] * idx is above the debt, since
 w0[a] >= sdebt[a] * idx / 1000).
 
+Targets of the witness side (2026-11-06). A counterexample state of an instance where no call
+of the pool holds is a free state (it satisfies the invariants) where the property itself may
+fail: it goes, as a counterexample to induction, to the fuzzers of the exact sides, which have
+none of their own for a property with an existential over a method (through `context` in one
+process; through the coordinator in parallel, `parallel.Coordinator._relay`). A counterexample
+found from it is confirmed by the exact check, as any other, and has its own number of users
+(`Outcome.users`, in the scope). On lending_int `Liquidation_defence` (false; never refuted
+by the tool), these states have the shape of the counterexample of its ground truth (a debt
+that `repay` cannot clear because of rounding, an unhealthy borrower whose tokens cover the
+debt but not a defence), with values that are not reachable (idx = 2001, an oracle null).
+
+Numeric witnesses (2026-11-06, `numwit.py`). The same introduction of existentials applies to a
+block of existentials over numbers after the universal prefix of a property: `forall x .
+exists y . psi` holds if `forall x . psi[y := t]` does, for terms t over x and the numeric
+fields at the state of the block (a y under d modalities becomes old^d(t)). The instance is
+universal: it may have a cutoff where the property has none. The terms come from samples
+(reachable states of the fuzzer, the most informative of 40: fields outside -1, 0, 1; random
+values of x outside -1, 0, 1): a y with an equality y == e under calls takes the value of e
+after them (the interpreter), the others (at most 2) get candidate terms (sums, differences
+and products of up to three of x, the fields, 0, 1), kept if psi holds at every sample; each
+storage y then takes the simplest term with its values. With samples where v == 0, division
+first gave c3 := c1, which every sample satisfied. additivity and division `P1_true`
+(`forall c1 c2 . exists c3 v12 v3 . forall a . ...`: no cutoff, open in every run) are proved
+for every n in under 5 s, with c3 := c1 + c2 (c1 * c2) and the values of v after the calls.
+
 ### 7.9 Instances of a chain of existentials over methods (2026-10-25)
 
 `forall xs . premise -> exists f1 args1 ... fk argsk . << s : C.f1(args1) >> ... << s :

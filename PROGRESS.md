@@ -1408,7 +1408,11 @@ DESIGN.md, "Solvers".
   `P2_true`, `P4_true`, `P2b_true`, `P3c_true` and signature_error `P5_true`, open for every n
   in every run before, are proved by invariants in under 2 s; removed from the open rows of
   `tests/test_regressions.py`.
-- **Next:** a full run with 8 cores, then the rows still open with 3600 s.
+- **Numeric witnesses** (DESIGN.md Sect. 7.8): additivity and division `P1_true`, open in every
+  run (no cutoff), are proved for every n in under 5 s through instances of their block of
+  existentials over numbers. **Targets of the witness side** (states where no call defends)
+  for the fuzzers of the exact sides, for lending_int `Liquidation_defence`.
+- **Next:** a full run with 8 cores (600 s), then the rows still open with 3600 s.
 
 ## Done (2026-11-06): mutations of the integer AMM families; the cost of the completion
 

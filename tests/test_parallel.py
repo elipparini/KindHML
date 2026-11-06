@@ -272,3 +272,43 @@ def test_the_merge_of_lanes():
     o = V._merge_lanes({K: k, P: p, F: f})
     assert o.cti == "x = 3" and o.memory_killed and o.status == "unknown"
     assert o.errors == ["side failed: RuntimeError: a bug"]
+
+
+def test_a_target_of_the_witness_side_reaches_the_fuzzer_of_another_side():
+    """The witness side publishes a state where no call defends; the fuzzer lane of the
+    exact side with 1 user receives it and finds a counterexample with 2 users, whose scope
+    says so."""
+    def wit_gen(s):
+        yield
+        s.publish({"target_users": 2, "guide": {("C", "x"): 1}, "inputs": {}, "cti": "x = 1",
+                   "direct": False, "witness": True})
+        while True:
+            time.sleep(0.05)
+            yield
+
+    def script(tasks, lane):
+        if tasks is not None and "fuzz" in tasks:
+            while True:
+                if any(f.get("witness") for f in lane.pull()):
+                    o = outcome("invalid", "fuzz")
+                    o.users = 2
+                    return o
+                time.sleep(0.05)
+                yield
+        while True:
+            time.sleep(0.05)
+            yield
+
+    def side(users, ghost, goal, cut, **flags):
+        s = lane_side(script)
+        s.users, s.ghost, s.goal = users, ghost, goal
+        return s
+
+    wit = V._Side(1, True, None, kind2=False, search=False)
+    wit.prop = UNIVERSAL
+    wit.gen = wit_gen(wit)
+    coord = coordinator(4)
+    o = coord.drive(V._AnyCombiner(PROGRAM, UNIVERSAL, None, None, side, FAR, wit,
+                                   stop=coord.stop))
+    assert (o.status, o.scope) == ("invalid", "counterexample with 2 users")
+    assert coord.context[("witness targets", UNIVERSAL.name)][0]["cti"] == "x = 1"
