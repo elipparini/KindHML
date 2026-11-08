@@ -1381,7 +1381,7 @@ DESIGN.md, "Solvers".
   - no time slice for `cvc5-mbqi` (it would be one more tuned constant);
   - the file-based path for cvc5's portfolio or yicesQS is left for later.
 
-## In progress (2026-11-06, with the user): several cores per check
+## Done (2026-11-06/07, with the user): several cores per check
 
 - **Why:** every recent decision (Kind 2's share, the budget of the completion, the turns of the
   witness side, which keep lending_int_v2 `Liquidation_defence` open in the tool although the
@@ -1412,7 +1412,15 @@ DESIGN.md, "Solvers".
   run (no cutoff), are proved for every n in under 5 s through instances of their block of
   existentials over numbers. **Targets of the witness side** (states where no call defends)
   for the fuzzers of the exact sides, for lending_int `Liquidation_defence`.
-- **Next:** a full run with 8 cores (600 s), then the rows still open with 3600 s.
+- **Full run with 8 cores** (473 tasks, 600 s, one task at a time, at d70761a): 472 decided,
+  none against the ground truth; the last row, lending_int `Liquidation_defence`, refuted with
+  3600 s in 2294 s (fuzz, 3 users). All 473 rows are decided. Against the serial run of
+  2026-11-06: 11 verdicts more (the 7 regression rows, lending_int_v2 and _v4
+  `Liquidation_defence`, lending_int_v4 `Health_non_interference`, lending_simple_int_v2
+  `Liquidation_attack_any`), none lost; total wall time 14479 to 5248 s (7275 to 3722 s on the
+  461 rows decided by both); CPU time 5.9 times the wall time. 7 rows slower (vault_v3
+  `Two_steps_drainability` 89 to 210 s, amm_real_v5 `Sandwich_slippage` 2.3 to 27 s): the
+  proved invariants differ in 41 of 202 Houdini entries (the new templates); not analysed yet.
 
 ## Done (2026-11-06): mutations of the integer AMM families; the cost of the completion
 
