@@ -684,6 +684,26 @@ outcome (with what it proved), with the proof lane's counterexample to induction
 left after the lanes start a side with more users early, then go to the workers that run
 Kind 2, whose engines run in parallel.
 
+CPUs lent to Kind 2 (2026-11-08). The CPUs of the workers that end go first to a side that is
+due (`next_side`, `spare_side`); the others are lent to the live workers that run Kind 2: the
+worker, its Kind 2 runs and their solvers, each with all its threads, are pinned again
+(`cpu.pin_tree`; new processes inherit the affinity of their parent), and the CPUs are taken
+back when a side becomes due (`Coordinator._lend`, `_reclaim`). On vault_v3
+`Two_steps_drainability`, P proved n >= 5 at 20 s, and the exact sides with 3 and 4 users
+then ran Kind 2 on one CPU each until 208 s, with 6 CPUs idle. With the CPUs lent, on the 11
+rows slower with 8 cores than in the serial run of 2026-11-06 (8 cores, one task at a time):
+vault_v3 and vault `Two_steps_drainability` 204 -> 59 s and 208 -> 66 s (unpinned, serially:
+78 s and 124 s); the 11 rows 744 -> 474 s; the others within 0.2 s, except amm_real
+`Sandwich_slippage`, 8.7 -> 26.1 s, whose proof by P comes at 8 s or at about 25 s from run to
+run (25.2 s in the full run with 8 cores, 24.8 s unpinned).
+
+The other rows slower with 8 cores than in the serial full run of 2026-11-06 are not slower
+for the code: run alone (`--tasks`), the code of that run (ed69f6a) takes 94 s on
+lending_simple_real `Liquidation_attack` (8.5 s in that run), 205 s on lending_simple_real_v2
+`Health_non_interference` (32.6 s) and 35 s on amm_real_v5 `Sandwich_slippage` (2.3 s), as
+the current code does: in a full run, the properties before them in their file extend the
+Houdini of the file (`houdini_progress` in `context`), which they continue.
+
 CPU time (results.csv `cpu`): the CPU time of the Python processes of the check (each its
 own, RUSAGE_SELF; the workers report theirs) plus that of its solver runs (`cpu_solvers`: the
 cpu.stat of the slice, which also counts the solvers Kind 2 leaves behind). `os.wait4` alone

@@ -57,13 +57,15 @@ def test_a_run_stopped_at_its_limit_leaves_no_process():
 
 @needs_scopes
 def test_the_cpu_time_of_the_runs_of_a_task():
-    """A busy loop of 2 s in a run: the slice of the task counts 2 s."""
+    """A busy loop of 2 s of CPU time in a run: the slice of the task counts 2 s. (Bounded by
+    the wall time, the loop got 1.3 s of CPU in a suite of 8 shards on 8 CPUs, 2026-11-08.)"""
     kind2.set_root()
     try:
         # the slice of this process may hold the runs of earlier tests
         before = kind2.slice_cpu(os.getpid()) or 0.0
         kind2.run_command([sys.executable, "-c",
-                           "import time\nt = time.time()\nwhile time.time() - t < 2: pass"], 30)
+                           "import time\nt = time.process_time()\n"
+                           "while time.process_time() - t < 2: pass"], 30)
         used = (kind2.slice_cpu(os.getpid()) or 0.0) - before
         assert 1.8 <= used <= 2.4, used
     finally:

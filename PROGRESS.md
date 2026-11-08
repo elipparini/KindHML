@@ -1426,6 +1426,14 @@ DESIGN.md, "Solvers".
   `tests/contracts/witness/numwit.sol` Uint_false was proved valid (checked on the server with
   the old code). Now the instance has the conjunct t >= 0; an occurrence under old(...) gets
   old^(d-1)(t). The two rows proved by numeric witnesses (int) are unchanged.
+- **The rows slower with 8 cores** (2026-11-08; DESIGN.md Sect. 6, "Several cores"): of the 11
+  rows slower than in the serial run of 2026-11-06, (a) 3 waited 5 s for a worker that ignored
+  SIGTERM (raised in a z3 finalizer and discarded): fixed in 922d186 (amm_simple_real
+  `Swap_reversibility` 5.6 -> 0.4 s); (b) the 2 vault `Two_steps_drainability` rows ran Kind 2
+  on one CPU each with 6 CPUs idle: the CPUs of ended workers are now lent to the workers that
+  run Kind 2 (204 -> 59 s, 208 -> 66 s; unpinned serial 78 s, 124 s); (c) the others are not
+  slower for the code: run alone, the code of 2026-11-06 is as slow as today's (they depend on
+  the Houdini progress left by the earlier properties of their file in a full run).
 - **Paper** (2026-11-08, not committed there): table regenerated with `gen_table.py` from the
   run above (results/kindhml-20261106-d70761a{,-long}.csv); architecture section: completion,
   address templates, disjunctive instances, targets, numeric witnesses, a subsection "Several

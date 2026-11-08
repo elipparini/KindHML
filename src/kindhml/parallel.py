@@ -11,6 +11,11 @@ the sides in order, one more lane at a time; then they start the next side with 
 early (`_AnyCombiner.spare_side`, one at a time); the rest go to the workers that run Kind 2,
 whose engines run in parallel. Each worker is pinned to its own CPUs among those of the check
 (Kind 2 and its solvers inherit them, so that Kind 2 cannot take the CPUs of the others).
+The CPUs of the workers that end go first to a side that is due (`next_side`, `spare_side`);
+the others are lent to the live workers that run Kind 2 (`_lend`: the worker, Kind 2 and its
+solvers are pinned again), and taken back when a side becomes due (`_reclaim`). On vault_v3
+`Two_steps_drainability`, the proof for n >= 5 came at 20 s, and the exact sides with 3 and 4
+users then ran Kind 2 on one CPU each until 208 s, with 6 CPUs idle (2026-11-08).
 
 Lanes: a side split into lanes runs `verify._rounds` with a `verify._Lane` in each of its
 workers; a decided outcome of a lane is the outcome of the side (the other lanes stop), and the
@@ -134,6 +139,7 @@ class _Worker:
     alive: bool = True
     said_bye: bool = False
     used: Optional[float] = None        # its CPU time when it was stopped
+    lent: List[int] = field(default_factory=list)   # CPUs lent to it (`Coordinator._lend`)
 
 
 @dataclass
@@ -183,8 +189,30 @@ class Coordinator:
     # ------------------------------------------------------------ placement
 
     def _free(self) -> List[int]:
-        used = {c for w in self.workers if w.alive for c in w.job.cpus}
+        used = {c for w in self.workers if w.alive for c in w.job.cpus + w.lent}
         return [c for c in self.cpus if c not in used]
+
+    def _lend(self) -> None:
+        """The free CPUs to the live workers that run Kind 2, the fewest CPUs first."""
+        free = self._free()
+        takers = [w for w in self.workers if w.alive and w.job.runs_kind2()]
+        if not free or not takers:
+            return
+        changed = set()
+        for c in free:
+            w = min(takers, key=lambda x: len(x.job.cpus) + len(x.lent))
+            w.lent.append(c)
+            changed.add(id(w))
+        for w in takers:
+            if id(w) in changed:
+                cpu.pin_tree(w.pid, w.job.cpus + w.lent)
+
+    def _reclaim(self) -> None:
+        """The CPUs lent, back from their workers."""
+        for w in self.workers:
+            if w.alive and w.lent:
+                w.lent = []
+                cpu.pin_tree(w.pid, w.job.cpus)
 
     def _plan(self, sides: list, n: int) -> Tuple[List[_Job], int]:
         """The jobs of `sides` on n CPUs, and the CPUs left."""
@@ -438,17 +466,21 @@ class Coordinator:
                 pass
 
     def _more(self, comb) -> None:
-        """New sides on free CPUs: the next side due (`next_side`), else one side with more
-        users early (`spare_side`)."""
-        free = self._free()
-        if not free:
+        """New sides on free CPUs, or on CPUs lent and taken back: the next side due
+        (`next_side`), else one side with more users early (`spare_side`); the CPUs left are
+        lent to the workers that run Kind 2."""
+        lent = any(w.lent for w in self.workers if w.alive)
+        if not self._free() and not lent:
             return
         s = comb.next_side() if hasattr(comb, "next_side") else None
         if s is None and hasattr(comb, "spare_side"):
             s = comb.spare_side()
         if s is not None:
-            jobs, extra = self._plan([s], len(free))
+            if lent:
+                self._reclaim()
+            jobs, extra = self._plan([s], len(self._free()))
             self._launch(jobs, extra)
+        self._lend()
 
     def _unfinished(self, comb) -> object:
         """Past the deadline and its grace with sides still live (a side ends by itself at

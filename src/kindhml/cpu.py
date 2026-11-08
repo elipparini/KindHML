@@ -54,6 +54,48 @@ def pin(cores: Optional[int]) -> List[int]:
     return chosen
 
 
+def _descendants(pid: int) -> List[int]:
+    """The descendants of `pid`, from the parent pids of /proc."""
+    children: dict = {}
+    for name in os.listdir("/proc"):
+        if name.isdigit():
+            try:
+                with open(f"/proc/{name}/stat") as f:
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+                children.setdefault(ppid, []).append(int(name))
+            except (OSError, IndexError, ValueError):
+                pass
+    out, todo = [], [pid]
+    while todo:
+        for c in children.get(todo.pop(), []):
+            out.append(c)
+            todo.append(c)
+    return out
+
+
+def pin_tree(pid: int, cpus: List[int]) -> int:
+    """Pin the process `pid` and its descendants, each with all its threads, to `cpus` (the
+    affinity of a process is that of each of its threads; a new process or thread inherits
+    it from its creator). Two passes, for the processes started during the first. The number
+    of threads pinned; the processes that end meanwhile are skipped."""
+    done: set = set()
+    for _ in range(2):
+        for p in [pid] + _descendants(pid):
+            try:
+                tids = [int(t) for t in os.listdir(f"/proc/{p}/task")]
+            except OSError:
+                continue
+            for t in tids:
+                if t in done:
+                    continue
+                try:
+                    os.sched_setaffinity(t, cpus)
+                    done.add(t)
+                except OSError:
+                    pass
+    return len(done)
+
+
 # the CPU time of the worker processes of the parallel portfolio this process waited for (each
 # reports its own `python_seconds`)
 WORKERS = 0.0

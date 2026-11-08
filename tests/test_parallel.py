@@ -375,3 +375,108 @@ def test_workers_stopped_together_share_their_grace(monkeypatch):
     coord._terminate_all(ws)
     assert time.time() - start < 1.2
     assert all(gone(w.pid) and not w.alive for w in ws)
+
+
+# ------------------------------------------------------------------ CPUs lent to Kind 2
+
+def _fake_worker(cpus):
+    """A process with a child, both sleeping, pinned to `cpus`, as a worker that runs Kind 2
+    (its child as Kind 2): (worker, the pid of the child)."""
+    recv, send = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            child = os.fork()
+            if child == 0:
+                time.sleep(60)
+                os._exit(0)
+            os.write(send, f"{child}\n".encode())
+            time.sleep(60)
+        finally:
+            os._exit(0)
+    os.close(send)
+    child = int(os.read(recv, 100).split()[0])
+    from kindhml import cpu
+    cpu.pin_tree(pid, cpus)
+    conn, _ = parallel.Pipe()
+    return parallel._Worker(pid, conn, parallel._Job([], K, 0, list(cpus))), child
+
+
+def _needs(n):
+    from kindhml import cpu
+    if len(cpu.available()) < n:
+        pytest.skip(f"fewer than {n} CPUs")
+
+
+def test_free_cpus_are_lent_to_kind2_and_taken_back():
+    _needs(3)
+    coord = coordinator(3)
+    w, child = _fake_worker(coord.cpus[:1])
+    coord.workers = [w]
+    try:
+        coord._lend()
+        assert w.lent == coord.cpus[1:]
+        assert os.sched_getaffinity(w.pid) == set(coord.cpus) == os.sched_getaffinity(child)
+        coord._reclaim()
+        assert w.lent == []
+        assert os.sched_getaffinity(w.pid) == {coord.cpus[0]} == os.sched_getaffinity(child)
+    finally:
+        coord._terminate_all(coord.workers)
+        os.kill(child, signal.SIGKILL)
+
+
+def test_a_side_due_takes_the_lent_cpus_back():
+    _needs(2)
+    coord = coordinator(2)
+    w, child = _fake_worker(coord.cpus[:1])
+    coord.workers = [w]
+
+    class Comb:
+        due = [_forever()]
+
+        def next_side(self):
+            return self.due.pop() if self.due else None
+    try:
+        coord._lend()
+        assert w.lent == coord.cpus[1:]
+        coord._more(Comb())
+        assert w.lent == [] and os.sched_getaffinity(w.pid) == {coord.cpus[0]}
+        assert [x.job.cpus for x in coord.workers[1:]] == [coord.cpus[1:]]
+    finally:
+        coord._terminate_all(coord.workers)
+        os.kill(child, signal.SIGKILL)
+
+
+def test_the_cpus_of_ended_sides_go_to_a_side_that_runs_kind2():
+    """P proves n >= 3 and the side with 1 user its number, at once; the side with 2 users
+    (Kind 2) proves its number only once it has more than one CPU, i.e. once the CPUs of the
+    two others are lent to it. No Cor. 7.8 here (EXISTENTIAL), so its proof is needed."""
+    _needs(3)
+    from test_users_modes import CAPPED, EXISTENTIAL
+
+    def wide(o):
+        for _ in range(200):
+            if len(os.sched_getaffinity(0)) >= 2:
+                return o
+            time.sleep(0.05)
+            yield
+        return outcome("unknown", prop=EXISTENTIAL)
+
+    def side(users, ghost, goal, cut, **flags):
+        s = V._Side(users, ghost, goal, **flags)
+        s.prop = EXISTENTIAL
+        if ghost:
+            s.gen = slow(1, outcome("valid", "invariants", 3, prop=EXISTENTIAL))
+        elif users == 1:
+            s.gen = slow(1, outcome("valid", "invariants", prop=EXISTENTIAL))
+        else:
+            s.gen = wide(outcome("valid", "kind2-IC3", prop=EXISTENTIAL))
+        return s
+
+    coord = parallel.Coordinator(3, FAR, EXISTENTIAL, {}, V._step, V.houdini_progress,
+                                 V.resume_houdini, V._failed, V._merge_lanes, V._Lane)
+    comb = V._AnyCombiner(CAPPED, EXISTENTIAL, None, 3, side, FAR, None, stop=coord.stop)
+    assert not comb.downward
+    o = coord.drive(comb)
+    assert o.status == "valid", o.describe()
+    assert o.scope == "n >= 3 by invariants, n < 3 one by one", o.scope
