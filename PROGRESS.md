@@ -1434,6 +1434,12 @@ DESIGN.md, "Solvers".
   run Kind 2 (204 -> 59 s, 208 -> 66 s; unpinned serial 78 s, 124 s); (c) the others are not
   slower for the code: run alone, the code of 2026-11-06 is as slow as today's (they depend on
   the Houdini progress left by the earlier properties of their file in a full run).
+- **Full run of 2026-11-08** (25e03aa; 8 cores, one task at a time, a bound of 3600 s per task
+  as a safeguard; runs/server/final1108/full8): all 473 tasks decided in one run, none against
+  the ground truth; total wall time 6511 s (the run of 11-06/07 with its rerun of the last row:
+  6941 s); CPU time 48069 s; longest task lending_int `Liquidation_defence`, 2294.6 s. The
+  paper's table is generated from it (results/kindhml-20261108-25e03aa.csv); the paper no
+  longer states a time limit (the authors' decision).
 - **Paper** (2026-11-08, not committed there): table regenerated with `gen_table.py` from the
   run above (results/kindhml-20261106-d70761a{,-long}.csv); architecture section: completion,
   address templates, disjunctive instances, targets, numeric witnesses, a subsection "Several
