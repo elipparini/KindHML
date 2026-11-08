@@ -1239,6 +1239,13 @@ storage y then takes the simplest term with its values. With samples where v == 
 first gave c3 := c1, which every sample satisfied. additivity and division `P1_true`
 (`forall c1 c2 . exists c3 v12 v3 . forall a . ...`: no cutoff, open in every run) are proved
 for every n in under 5 s, with c3 := c1 + c2 (c1 * c2) and the values of v after the calls.
+Two soundness fixes (2026-11-08): a y of type uint ranges over the naturals (the encoding
+guards it with y >= 0), so its instance has the conjunct t >= 0; without it, the false
+`tests/contracts/witness/numwit.sol` Uint_false (`forall c . exists d : uint . ... add(d) ...
+v == old(v) + c`) was proved valid through d := c. An occurrence of y inside old(...) is one
+state earlier: it becomes old^(d-1)(t) (before, old(old(t)) went above the state of the
+property, an encoding error). Only integer blocks and prefixes are instantiated. The two rows
+of the benchmark proved by numeric witnesses have int existentials, and are unchanged.
 
 ### 7.9 Instances of a chain of existentials over methods (2026-10-25)
 

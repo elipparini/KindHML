@@ -16,6 +16,14 @@ by the reference interpreter; the other y's (e.g. the argument of a call) get ca
 terms, tried in turn, and an assignment is kept if psi holds at every sample (bounded
 evaluation). For each storage variable, the simplest term with its values at every sample is
 taken. The choice is a heuristic: the instance is proved or refuted by its own check.
+
+Soundness conditions (2026-11-08). A y of type uint ranges over the naturals (the encoding
+guards it with y >= 0), so its instance has the conjunct t >= 0: without it, a term that is
+negative somewhere would prove a false property (`tests/contracts/witness/numwit.sol`
+Uint_false). An occurrence of y inside old(...) is one state earlier than its modalities say:
+it becomes old^(d-1)(t). The blocks and the universal prefix are integer (no real terms, which
+the encoding would reject); the variables of the terms cannot be captured, since quantified
+names are unique within a property (`typecheck`).
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ MAX_FREE = 2                # the existentials without an equality that get cand
 # the values of the universal numbers at the samples: not -1, 0, 1, with which many terms
 # agree (division: with v == 0, every c3 is a witness)
 NUMBERS = [-4, -3, -2, 2, 3, 4, 5, 6, 7]
+NATURALS = [n for n in NUMBERS if n > 0]          # for a uint
 
 
 def site(formula: S.Expr) -> Optional[Tuple[List[S.Quant], List[S.Quant], S.Expr]]:
@@ -134,15 +143,20 @@ def _old(e: S.Expr, d: int) -> S.Expr:
 
 
 def _substitute(e, terms: Dict[str, S.Expr], depth: int = 0):
-    """e with each y of `terms` replaced by old^d(its term), d the modalities above it."""
+    """e with each y of `terms` replaced by old^d(its term), d the modalities above it minus
+    the old(...) above it, i.e. the number of states between the y and the state of the
+    terms. ValueError if a y is above that state (old(y) where d = 0)."""
     if isinstance(e, S.QVar) and e.name in terms:
+        if depth < 0:
+            raise ValueError(f"{e.name} is evaluated before the state of its term")
         return _old(terms[e.name], depth)
     if not hasattr(e, "__dataclass_fields__") or isinstance(e, (S.Type, S.MapType)):
         return e
     changes = {}
     for name in e.__dataclass_fields__:
         v = getattr(e, name)
-        deeper = depth + (1 if isinstance(e, S.Modal) and name == "body" else 0)
+        deeper = (depth + (1 if isinstance(e, S.Modal) and name == "body" else 0)
+                  - (1 if isinstance(e, S.Old) else 0))
         if isinstance(v, tuple):
             new = tuple(_substitute(x, terms, deeper) if isinstance(x, S.Expr) else x
                         for x in v)
@@ -169,9 +183,9 @@ def instances(program: S.Program, prop: S.Property, fuzzer,
         return []
     univ, block, psi = found
     ys = [q.var for q in block]
-    nums = [q for q in univ if S.is_num(q.type)]
-    if any(not S.is_num(q.type) for q in univ):
-        return []                       # an address universal before the existentials
+    nums = list(univ)
+    if any(not S.is_int(q.type) for q in univ + block):
+        return []                       # an address or real variable in the prefix or block
     defs = _definitions(psi, set(ys))
     free = [y for y in ys if y not in defs]
     if len(free) > MAX_FREE:
@@ -180,7 +194,7 @@ def instances(program: S.Program, prop: S.Property, fuzzer,
     ev = FormulaEvaluator(system, range(-1, 4))
     rnd = random.Random(f"numwit:{prop.name}")
     fields = [S.Field(c.name, f.name) for c in program.contracts for f in c.fields
-              if S.is_num(f.type)]
+              if S.is_int(f.type)]
     # the most informative states: the most numeric fields outside -1, 0, 1, all different
     states = {}
     for _ in range(STATES):
@@ -192,7 +206,8 @@ def instances(program: S.Program, prop: S.Property, fuzzer,
             states.setdefault(key, st)
     ranked = sorted(states.items(), key=lambda kv: -sum(1 for v in kv[0]
                                                          if v not in (-1, 0, 1)))
-    points = [(st, {q.var: rnd.choice(NUMBERS) for q in nums})
+    points = [(st, {q.var: rnd.choice(NUMBERS if q.type == S.INT else NATURALS)
+                     for q in nums})
               for _, st in ranked[:SAMPLES]]
     if len(points) < 2:
         return []
@@ -211,7 +226,8 @@ def instances(program: S.Program, prop: S.Property, fuzzer,
     for choice in itertools.product(free_terms, repeat=len(free)):
         assign = dict(zip(free, choice))
         vec = tuple(values(t, lambda i: points[i][1]) for t in choice)
-        if None in vec or vec in seen_free:
+        if None in vec or vec in seen_free or any(
+                block_type[y] == S.UINT and min(vec[j]) < 0 for j, y in enumerate(free)):
             continue
         seen_free.add(vec)
         envs = [dict(env, **{y: vec[j][i] for j, y in enumerate(free)})
@@ -229,7 +245,8 @@ def instances(program: S.Program, prop: S.Property, fuzzer,
                     ok = False
                     break
                 vals.append(v)
-            if not ok:
+            if not ok or (block_type[y] == S.UINT and min(vals) < 0):
+                ok = False
                 break
             for i, v in enumerate(vals):
                 envs[i][y] = v
@@ -256,7 +273,13 @@ def instances(program: S.Program, prop: S.Property, fuzzer,
         if not ok:
             continue
         closed = {y: _close(t, {x: terms[x] for x in free}) for y, t in terms.items()}
-        body = _substitute(psi, closed)
+        try:
+            body = _substitute(psi, closed)
+        except ValueError:
+            return out
+        for y in reversed(ys):          # the domain of a uint y: its term is a natural
+            if block_type[y] == S.UINT:
+                body = S.BinOp("&&", S.BinOp(">=", closed[y], S.IntLit(0)), body)
         for q in reversed(univ):
             body = replace(q, body=body)
         text = ", ".join(f"{y} := {pretty.expr(closed[y])}" for y in ys)
