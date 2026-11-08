@@ -25,7 +25,8 @@ limit of pickle), ("fact", side, lane, fact), and ("bye", CPU time, the progress
 Houdinis) when a worker has no live side; to a worker, ("close", side) for a side of a worker
 with several, ("fact", fact) for a lane. A worker with nothing else to do is stopped by
 SIGTERM, which raises SystemExit (`kind2.py`), so that its Kind 2 runs stop in their `finally`;
-SIGKILL follows after GRACE seconds, and the slice of the check is stopped at its end. A worker
+SIGKILL follows after GRACE seconds, and the slice of the check is stopped at its end. The
+workers stopped together (the lanes of a side, all of them at a verdict) share their GRACE. A worker
 dies with the coordinator (PR_SET_PDEATHSIG). A side or lane that raises, or whose worker dies
 without a result, ends with status "error"; the others go on.
 """
@@ -58,6 +59,14 @@ def _die_with_parent(parent: int) -> None:
         pass
     if os.getppid() != parent:
         os._exit(1)
+
+
+def _reaped(pid: int, options: int) -> bool:
+    """waitpid: whether the child `pid` has ended (and is reaped), or was reaped before."""
+    try:
+        return os.waitpid(pid, options)[0] == pid
+    except ChildProcessError:
+        return True
 
 
 def merge_progress(reports: List[dict]) -> dict:
@@ -124,6 +133,7 @@ class _Worker:
     job: _Job
     alive: bool = True
     said_bye: bool = False
+    used: Optional[float] = None        # its CPU time when it was stopped
 
 
 @dataclass
@@ -156,6 +166,7 @@ class Coordinator:
     def stop(self, side) -> None:
         """Stop a side (a side covered by a proof, or every side at a verdict)."""
         i = id(side)
+        ending = []
         for w in self.where.get(i, []):
             if not w.alive:
                 continue
@@ -166,7 +177,8 @@ class Coordinator:
                 except (BrokenPipeError, OSError):
                     pass
             else:
-                self._terminate(w)
+                ending.append(w)
+        self._terminate_all(ending)
 
     # ------------------------------------------------------------ placement
 
@@ -287,29 +299,35 @@ class Coordinator:
         conn.send(("bye", cpu.python_seconds(), self.progress(self.context)))
 
     def _terminate(self, w: _Worker) -> None:
-        """Stop a worker: SIGTERM, GRACE seconds, SIGKILL; reap it."""
-        if not w.alive:
-            return
-        w.alive = False
-        used = cpu.proc_seconds(w.pid)
-        try:
-            os.kill(w.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        end = time.time() + GRACE
-        while time.time() < end:
-            if os.waitpid(w.pid, os.WNOHANG)[0] == w.pid:
+        self._terminate_all([w])
+
+    def _terminate_all(self, ws: List[_Worker]) -> None:
+        """Stop workers at once: SIGTERM to each, GRACE seconds for all of them together,
+        SIGKILL to those left; reap them."""
+        ws = [w for w in ws if w.alive]
+        for w in ws:
+            w.alive = False
+            w.used = cpu.proc_seconds(w.pid)
+            try:
+                os.kill(w.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        left, end = list(ws), time.time() + GRACE
+        while left:
+            left = [w for w in left if not _reaped(w.pid, os.WNOHANG)]
+            if not left or time.time() >= end:
                 break
-            time.sleep(0.05)
-        else:
+            time.sleep(0.01)
+        for w in left:
             try:
                 os.kill(w.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            os.waitpid(w.pid, 0)
-        if not w.said_bye and used is not None:
-            cpu.WORKERS += used
-        w.conn.close()
+            _reaped(w.pid, 0)
+        for w in ws:
+            if not w.said_bye and w.used is not None:
+                cpu.WORKERS += w.used
+            w.conn.close()
 
     # ------------------------------------------------------------ outcomes
 
@@ -379,6 +397,7 @@ class Coordinator:
                     except (EOFError, OSError):
                         v = self._ended_worker(w, comb)
                         if v is not None:
+                            self._terminate_all(self.workers)
                             comb.close()
                             return v
                         continue
@@ -386,6 +405,7 @@ class Coordinator:
                         v = self._side_ended(self.ids[msg[1]],
                                              replace(msg[3], prop=self.prop), msg[2], comb)
                         if v is not None:
+                            self._terminate_all(self.workers)
                             comb.close()
                             return v
                     elif msg[0] == "fact":
@@ -398,8 +418,7 @@ class Coordinator:
                 self._more(comb)
             return comb.final() if comb.done() else self._unfinished(comb)
         finally:
-            for w in self.workers:
-                self._terminate(w)
+            self._terminate_all(self.workers)
             self.resume(self.context, merge_progress(self.reports))
 
     def _relay(self, sender: _Worker, side: int, fact: dict) -> None:

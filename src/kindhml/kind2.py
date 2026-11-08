@@ -24,15 +24,39 @@ from .colors import PLAIN, Palette
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+_STOPPING = False            # SIGTERM was received
+
+
 def _exit_on_sigterm(signum, frame):
     """SIGTERM (e.g. from `timeout`) raises SystemExit, so that `run` stops Kind 2 and its
     solvers in its `finally` (by default Python exits at once, leaving them running)."""
+    global _STOPPING
+    _STOPPING = True
     sys.exit(128 + signum)
+
+
+_DEFAULT_UNRAISABLE = sys.unraisablehook
+
+
+def _unraisable(u) -> None:
+    """Python discards an exception raised in a finalizer: a SIGTERM that arrives during the
+    `__del__` of a z3 object would leave the process running (a worker of `parallel.py` then
+    ran until SIGKILL, 5 s later; 2026-11-08). The signal is sent again shortly after, by a
+    timer thread, so that it is handled once the finalizer has returned (sent here, it would
+    be handled at once, inside the finalizer again)."""
+    if _STOPPING and u.exc_type is SystemExit \
+            and getattr(u.exc_value, "code", None) == 128 + signal.SIGTERM:
+        again = threading.Timer(0.05, os.kill, (os.getpid(), signal.SIGTERM))
+        again.daemon = True
+        again.start()
+        return
+    _DEFAULT_UNRAISABLE(u)
 
 
 if threading.current_thread() is threading.main_thread() \
         and signal.getsignal(signal.SIGTERM) == signal.SIG_DFL:
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    sys.unraisablehook = _unraisable
 
 
 def find_kind2() -> str:

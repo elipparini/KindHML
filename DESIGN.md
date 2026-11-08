@@ -661,7 +661,14 @@ whole; a worker dies with the coordinator (PR_SET_PDEATHSIG), and is stopped by 
 Kind 2 runs stop in their `finally`), then SIGKILL; `_cleanup` kills a recorded pid only if
 it still belongs to its run (pids are reused), and joins its watcher thread (no fork with
 other threads alive). Forks were checked for the in-process z3 of the completion (a timeout of
-1 s still stops a query in a forked process) and for SIGALRM in the fuzzer.
+1 s still stops a query in a forked process) and for SIGALRM in the fuzzer. A SIGTERM handled
+during a finalizer (the `__del__` of a z3 object) raises a SystemExit that Python discards; the
+worker went on until SIGKILL, 5 s later, and the coordinator, which stopped workers one at a
+time, read no message meanwhile (2026-11-08: amm_simple_real `Swap_reversibility` 0.2 s
+serially, 5.6 s with 8 cores, 0.4 s after the fix). `kind2._unraisable` (sys.unraisablehook)
+now sends the signal again from a 50 ms timer thread, so that it is handled after the
+finalizer; the workers stopped together (the lanes of a side, all at a verdict) share one
+GRACE (`Coordinator._terminate_all`).
 
 Lanes. With more CPUs than sides, a side is split into lanes, each in a worker of its own
 (`_Side.lanes`, split off in this order): Kind 2 (in its own worker it gets all the time

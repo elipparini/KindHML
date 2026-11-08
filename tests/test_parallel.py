@@ -312,3 +312,66 @@ def test_a_target_of_the_witness_side_reaches_the_fuzzer_of_another_side():
                                    stop=coord.stop))
     assert (o.status, o.scope) == ("invalid", "counterexample with 2 users")
     assert coord.context[("witness targets", UNIVERSAL.name)][0]["cti"] == "x = 1"
+
+
+# ------------------------------------------------------------------ stopping workers
+
+def test_sigterm_during_a_finalizer():
+    """SIGTERM handled during a finalizer (as the `__del__` of a z3 object) raises a SystemExit
+    that Python discards: the process stops anyway, once the finalizer has returned (before:
+    it went on until SIGKILL). The hooks are set in the child, as at the import of `kind2`
+    outside pytest (which replaces `sys.unraisablehook` during a test)."""
+    import sys
+    from kindhml import kind2
+    recv, send = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            signal.signal(signal.SIGTERM, kind2._exit_on_sigterm)
+            sys.unraisablehook = kind2._unraisable
+
+            class Slow:
+                def __del__(self):
+                    os.write(send, b"x")
+                    end = time.time() + 1.0
+                    while time.time() < end:
+                        pass
+
+            x = Slow()
+            del x                       # the finalizer runs here; SIGTERM arrives in it
+            end = time.time() + 30
+            while time.time() < end:
+                pass
+            os._exit(0)                 # not stopped
+        finally:
+            os._exit(1)                 # stopped by the SystemExit of SIGTERM
+    os.close(send)
+    assert os.read(recv, 1) == b"x"
+    start = time.time()
+    os.kill(pid, signal.SIGTERM)
+    _, status = os.waitpid(pid, 0)
+    assert time.time() - start < 5
+    assert os.WEXITSTATUS(status) == 1
+
+
+def test_workers_stopped_together_share_their_grace(monkeypatch):
+    """Workers that ignore SIGTERM are killed after one GRACE for all of them, not one each."""
+    monkeypatch.setattr(parallel, "GRACE", 0.5)
+    coord = coordinator(4)
+    ws = []
+    for _ in range(3):
+        recv, send = parallel.Pipe()
+        pid = os.fork()
+        if pid == 0:
+            try:
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                time.sleep(60)
+            finally:
+                os._exit(0)
+        send.close()
+        ws.append(parallel._Worker(pid, recv, parallel._Job([])))
+    time.sleep(0.2)
+    start = time.time()
+    coord._terminate_all(ws)
+    assert time.time() - start < 1.2
+    assert all(gone(w.pid) and not w.alive for w in ws)
