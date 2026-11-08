@@ -1421,6 +1421,15 @@ DESIGN.md, "Solvers".
   461 rows decided by both); CPU time 5.9 times the wall time. 7 rows slower (vault_v3
   `Two_steps_drainability` 89 to 210 s, amm_real_v5 `Sandwich_slippage` 2.3 to 27 s): the
   proved invariants differ in 41 of 202 Houdini entries (the new templates); not analysed yet.
+- **Soundness fix of the numeric witnesses** (2026-11-08, d3ecb99): a uint existential lost
+  its domain (y >= 0) in its instance; the crafted false property
+  `tests/contracts/witness/numwit.sol` Uint_false was proved valid (checked on the server with
+  the old code). Now the instance has the conjunct t >= 0; an occurrence under old(...) gets
+  old^(d-1)(t). The two rows proved by numeric witnesses (int) are unchanged.
+- **Paper** (2026-11-08, not committed there): table regenerated with `gen_table.py` from the
+  run above (results/kindhml-20261106-d70761a{,-long}.csv); architecture section: completion,
+  address templates, disjunctive instances, targets, numeric witnesses, a subsection "Several
+  cores"; appendix: the Instances lemma for disjunctions, a lemma on numeric instances.
 
 ## Done (2026-11-06): mutations of the integer AMM families; the cost of the completion
 
